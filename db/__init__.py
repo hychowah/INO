@@ -62,6 +62,13 @@ from db.proposals import (
     cleanup_expired as cleanup_expired_proposals,
 )
 
+# Preferences (persona selection)
+from db.preferences import (
+    get_available_personas, get_persona, set_persona,
+    get_persona_content,
+    PERSONAS_DIR, DEFAULT_PERSONA,
+)
+
 
 # ============================================================================
 # Self-test

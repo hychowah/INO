@@ -50,8 +50,12 @@ ROOT
 │   ├── concepts.py        # Concept CRUD, search, detail views
 │   ├── reviews.py         # Review log, remarks
 │   ├── chat.py            # Chat history, session state
+│   ├── preferences.py     # Persona selection (get/set via session_state)
 │   ├── diagnostics.py     # Maintenance diagnostics
 │   └── __init__.py        # Re-exports all public functions
+│
+├── data/
+│   └── personas/          # Persona preset .md files (mentor, coach, buddy)
 │
 ├── tests/                 # Manual test scripts (not pytest)
 ├── webui/                 # Standalone web UI for DB browsing
@@ -180,8 +184,9 @@ They use `print()` output, not assertions. Run manually and inspect.
 
 | File | Risk | Why |
 |------|------|-----|
-| `AGENTS.md` | **High** | Runtime LLM prompt. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. |
+| `AGENTS.md` | **High** | Runtime LLM prompt. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. **No tone/style directives here** — those go in persona files. |
 | `preferences.md` | **Medium** | User preferences injected into every LLM call. |
+| `data/personas/*.md` | **Medium** | Persona presets. Changes reflected without restart (mtime cache). Token budget: ~600 tokens max per file. |
 | `db/core.py` migrations | **High** | Schema migrations are append-only. Never modify existing migration blocks. |
 | `services/pipeline.py` | **Medium** | Central orchestrator. Changes here affect both Discord and API. |
 
@@ -196,6 +201,29 @@ They use `print()` output, not assertions. Run manually and inspect.
 - **Logging:** `logger = logging.getLogger("module_name")` at module level.
 - **Path resolution:** `Path(__file__).parent.parent / "filename"` from services/ to find project root.
 - **Config validation:** `validate_config()` returns error strings, not exceptions.
+
+---
+
+## How to Add a New Persona Preset
+
+1. **Create `data/personas/<name>.md`** — follow the structure of existing presets (mentor.md, coach.md, buddy.md). Required sections:
+   - Identity (archetype description)
+   - Tone & Register
+   - Humor policy
+   - Feedback Style (behavioral rules, not just adjectives)
+   - Emoji Policy
+   - Quiz Interactions (example phrases for correct/wrong/next)
+   - Anti-patterns
+
+2. **Token budget:** Keep under ~600 tokens (~2500 chars). Run `python tests/test_persona.py` to verify.
+
+3. **Guard comment:** Include `<!-- Controls TONE only. Does NOT override action formats... -->` at the top.
+
+4. **No code changes needed** — the persona is auto-discovered from `data/personas/`. The `/persona` command and API endpoint will list it automatically.
+
+5. **WARNING:** Never put tone/style directives in `AGENTS.md`. All personality goes in persona files. AGENTS.md is the behavioral rulebook; persona files are the voice.
+
+6. **Hot-reload:** Persona file edits are reflected on the next LLM call without restart (mtime-based cache).
 
 ---
 

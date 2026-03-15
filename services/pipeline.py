@@ -28,6 +28,7 @@ from services.dedup import (
     execute_dedup_merges,
     format_dedup_suggestions,
 )
+from db.preferences import get_persona, get_persona_content
 
 logger = logging.getLogger("pipeline")
 
@@ -46,20 +47,93 @@ SAFE_MAINTENANCE_ACTIONS = frozenset({
     'list_topics',     # read-only
 })
 
-# Cached system prompt content (read once, reused)
-_system_prompt_cache: str | None = None
+# Cached system prompt content — keyed by persona name, with mtime for hot-reload.
+# Format: {persona_name: (prompt_str, persona_mtime)}
+_system_prompt_cache: dict[str, tuple[str, float]] = {}
+
+# Cached base content (AGENTS.md + preferences.md) — shared across all personas
+_base_prompt_cache: tuple[str, float, float] | None = None  # (content, agents_mtime, prefs_mtime)
 
 
-def _get_system_prompt() -> str:
-    """Read AGENTS.md + preferences.md content.  Cached after first call.
-    Used as the system_prompt parameter for API-based providers.
-    KimiCliProvider ignores it (injects file-path references instead)."""
+def _get_base_prompt() -> str:
+    """Read AGENTS.md + preferences.md content, cached with mtime check."""
+    global _base_prompt_cache
+    agents_mtime = AGENTS_MD_PATH.stat().st_mtime if AGENTS_MD_PATH.exists() else 0
+    prefs_mtime = PREFERENCES_MD_PATH.stat().st_mtime if PREFERENCES_MD_PATH.exists() else 0
+
+    if (_base_prompt_cache is not None
+            and _base_prompt_cache[1] == agents_mtime
+            and _base_prompt_cache[2] == prefs_mtime):
+        return _base_prompt_cache[0]
+
+    agents = ctx._read_file(AGENTS_MD_PATH)
+    prefs = ctx._read_file(PREFERENCES_MD_PATH)
+    content = f"{agents}\n\n## User Preferences\n\n{prefs}"
+    _base_prompt_cache = (content, agents_mtime, prefs_mtime)
+    return content
+
+
+def build_system_prompt(persona: str | None = None) -> str:
+    """Compose system prompt: AGENTS.md + persona + preferences.md.
+    Cached per persona with file mtime checks for hot-reload."""
     global _system_prompt_cache
-    if _system_prompt_cache is None:
-        agents = ctx._read_file(AGENTS_MD_PATH)
-        prefs = ctx._read_file(PREFERENCES_MD_PATH)
-        _system_prompt_cache = f"{agents}\n\n## User Preferences\n\n{prefs}"
-    return _system_prompt_cache
+    if persona is None:
+        persona = get_persona()
+
+    # Check persona file mtime for hot-reload
+    persona_content = get_persona_content(persona)
+    persona_path = db.PERSONAS_DIR / f"{persona}.md"
+    persona_mtime = persona_path.stat().st_mtime if persona_path.exists() else 0
+
+    if persona in _system_prompt_cache:
+        cached_prompt, cached_mtime = _system_prompt_cache[persona]
+        if cached_mtime == persona_mtime:
+            # Also verify base hasn't changed
+            base = _get_base_prompt()
+            expected = _compose_prompt(base, persona_content)
+            if cached_prompt == expected:
+                return cached_prompt
+
+    base = _get_base_prompt()
+    full_prompt = _compose_prompt(base, persona_content)
+    _system_prompt_cache[persona] = (full_prompt, persona_mtime)
+    logger.info(f"System prompt built for persona '{persona}' ({len(full_prompt)} chars)")
+    return full_prompt
+
+
+def _compose_prompt(base: str, persona_content: str) -> str:
+    """Insert persona content into the base prompt (AGENTS + prefs).
+    Persona goes between AGENTS.md and User Preferences."""
+    marker = "\n\n## User Preferences\n\n"
+    if marker in base:
+        agents_part, prefs_part = base.split(marker, 1)
+        return (
+            f"{agents_part}\n\n"
+            f"## Active Persona\n\n{persona_content}\n\n"
+            f"## User Preferences\n\n{prefs_part}"
+        )
+    # Fallback: append at end
+    return f"{base}\n\n## Active Persona\n\n{persona_content}"
+
+
+def invalidate_prompt_cache():
+    """Clear all cached prompts. Call after persona switch or file edits."""
+    global _system_prompt_cache, _base_prompt_cache
+    _system_prompt_cache.clear()
+    _base_prompt_cache = None
+    logger.info("System prompt cache invalidated")
+
+
+def reset_conversation_session():
+    """Force a new conversation session. Call after persona switch so the
+    OpenAI provider doesn't serve the old system prompt from cached messages."""
+    global _conv_session_name, _conv_session_last_used
+    if _conv_session_name:
+        provider = get_provider()
+        provider.clear_session(_conv_session_name)
+        logger.info(f"Cleared LLM session: {_conv_session_name}")
+    _conv_session_name = None
+    _conv_session_last_used = None
 
 # Conversation session state (see DEVNOTES.md §2.3)
 _conv_session_name: str | None = None
@@ -203,7 +277,7 @@ async def _call_llm(mode: str, text: str, author: str,
         f"(prompt: {len(prompt)} chars{', session=' + session if session else ''})"
     )
 
-    system_prompt = _get_system_prompt()
+    system_prompt = build_system_prompt()
 
     raw = await provider.send(
         prompt,
@@ -239,7 +313,7 @@ async def _call_llm_followup(session: str, fetch_data: str,
     )
 
     # system_prompt passed for stateless providers; session-based ones ignore it
-    system_prompt = _get_system_prompt()
+    system_prompt = build_system_prompt()
 
     raw = await provider.send(
         prompt,

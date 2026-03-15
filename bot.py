@@ -202,6 +202,64 @@ async def sync_command(ctx):
     await ctx.send(f"Synced {len(synced)} command(s).")
 
 
+@bot.hybrid_command(
+    name="persona",
+    description="View or switch persona preset (mentor/coach/buddy)",
+)
+@authorized_only()
+async def persona_command(ctx, *, name: str = ""):
+    """
+    /persona          — show current persona + available presets
+    /persona mentor   — switch to the Mentor persona
+    /persona coach    — switch to the Coach persona
+    /persona buddy    — switch to the Buddy persona
+    """
+    _ensure_db()
+    current = db.get_persona()
+    available = db.get_available_personas()
+
+    if not name.strip():
+        # Show current + list
+        icons = {"mentor": "🎓", "coach": "🏋️", "buddy": "🤝"}
+        descriptions = {
+            "mentor": "Calm, wise senior colleague — guides via questions, dry wit, measured enthusiasm",
+            "coach": "Direct, results-oriented trainer — blunt feedback, action items, structured",
+            "buddy": "Enthusiastic friend — casual, playful, analogies, celebrates wins loudly",
+        }
+        lines = [f"**Active persona:** {icons.get(current, '🎭')} **{current.title()}**\n"]
+        lines.append("**Available presets:**")
+        for p in available:
+            icon = icons.get(p, "🎭")
+            desc = descriptions.get(p, "")
+            marker = " ← active" if p == current else ""
+            lines.append(f"{icon} **{p.title()}** — {desc}{marker}")
+        lines.append(f"\nSwitch with: `/persona <name>`")
+        await send_long(ctx, "\n".join(lines))
+        return
+
+    # Switch persona
+    target = name.strip().lower()
+    if target == current:
+        await ctx.send(f"Already using **{current.title()}** persona.")
+        return
+
+    try:
+        db.set_persona(target)
+    except ValueError:
+        await ctx.send(
+            f"Unknown persona `{target}`. Available: {', '.join(available)}"
+        )
+        return
+
+    # Invalidate prompt cache + conversation session so new persona takes effect
+    pipeline.invalidate_prompt_cache()
+    pipeline.reset_conversation_session()
+
+    icons = {"mentor": "🎓", "coach": "🏋️", "buddy": "🤝"}
+    icon = icons.get(target, "🎭")
+    await ctx.send(f"{icon} Switched to **{target.title()}** persona. Next message will use the new style.")
+
+
 # ============================================================================
 # FAST-PATH COMMANDS (local DB reads, no LLM call)
 # ============================================================================
@@ -482,7 +540,7 @@ async def on_ready():
     logger.info(f"Bot: {bot.user.name} ({bot.user.id})")
     logger.info(f"Guilds: {len(bot.guilds)}")
     config.print_config()
-    logger.info("Commands: /learn /due /topics /review /clear /ping /sync (or !prefix)")
+    logger.info("Commands: /learn /due /topics /review /persona /clear /ping /sync (or !prefix)")
     logger.info("=" * 50)
 
     try:

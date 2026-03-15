@@ -74,10 +74,12 @@ class KimiCliProvider:
         cli_path: str,
         agents_md_path: str | None = None,
         preferences_path: str | None = None,
+        personas_dir: str | None = None,
     ):
         self._cli_path = cli_path
         self._agents_md_path = agents_md_path
         self._preferences_path = preferences_path
+        self._personas_dir = personas_dir
 
     # ---- public interface --------------------------------------------------
 
@@ -92,17 +94,39 @@ class KimiCliProvider:
         """Build a kimi-cli command and pipe *prompt* via stdin.
 
         *system_prompt* is **ignored** — the kimi-cli prompt already
-        references AGENTS.md / preferences.md by file path (the CLI
-        reads them from disk).
+        references AGENTS.md / preferences.md / persona by file path
+        (the CLI reads them from disk).
         """
         # Prepend file-path references when the provider knows the paths
         if self._agents_md_path and self._preferences_path:
-            header = (
-                "Follow the instructions in these two files "
-                "(do NOT summarize or acknowledge them):\n"
-                f"1. {self._agents_md_path}\n"
-                f"2. {self._preferences_path}\n\n"
-            )
+            # Resolve active persona file path
+            persona_line = ""
+            if self._personas_dir:
+                try:
+                    from db.preferences import get_persona
+                    persona_name = get_persona()
+                    import os
+                    persona_path = os.path.join(self._personas_dir, f"{persona_name}.md")
+                    if os.path.exists(persona_path):
+                        persona_line = f"2. {persona_path}\n"
+                except Exception:
+                    pass  # Fallback: no persona file reference
+
+            if persona_line:
+                header = (
+                    "Follow the instructions in these files "
+                    "(do NOT summarize or acknowledge them):\n"
+                    f"1. {self._agents_md_path}\n"
+                    f"{persona_line}"
+                    f"3. {self._preferences_path}\n\n"
+                )
+            else:
+                header = (
+                    "Follow the instructions in these two files "
+                    "(do NOT summarize or acknowledge them):\n"
+                    f"1. {self._agents_md_path}\n"
+                    f"2. {self._preferences_path}\n\n"
+                )
             prompt = header + prompt
 
         flags = "--print --final-message-only --input-format text"
@@ -356,10 +380,12 @@ def get_provider() -> LLMProvider:
     if provider_name == "kimi":
         agents_path = str((config.BASE_DIR / "AGENTS.md").resolve())
         prefs_path = str((config.BASE_DIR / "preferences.md").resolve())
+        personas_dir = str((config.BASE_DIR / "data" / "personas").resolve())
         _provider_instance = KimiCliProvider(
             cli_path=config.KIMI_CLI_PATH,
             agents_md_path=agents_path,
             preferences_path=prefs_path,
+            personas_dir=personas_dir,
         )
         logger.info("LLM provider: kimi-cli")
 

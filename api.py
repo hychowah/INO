@@ -150,6 +150,38 @@ async def health():
 
 
 # ============================================================================
+# Persona
+# ============================================================================
+
+class PersonaRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/persona", dependencies=[Depends(verify_token)])
+async def get_persona_endpoint():
+    """Get current persona and available presets."""
+    return {
+        "current": db.get_persona(),
+        "available": db.get_available_personas(),
+    }
+
+
+@app.post("/api/persona", dependencies=[Depends(verify_token)])
+async def set_persona_endpoint(req: PersonaRequest):
+    """Switch persona preset."""
+    try:
+        db.set_persona(req.name.strip().lower())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Invalidate prompt cache + session so new persona takes effect
+    pipeline.invalidate_prompt_cache()
+    pipeline.reset_conversation_session()
+
+    return {"current": db.get_persona(), "message": f"Switched to {req.name} persona."}
+
+
+# ============================================================================
 # Run directly: python api.py
 # ============================================================================
 
