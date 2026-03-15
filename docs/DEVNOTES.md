@@ -3,10 +3,8 @@
 > **Purpose:** Project-specific institutional memory. Past bugs, architecture decisions,
 > and non-obvious patterns for this codebase.
 >
-> **Also read:** Root [`DEVNOTES.md`](../DEVNOTES.md) for workspace-wide Windows/encoding/git rules.
->
 > **Audience:** Developers / Copilot during code-editing sessions only.
-> The runtime LLM (kimi) does NOT read this file — its instructions are in `AGENTS.md`.
+> The runtime LLM does NOT read this file — its instructions are in `AGENTS.md`.
 >
 > **When to update:** After fixing a non-trivial bug or making an architectural decision
 > that isn't obvious from the code — add a short entry here.
@@ -18,6 +16,7 @@
 2. [Architecture Decisions](#2-architecture-decisions)
 3. [Score-Based Review System](#3-score-based-review-system)
 4. [Codebase Restructuring for LLM Dev Scalability](#4-codebase-restructuring-for-llm-dev-scalability)
+5. [FastAPI Backend & Project Restructuring](#5-fastapi-backend--project-restructuring)
 
 ---
 
@@ -182,7 +181,7 @@ The LLM is instructed to use a **hybrid tier + fine-tuning** approach: pick the 
 ---
 
 ## 4. Codebase Restructuring for LLM Dev Scalability
-**Date:** 2026-03-18
+**Date:** 2026-03-13
 
 **Problem:** Adding a new feature required reading ~3900 lines of context (db.py 1396 + pipeline.py 750 + tools.py 540 + agent.py 387 + context.py 426 + bot.py 439). An LLM developer (Copilot, etc.) needed most of the codebase in its context window for any non-trivial change.
 
@@ -230,3 +229,151 @@ Split the 750-line `services/pipeline.py` into:
 - **Changing LLM output parsing:** Only touch `services/parser.py`.
 - **Changing dedup logic:** Only touch `services/dedup.py`.
 - **Changing review scheduling:** Only touch `services/scheduler.py` + `db/reviews.py`.
+
+---
+
+## 5. FastAPI Backend & Project Restructuring
+**Date:** 2026-03-15
+
+### 5.1 FastAPI backend (`api.py`) — parallel entry point
+**Goal:** Enable a mobile app (React Native) to use the same learning pipeline via HTTP, while keeping the Discord bot running.
+
+**Implementation:** Created `api.py` (~150 lines) as a thin FastAPI wrapper that calls the exact same pipeline functions as `bot.py`:
+```
+bot.py (Discord)  ─┐
+                    ├──→  pipeline.call_with_fetch_loop()  →  execute_llm_response()  →  process_output()
+api.py (FastAPI)  ─┘
+```
+
+**Endpoints:**
+| Method | Route | Maps to |
+|--------|-------|---------|
+| `POST` | `/api/chat` | `pipeline.call_with_fetch_loop()` → `execute_llm_response()` → `process_output()` |
+| `GET` | `/api/topics` | `db.get_hierarchical_topic_map()` |
+| `GET` | `/api/topics/{id}` | `db.get_topic()` + `db.get_concepts_for_topic()` |
+| `GET` | `/api/concepts/{id}` | `db.get_concept_detail()` |
+| `GET` | `/api/due` | `db.get_due_concepts()` |
+| `GET` | `/api/stats` | `db.get_review_stats()` |
+| `GET` | `/api/health` | Health check (no auth) |
+
+**Auth:** Optional bearer token via `API_SECRET_KEY` config. Skipped if not set (solo mode). Same header pattern upgrades to Firebase tokens later.
+
+**Concurrency with bot.py:** Both run as separate processes. SQLite WAL mode + short-lived connections handle concurrent access. The `webui/server.py` already proved this pattern works.
+
+**No scheduler in API:** The Discord bot owns the scheduler (review DMs, maintenance). The mobile app uses `GET /api/due` on launch instead.
+
+### 5.2 Project structure reorganization
+**Problem:** 17 items at root, with internal modules (`context.py`, `tools.py`) mixed with entry points and docs.
+
+**Changes:**
+| Move | Reason |
+|------|--------|
+| `context.py` → `services/context.py` | Only imported by `services/pipeline.py` — belongs with the rest of the service layer |
+| `tools.py` → `services/tools.py` | Only imported by `services/pipeline.py` and `services/repair.py` |
+| `agent.py` → `scripts/agent.py` | Dead code (not imported anywhere), kept for manual CLI debugging |
+| `ARCHITECTURE.md`, `DEVNOTES.md`, `PLAN.md` → `docs/` | Dev docs, not runtime files |
+| `start.bat`, `start_api.bat` → `scripts/` | Launcher scripts |
+
+**Path fixes required after moves:**
+- `context.py`: `Path(__file__).parent` → `Path(__file__).parent.parent` for `AGENTS.md` and `preferences.md`
+- `tools.py`: same fix for `preferences.md`
+- `pipeline.py`: `import context as ctx` → `from services import context as ctx`; `import tools` → `from services import tools`
+- `repair.py`: `import tools` → `from services import tools`
+- `bot.py`: `from tools import _handle_list_topics` → `from services.tools import _handle_list_topics`
+- Tests: updated accordingly
+- Bat scripts: added `cd /d "%~dp0\..\"` and fixed venv activation paths
+
+**Result:** Root went from 17 items → 9 items. Entry points (`bot.py`, `api.py`) and runtime config (`config.py`, `AGENTS.md`, `preferences.md`) stay at root. Everything else is organized.
+
+### 5.3 Standalone git repo
+**Problem:** Project was a subfolder inside the `PA/` git repo. Needed its own repo for GitHub.
+
+**Security audit before commit:**
+- Removed hardcoded Discord bot token from `config.py` (was a fallback default)
+- Removed hardcoded `AUTHORIZED_USER_ID` — now reads from `LEARN_AUTHORIZED_USER_ID` env var
+- Sanitized `ARCHITECTURE.md` — removed personal Discord user ID
+- All secrets now live in `.env` (git-ignored) or environment variables
+
+**Files added:**
+- `.gitignore` — excludes `venv/`, `data/`, `__pycache__/`, `.env`
+- `.env.example` — documents all env vars
+- `python-dotenv` added to requirements — `config.py` auto-loads `.env` on import
+
+### 5.4 Config changes
+- `API_HOST`, `API_PORT`, `API_SECRET_KEY` added (env vars: `LEARN_API_HOST`, `LEARN_API_PORT`, `LEARN_API_SECRET_KEY`)
+- `BOT_TOKEN` no longer has a hardcoded fallback — empty string default, must be set via env var for Discord mode
+- `AUTHORIZED_USER_ID` now reads from `LEARN_AUTHORIZED_USER_ID` env var (default `0`)
+- `validate_config()` relaxed — `BOT_TOKEN` no longer validated (not needed for API-only mode)
+- `python-dotenv` loads `.env` at import time with graceful fallback if not installed
+
+### 5.5 Virtual environment
+Added `venv/` (Python 3.12) with all dependencies. Both `scripts/start.bat` and `scripts/start_api.bat` auto-activate the venv before launching. The venv is git-ignored.
+
+---
+
+## 6. Confirmation Flows for Dedup & Maintenance
+**Date:** 2026-03-15
+
+### 6.1 Problem: Dedup auto-merged concepts without confirmation
+The dedup sub-agent ran on a 24h schedule, identified potential duplicates via LLM, and **immediately deleted** merge targets. No user approval. This caused:
+- Related-but-distinct concepts merged (e.g. "Ring Buffer" → "ISR Bottom Half")
+- Concepts became too broad for effective spaced repetition
+- User lost granularity in their knowledge graph
+
+### 6.2 Problem: Maintenance auto-executed destructive actions
+The maintenance LLM could `delete_concept`, `unlink_concept`, etc. without asking. While AGENTS.md said to "suggest" some actions, there was no code-level enforcement.
+
+### 6.3 Fix: Proposal-based confirmation with Discord buttons
+
+**Architecture:** Destructive actions are now **proposals** stored in a `pending_proposals` DB table. Users approve/reject via discord.py `View`/`Button` components (not text replies — those would be consumed by the LLM pipeline).
+
+**Flow:**
+```
+Scheduler/Command
+    │
+    ├── Dedup: LLM identifies duplicates → save_proposal('dedup', groups)
+    │   → DM user with DedupConfirmView (per-group ✅/❌ + bulk buttons)
+    │   → User clicks buttons → execute_dedup_merges(approved_groups)
+    │
+    └── Maintenance: LLM proposes actions → safe ones execute immediately
+        → destructive ones → save_proposal('maintenance', actions)
+        → DM user with MaintenanceConfirmView (same button pattern)
+        → User clicks → execute_maintenance_actions(approved_actions)
+```
+
+**Key design decisions:**
+- **Discord buttons over text replies** — `on_message` routes all text to the LLM pipeline; intercepting "1, 2" or "all" is fragile and ambiguous. Buttons are mobile-friendly, have built-in timeout, and the callback lives in the View class (not `on_message`).
+- **DB-backed proposals over in-memory state** — the bot restarts (exit code 42 mechanism). In-memory state would be lost between DM and user response (hours later). DB proposals survive restarts.
+- **24h auto-expiry** — `View(timeout=86400)` disables buttons after 24h. DB rows also have `expires_at` column, cleaned up by scheduler.
+- **Skip dedup if pending** — if a proposal from the last cycle isn't resolved yet, the next cycle skips dedup. Prevents overwriting proposals.
+- **Separate proposal from execution in maintenance** — `call_maintenance_loop` returns `(report_text, proposed_actions)`. Safe actions (`link_concept`, `delete_topic` for empty topics, `remark`) execute immediately. Destructive actions (`delete_concept`, `unlink_concept`, `update_concept`) are collected and shown with buttons.
+
+### 6.4 Dedup prompt tightened
+The dedup LLM prompt was too permissive — "find duplicate or highly overlapping concepts" merged related concepts. New prompt:
+- Only merge concepts that are the **same thing with different wording**
+- Explicit examples of what IS vs IS NOT a duplicate
+- "When in doubt, do NOT merge" instruction
+- Removed "highly overlapping" language
+
+### 6.5 Schema change (migration 6)
+Added `pending_proposals` table to `knowledge.db`:
+```sql
+CREATE TABLE pending_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_type TEXT NOT NULL,       -- 'dedup' or 'maintenance'
+    payload TEXT NOT NULL,             -- JSON blob of action dicts
+    discord_message_id INTEGER,        -- for reference
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+);
+```
+
+### 6.6 New files
+- `db/proposals.py` — CRUD for pending proposals (save, get, delete, cleanup)
+- `services/views.py` — Discord UI views (`DedupConfirmView`, `MaintenanceConfirmView`)
+
+### 6.7 AGENTS.md maintenance rules updated
+Removed "Potential duplicates" from auto-fix list. Added explicit boundary:
+- Maintenance handles structural issues (empty topics, untagged concepts)
+- Dedup handles duplicate detection (separate sub-agent)
+- Destructive actions are proposals, not auto-executed

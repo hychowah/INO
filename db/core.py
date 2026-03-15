@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 # ============================================================================
@@ -106,6 +106,15 @@ def _init_knowledge_db():
         CREATE INDEX IF NOT EXISTS idx_remarks_concept ON concept_remarks(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_concept ON review_log(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_reviewed ON review_log(reviewed_at);
+
+        CREATE TABLE IF NOT EXISTS pending_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposal_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            discord_message_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL
+        );
     """)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
@@ -321,6 +330,23 @@ def _run_migrations():
         chat_conn.commit()
         chat_conn.close()
         print("[LEARN DB] Migration 5: Added user_id columns for multi-user prep")
+
+    # --- Migration 6: pending_proposals table for confirmation flows ---
+    if current < 6:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS pending_proposals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                proposal_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                discord_message_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME NOT NULL
+            );
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 6: pending_proposals table")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

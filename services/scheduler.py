@@ -10,7 +10,10 @@ from datetime import datetime, timedelta
 import discord
 
 import config
+import db
 from services import pipeline
+from services.dedup import format_dedup_suggestions
+from services.views import DedupConfirmView
 
 logger = logging.getLogger("scheduler")
 
@@ -137,7 +140,11 @@ async def _check_maintenance():
 
 
 async def _send_maintenance_report(diagnostic_context: str):
-    """Send diagnostic context to the LLM for triage, then DM the report."""
+    """Send diagnostic context to the LLM for triage, then DM the report.
+    Safe actions are executed immediately; destructive actions are proposed
+    with Discord buttons for user approval."""
+    from services.views import MaintenanceConfirmView
+
     if not _bot or not _authorized_user_id:
         logger.error("Bot not initialized, can't send maintenance report")
         return
@@ -150,7 +157,9 @@ async def _send_maintenance_report(diagnostic_context: str):
 
         try:
             # Let the LLM triage and fix issues (multi-action loop)
-            final_result = await pipeline.call_maintenance_loop(diagnostic_context)
+            final_result, proposed_actions = await pipeline.call_maintenance_loop(
+                diagnostic_context
+            )
 
             if final_result and final_result.strip():
                 # Strip REPLY: prefix
@@ -164,6 +173,29 @@ async def _send_maintenance_report(diagnostic_context: str):
                     await user.send(f"🔧 **Knowledge Base Maintenance**\n\n{msg[:1900]}")
                     logger.info("Sent maintenance report DM")
 
+            # If there are proposed destructive actions, send with buttons
+            if proposed_actions:
+                proposal_id = db.save_proposal('maintenance', proposed_actions)
+                view = MaintenanceConfirmView(
+                    proposal_id, proposed_actions,
+                    pipeline.execute_maintenance_actions,
+                )
+                # Format proposed actions for the DM
+                action_lines = []
+                for i, a in enumerate(proposed_actions, 1):
+                    name = a.get('action', 'unknown')
+                    desc = a.get('message', '')[:80]
+                    action_lines.append(f"**{i}.** `{name}` — {desc}")
+
+                proposal_text = (
+                    "⏳ **Actions needing your approval:**\n\n"
+                    + "\n".join(action_lines)
+                    + "\n\nUse the buttons below to approve or reject."
+                )
+                sent_msg = await user.send(content=proposal_text[:1900], view=view)
+                db.update_proposal_message_id(proposal_id, sent_msg.id)
+                logger.info(f"Sent {len(proposed_actions)} proposed maintenance actions")
+
         except ImportError as ie:
             logger.error(f"Import error in maintenance: {ie}")
         except Exception as e:
@@ -176,7 +208,14 @@ async def _send_maintenance_report(diagnostic_context: str):
 
 
 async def _check_dedup():
-    """Run the dedup sub-agent to find and merge duplicate concepts."""
+    """Run the dedup sub-agent to find potential duplicates.
+    Now proposal-only: stores suggestions in DB and DMs user with buttons."""
+    # Skip if there's already a pending dedup proposal
+    existing = db.get_pending_proposal('dedup')
+    if existing:
+        logger.debug("[DEDUP] Skipping — pending proposal exists")
+        return
+
     logger.info("[DEDUP] Running dedup check...")
     try:
         groups = await pipeline.handle_dedup_check()
@@ -184,28 +223,42 @@ async def _check_dedup():
             logger.debug("[DEDUP] No duplicates found")
             return
 
-        # Execute merges
-        summaries = await pipeline.execute_dedup_merges(groups)
-        if summaries and _bot and _authorized_user_id:
-            await _send_dedup_report(summaries)
+        # Save proposal to DB (survives restarts)
+        proposal_id = db.save_proposal('dedup', groups)
+
+        # Send suggestion DM with buttons
+        if _bot and _authorized_user_id:
+            await _send_dedup_suggestions(proposal_id, groups)
 
     except Exception as e:
         logger.error(f"Error in dedup check: {e}", exc_info=True)
 
 
-async def _send_dedup_report(summaries: list[str]):
-    """DM the user about merged duplicates."""
+async def _send_dedup_suggestions(proposal_id: int, groups: list[dict]):
+    """DM the user dedup suggestions with approve/reject buttons."""
     try:
         user = await _bot.fetch_user(_authorized_user_id)
         if not user:
             return
 
-        body = "\n".join(f"• {s}" for s in summaries)
-        await user.send(f"🔄 **Duplicate Concepts Merged**\n\n{body[:1900]}")
-        logger.info(f"[DEDUP] Sent dedup report ({len(summaries)} merges)")
+        # Format the suggestion message
+        suggestion_text = format_dedup_suggestions(groups)
+
+        # Create button view
+        view = DedupConfirmView(proposal_id, groups)
+
+        # Send DM with buttons
+        msg = await user.send(
+            content=suggestion_text[:1900],
+            view=view,
+        )
+
+        # Store message ID for reference
+        db.update_proposal_message_id(proposal_id, msg.id)
+        logger.info(f"[DEDUP] Sent dedup suggestions ({len(groups)} groups) as proposal #{proposal_id}")
 
     except Exception as e:
-        logger.error(f"Error sending dedup report: {e}", exc_info=True)
+        logger.error(f"Error sending dedup suggestions: {e}", exc_info=True)
 
 
 async def _loop():
@@ -241,6 +294,12 @@ async def _loop():
                 await _check_dedup()
             except Exception as e:
                 logger.error(f"Dedup loop error: {e}", exc_info=True)
+
+            # Clean up expired proposals
+            try:
+                db.cleanup_expired_proposals()
+            except Exception as e:
+                logger.error(f"Proposal cleanup error: {e}", exc_info=True)
 
         await asyncio.sleep(interval * 60)
 

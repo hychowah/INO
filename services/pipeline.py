@@ -26,6 +26,7 @@ from services.repair import repair_action
 from services.dedup import (
     handle_dedup_check,
     execute_dedup_merges,
+    format_dedup_suggestions,
 )
 
 logger = logging.getLogger("pipeline")
@@ -34,6 +35,16 @@ AGENTS_MD_PATH = Path(__file__).parent.parent / "AGENTS.md"
 PREFERENCES_MD_PATH = Path(__file__).parent.parent / "preferences.md"
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
+
+# Actions that maintenance can execute without user confirmation.
+# Everything else is collected as a proposal for the user to approve.
+SAFE_MAINTENANCE_ACTIONS = frozenset({
+    'link_concept',    # fix untagged concepts
+    'delete_topic',    # remove empty topics
+    'remark',          # add notes
+    'fetch',           # data retrieval
+    'list_topics',     # read-only
+})
 
 # Cached system prompt content (read once, reused)
 _system_prompt_cache: str | None = None
@@ -367,26 +378,34 @@ def handle_maintenance() -> str | None:
     return maint_context
 
 
-async def call_maintenance_loop(diagnostic_context: str, user_id: str = "default") -> str:
+async def call_maintenance_loop(
+    diagnostic_context: str, user_id: str = "default"
+) -> tuple[str, list[dict]]:
     """Run the maintenance LLM in a loop, executing up to MAX_MAINTENANCE_ACTIONS.
 
-    Each iteration:
-      1. call_with_fetch_loop → LLM response (may include its own fetch sub-loop)
-      2. If LLM returns an action → execute it, record result, loop back
-      3. If LLM returns REPLY/ASK → done, return the final summary
+    Safe actions (link_concept, delete_topic for empty topics, remark) execute
+    immediately. Destructive actions (delete_concept, unlink_concept, update_concept)
+    are collected as proposals for user confirmation via Discord buttons.
 
-    The LLM's final REPLY becomes the user-facing maintenance report.
+    Returns:
+        (report_text, proposed_actions) — report_text is the REPLY: prefixed summary,
+        proposed_actions is a list of action dicts needing user approval.
 
     Args:
         user_id: User identifier for multi-user support. Currently unused.
     """
     actions_taken = []
+    proposed_actions = []
     text = (
         f"[MAINTENANCE] Triage these DB issues and fix what you can.\n\n"
         f"{diagnostic_context}\n\n"
         f"You may execute up to {MAX_MAINTENANCE_ACTIONS} actions this run. "
         f"Output one JSON action at a time. After each, you'll see the result "
-        f"and can output another action or a final REPLY: summary."
+        f"and can output another action or a final REPLY: summary.\n\n"
+        f"**Note:** Destructive actions (delete_concept, unlink_concept) will be "
+        f"proposed to the user for approval rather than executed immediately. "
+        f"Do NOT attempt to merge duplicate concepts — that is handled by a "
+        f"separate dedup sub-agent."
     )
 
     for action_num in range(MAX_MAINTENANCE_ACTIONS):
@@ -402,7 +421,6 @@ async def call_maintenance_loop(diagnostic_context: str, user_id: str = "default
         if not action_data:
             # LLM is done — returned a REPLY/ASK summary
             final_msg = message or ""
-            # Prepend action summary if any actions were taken
             if actions_taken:
                 action_summary = "\n".join(
                     f"{i+1}. {a}" for i, a in enumerate(actions_taken)
@@ -411,28 +429,41 @@ async def call_maintenance_loop(diagnostic_context: str, user_id: str = "default
                     f"**Actions taken ({len(actions_taken)}):**\n"
                     f"{action_summary}\n\n{final_msg}"
                 )
-            return f"REPLY: {final_msg}"
+            return f"REPLY: {final_msg}", proposed_actions
 
-        # Execute the action
-        result = await execute_action(action_data)
-        action_name = action_data.get('action', 'unknown')
+        action_name = action_data.get('action', 'unknown').lower().strip()
         action_msg = action_data.get('message', '')
 
-        # Strip prefix from result for logging
-        result_clean = result
-        for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
-            if result_clean.startswith(pfx):
-                result_clean = result_clean[len(pfx):]
-                break
+        # Check if this action is safe to auto-execute
+        if action_name in SAFE_MAINTENANCE_ACTIONS:
+            # Execute immediately
+            result = await execute_action(action_data)
 
-        is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
-        status = "\u274c" if is_error else "\u2705"
-        actions_taken.append(f"{status} `{action_name}` — {action_msg[:80]}")
+            result_clean = result
+            for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
+                if result_clean.startswith(pfx):
+                    result_clean = result_clean[len(pfx):]
+                    break
 
-        logger.info(
-            f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
-            f"{action_name} → {'error' if is_error else 'ok'}"
-        )
+            is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
+            status = "\u274c" if is_error else "\u2705"
+            actions_taken.append(f"{status} `{action_name}` — {action_msg[:80]}")
+
+            logger.info(
+                f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
+                f"{action_name} → {'error' if is_error else 'ok'}"
+            )
+        else:
+            # Destructive action — collect as proposal, tell LLM it's deferred
+            proposed_actions.append(action_data)
+            actions_taken.append(
+                f"⏳ `{action_name}` — {action_msg[:80]} *(pending user approval)*"
+            )
+
+            logger.info(
+                f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
+                f"{action_name} → deferred (needs approval)"
+            )
 
         # Build continuation prompt with results so far
         action_log = "\n".join(
@@ -464,4 +495,28 @@ async def call_maintenance_loop(diagnostic_context: str, user_id: str = "default
         f"**Actions taken ({len(actions_taken)}):**\n"
         f"{action_summary}\n\n{message or ''}"
     )
-    return f"REPLY: {final_msg}"
+    return f"REPLY: {final_msg}", proposed_actions
+
+
+async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
+    """Execute a list of maintenance actions that were approved by the user.
+    Returns summary strings for each executed action."""
+    summaries = []
+    for action_data in actions:
+        action_name = action_data.get('action', 'unknown')
+        action_msg = action_data.get('message', '')
+        result = await execute_action(action_data)
+
+        result_clean = result
+        for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
+            if result_clean.startswith(pfx):
+                result_clean = result_clean[len(pfx):]
+                break
+
+        is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
+        status = "❌" if is_error else "✅"
+        summaries.append(f"{status} `{action_name}` — {action_msg[:80]}")
+        logger.info(f"Approved maintenance action: {action_name} → "
+                     f"{'error' if is_error else 'ok'}")
+
+    return summaries

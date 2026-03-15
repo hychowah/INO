@@ -6,6 +6,12 @@ Configuration for the Learning Agent Discord Bot.
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass  # python-dotenv not installed — rely on actual env vars
+
 # ============================================================================
 # REQUIRED SETTINGS
 # ============================================================================

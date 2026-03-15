@@ -55,6 +55,13 @@ from db.diagnostics import (
     get_maintenance_diagnostics,
 )
 
+# Proposals (confirmation flows)
+from db.proposals import (
+    save_proposal, get_proposal, get_pending_proposal,
+    update_proposal_message_id, delete_proposal,
+    cleanup_expired as cleanup_expired_proposals,
+)
+
 
 # ============================================================================
 # Self-test

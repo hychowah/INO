@@ -43,6 +43,31 @@ from discord.ext import commands
 import config
 import db
 from services import pipeline, scheduler, state
+from services.parser import parse_llm_response
+from services.views import AddConceptConfirmView
+
+# ============================================================================
+# PENDING ADD-CONCEPT TRACKING
+# ============================================================================
+
+# Maps message_id → (action_data, AddConceptConfirmView) for reply-to detection
+_pending_concepts: dict[int, tuple[dict, AddConceptConfirmView]] = {}
+
+_AFFIRMATIVES = {'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'y', 'add',
+                 'add it', 'go ahead', 'do it', 'please', 'yea'}
+_NEGATIVES = {'no', 'nah', 'nope', 'skip', 'n', 'no thanks', 'pass',
+              'decline', "don't", 'dont'}
+
+
+def _is_affirmative(text: str) -> bool:
+    text = text.lower().strip().rstrip('.!,')
+    return text in _AFFIRMATIVES or text.startswith(('yes', 'sure', 'add'))
+
+
+def _is_negative(text: str) -> bool:
+    text = text.lower().strip().rstrip('.!,')
+    return text in _NEGATIVES or text.startswith(('no ', 'nah', 'skip'))
+
 
 # ============================================================================
 # BOT SETUP
@@ -131,8 +156,18 @@ async def learn_command(ctx, *, text: str = ""):
 
     try:
         async with ctx.channel.typing():
-            response = await _handle_user_message(text or "hello", str(ctx.author))
-        await send_long(ctx, response)
+            response, pending_action = await _handle_user_message(text or "hello", str(ctx.author))
+
+        if pending_action:
+            view = AddConceptConfirmView(pending_action)
+            if is_interaction:
+                sent = await ctx.interaction.followup.send(response, view=view)
+            else:
+                sent = await ctx.send(response, view=view)
+            _pending_concepts[sent.id] = (pending_action, view)
+            view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+        else:
+            await send_long(ctx, response)
     except Exception as e:
         logger.error(f"learn_command error: {e}", exc_info=True)
         msg = f"Error: `{e}`"
@@ -212,6 +247,9 @@ async def clear_command(ctx):
 @authorized_only()
 async def maintain_command(ctx):
     """Manually trigger maintenance diagnostics and dedup agent."""
+    from services.dedup import format_dedup_suggestions
+    from services.views import DedupConfirmView, MaintenanceConfirmView
+
     is_interaction = ctx.interaction is not None
     if is_interaction:
         await ctx.interaction.response.defer(ephemeral=False)
@@ -220,11 +258,12 @@ async def maintain_command(ctx):
     parts = []
 
     # 1. Maintenance diagnostics
+    proposed_actions = []
     try:
         maint_context = pipeline.handle_maintenance()
         if maint_context:
             async with ctx.channel.typing():
-                result = await pipeline.call_maintenance_loop(maint_context)
+                result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
                 msg = result
                 for pfx in ("REPLY: ", "REPLY:"):
                     if msg.startswith(pfx):
@@ -237,24 +276,60 @@ async def maintain_command(ctx):
         logger.error(f"maintain_command maint error: {e}", exc_info=True)
         parts.append(f"🔧 **Maintenance** — error: `{e}`")
 
-    # 2. Dedup agent
+    # 2. Dedup agent (proposal-only)
     try:
-        async with ctx.channel.typing():
-            groups = await pipeline.handle_dedup_check()
-        if groups:
-            summaries = await pipeline.execute_dedup_merges(groups)
-            if summaries:
-                body = "\n".join(f"• {s}" for s in summaries)
-                parts.append(f"🔄 **Dedup** — merged {len(summaries)} group(s):\n{body}")
-            else:
-                parts.append("🔄 **Dedup** — duplicates found but nothing to merge")
+        # Skip if there's already a pending dedup proposal
+        existing = db.get_pending_proposal('dedup')
+        if existing:
+            parts.append("🔄 **Dedup** — pending proposal already exists, check your DMs")
         else:
-            parts.append("🔄 **Dedup** — no duplicates found ✅")
+            async with ctx.channel.typing():
+                groups = await pipeline.handle_dedup_check()
+            if groups:
+                proposal_id = db.save_proposal('dedup', groups)
+                suggestion_text = format_dedup_suggestions(groups)
+                view = DedupConfirmView(proposal_id, groups)
+                parts.append(suggestion_text)
+                # We'll send the view with the main message below
+            else:
+                groups = None
+                parts.append("🔄 **Dedup** — no duplicates found ✅")
     except Exception as e:
         logger.error(f"maintain_command dedup error: {e}", exc_info=True)
         parts.append(f"🔄 **Dedup** — error: `{e}`")
+        groups = None
 
-    await send_long(ctx, "\n\n".join(parts))
+    # Send the main response
+    main_text = "\n\n".join(parts)
+
+    # Determine which views to attach
+    views_to_send = []
+    if groups:
+        views_to_send.append(('dedup', view))
+    if proposed_actions:
+        maint_proposal_id = db.save_proposal('maintenance', proposed_actions)
+        maint_view = MaintenanceConfirmView(
+            maint_proposal_id, proposed_actions,
+            pipeline.execute_maintenance_actions,
+        )
+        views_to_send.append(('maintenance', maint_view))
+
+    if views_to_send:
+        # Send main text first, then each view as separate message
+        await send_long(ctx, main_text)
+        for label, v in views_to_send:
+            if is_interaction:
+                await ctx.interaction.followup.send(
+                    content=f"👆 **Approve/reject {label} actions above:**",
+                    view=v,
+                )
+            else:
+                await ctx.send(
+                    content=f"👆 **Approve/reject {label} actions above:**",
+                    view=v,
+                )
+    else:
+        await send_long(ctx, main_text)
 
 
 @bot.hybrid_command(
@@ -324,23 +399,41 @@ def _ensure_db():
 # CORE HANDLER
 # ============================================================================
 
-async def _handle_user_message(text: str, author: str) -> str:
-    """Core handler: text in → response out. Used by both /learn and on_message."""
+async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None]:
+    """Core handler: text in → (response, pending_action | None).
+
+    If the LLM wants to add_concept, the action is NOT executed here.
+    Instead the raw action_data is returned so the caller can attach
+    an AddConceptConfirmView to the Discord message.
+    """
     _ensure_db()
     state.last_activity_at = datetime.now()
 
-    # Full pipeline: context → kimi-cli (+ fetch loop) → execute
+    # Full pipeline: context → LLM (+ fetch loop)
     llm_response = await pipeline.call_with_fetch_loop(
         "command", text, author
     )
 
+    # --- intercept add_concept before execution ---
+    prefix, message, action_data = parse_llm_response(llm_response)
+    if action_data and action_data.get('action', '').lower().strip() == 'add_concept':
+        # Save chat history (message only, concept not created yet)
+        if text:
+            db.add_chat_message('user', text)
+        display_msg = action_data.get('message', message or '')
+        if display_msg:
+            db.add_chat_message('assistant', display_msg)
+        logger.info(f"Intercepted add_concept — pending user confirmation")
+        return display_msg, action_data
+
+    # All other actions: execute normally
     final_result = await pipeline.execute_llm_response(text, llm_response, "command")
 
     logger.debug(f"Agent result: {final_result[:500]!r}")
 
-    msg_type, message = pipeline.process_output(final_result)
+    msg_type, msg = pipeline.process_output(final_result)
     logger.info(f"Completed: '{text[:50]}' → {msg_type}")
-    return message
+    return msg, None
 
 
 # ============================================================================
@@ -424,19 +517,62 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
+    # Check for reply to a pending add-concept message
+    if message.reference and message.reference.message_id in _pending_concepts:
+        action_data, view = _pending_concepts[message.reference.message_id]
+        if not view.decided:
+            reply_text = text.lower().strip()
+            if _is_affirmative(reply_text):
+                view.decided = True
+                view._disable_all()
+                from services.tools import execute_action
+                msg_type, result = execute_action(
+                    action_data.get('action', 'add_concept'),
+                    action_data.get('params', {}),
+                )
+                note = f"\n\n⚠️ Could not add concept: {result}" if msg_type == 'error' \
+                    else f"\n\n✅ {result}"
+                try:
+                    orig = await message.channel.fetch_message(message.reference.message_id)
+                    await orig.edit(content=(orig.content or '') + note, view=view)
+                except discord.errors.NotFound:
+                    pass
+                _pending_concepts.pop(message.reference.message_id, None)
+                await message.add_reaction('✅')
+                return
+            elif _is_negative(reply_text):
+                view.decided = True
+                view._disable_all()
+                try:
+                    orig = await message.channel.fetch_message(message.reference.message_id)
+                    await orig.edit(view=view)
+                except discord.errors.NotFound:
+                    pass
+                _pending_concepts.pop(message.reference.message_id, None)
+                await message.add_reaction('👍')
+                return
+            # Ambiguous reply — fall through to normal pipeline
+
     # Route every plain message through the learning pipeline
     try:
         async with message.channel.typing():
-            response = await _handle_user_message(text, str(message.author))
+            response, pending_action = await _handle_user_message(text, str(message.author))
 
         if not response or not response.strip():
             response = "(empty response)"
 
-        # Send, handling Discord's 2000-char limit
-        while response:
-            chunk = response[:config.MAX_MESSAGE_LENGTH]
-            response = response[config.MAX_MESSAGE_LENGTH:]
-            await message.reply(chunk)
+        if pending_action:
+            # Show educational answer + confirmation buttons
+            view = AddConceptConfirmView(pending_action)
+            sent = await message.reply(response[:config.MAX_MESSAGE_LENGTH], view=view)
+            _pending_concepts[sent.id] = (pending_action, view)
+            view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+        else:
+            # Send, handling Discord's 2000-char limit
+            while response:
+                chunk = response[:config.MAX_MESSAGE_LENGTH]
+                response = response[config.MAX_MESSAGE_LENGTH:]
+                await message.reply(chunk)
 
     except Exception as e:
         logger.error(f"Message handler error: {e}", exc_info=True)

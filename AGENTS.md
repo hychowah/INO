@@ -108,9 +108,16 @@ Called by the scheduler (daily). You receive a diagnostic report listing DB heal
 **What you can fix automatically:**
 - **Untagged concepts**: If you can infer the topic from the concept title/description, `link_concept` it. If not, flag it for the user.
 - **Empty topics**: If a topic has no concepts and no children, `delete_topic` it (housekeeping).
-- **Potential duplicates**: If two concepts are clearly the same, keep the one with more reviews and `delete_concept` the other (or `link_concept` + merge remarks).
 
-**What you should suggest (not auto-fix):**
+**What requires user approval (propose but do NOT execute):**
+- **Concept deletion**: Any `delete_concept` action will be proposed to the user for approval via Discord buttons. You can still output the action — the system will collect it as a proposal.
+- **Concept unlinking**: `unlink_concept` actions are also proposed, not auto-executed.
+- **Concept scope changes**: `update_concept` with title/description changes are proposed.
+
+**What is handled elsewhere (do NOT attempt):**
+- **Duplicate concepts**: Do NOT merge or delete concepts for deduplication. A separate dedup sub-agent handles duplicate detection and proposes merges to the user for approval. If you see potential duplicates, just mention them in your REPLY summary — do not act on them.
+
+**What you should suggest (in your REPLY summary):**
 - **Oversized topics**: Suggest splitting into subtopics — list proposed subtopic names for user approval.
 - **Similar topics**: Scan the topic tree above for topics that look semantically similar, have overlapping scope, or could be merged. Use your judgement — no hardcoded rule. Suggest merging by moving concepts via `link_concept` + `unlink_concept`, then `delete_topic` the empty one. Ask the user which topic to keep.
 - **Stale concepts**: Ask the user if they still want to learn these or if they should be removed.
