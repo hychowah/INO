@@ -62,6 +62,13 @@ from db.proposals import (
     cleanup_expired as cleanup_expired_proposals,
 )
 
+# Action Log (audit trail)
+from db.action_log import (
+    log_action, get_action_log, get_action_log_count,
+    get_action_summary, get_distinct_actions, get_distinct_sources,
+    cleanup_old_actions,
+)
+
 # Preferences (persona selection)
 from db.preferences import (
     get_available_personas, get_persona, set_persona,

@@ -330,3 +330,48 @@ tr:hover .btn-delete { opacity: 1; }
 .toast.show { opacity: 1; transform: translateX(0); }
 .toast-success { background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
 .toast-error { background: rgba(248,81,73,.15); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+
+/* ===================== Activity (Action Log) ===================== */
+
+/* Source pill colors */
+.tag.source-discord { background: rgba(88,101,242,.2); color: #7289da; }
+.tag.source-maintenance { background: rgba(210,153,34,.18); color: var(--yellow); }
+.tag.source-scheduler { background: rgba(63,185,80,.18); color: var(--green); }
+.tag.source-api { background: rgba(219,109,40,.18); color: var(--orange); }
+.tag.source-cli { background: rgba(139,148,158,.18); color: var(--text2); }
+
+/* Status badges */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
+.badge.due { background: rgba(248,81,73,.15); color: var(--red); }
+
+/* Activity table */
+.activity-table { margin-top: 12px; }
+.activity-table th { font-size: 11px; }
+.activity-table td { padding: 8px 12px; font-size: 13px; }
+
+/* Clickable action rows */
+.action-row { cursor: pointer; transition: background .1s; }
+.action-row:hover { background: rgba(88,166,255,.08); }
+.action-chevron { display: inline-block; transition: transform .15s ease; font-size: 10px; color: var(--text2); margin-right: 4px; }
+.action-row.expanded .action-chevron { transform: rotate(90deg); }
+
+/* Expanded detail row */
+.detail-row { background: rgba(22,27,34,.65); }
+.detail-row td { padding: 0; }
+.action-detail { padding: 12px 16px; border-left: 3px solid var(--border); margin: 6px 0 6px 20px; }
+
+/* Filter toolbar */
+.filter-btn-group { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.filter-btn { padding: 5px 12px; font-size: 12px; color: var(--text2); text-decoration: none; border-right: 1px solid var(--border); transition: background .1s, color .1s; }
+.filter-btn:last-child { border-right: none; }
+.filter-btn:hover { background: var(--surface); color: var(--text); text-decoration: none; }
+.filter-btn.active { background: var(--accent); color: #000; }
+
+/* Mobile overrides */
+@media (max-width: 700px) {
+  .activity-table th:nth-child(5),
+  .activity-table td:nth-child(5) { display: none; }
+  .filter-btn-group { flex-wrap: wrap; }
+  .concepts-toolbar { flex-wrap: wrap; gap: 8px; }
+}

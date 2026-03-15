@@ -474,6 +474,10 @@ async def call_maintenance_loop(
     """
     actions_taken = []
     proposed_actions = []
+
+    # Set action source for audit trail
+    tools.set_action_source('maintenance')
+
     text = (
         f"[MAINTENANCE] Triage these DB issues and fix what you can.\n\n"
         f"{diagnostic_context}\n\n"

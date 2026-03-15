@@ -12,6 +12,7 @@ import discord
 
 import db
 from services.dedup import execute_dedup_merges
+from services.formatting import truncate_for_discord, truncate_with_suffix
 
 logger = logging.getLogger("views")
 
@@ -81,7 +82,7 @@ class DedupConfirmView(discord.ui.View):
         # Edit the original message with results
         result_text = "\n\n".join(result_parts) if result_parts else "No merges executed."
         try:
-            await interaction.message.edit(content=result_text, view=self)
+            await interaction.message.edit(content=truncate_for_discord(result_text), view=self)
         except discord.errors.NotFound:
             pass
 
@@ -174,7 +175,8 @@ class ApproveGroupButton(discord.ui.Button):
 
         status = self.parent_view._get_status_text()
         await interaction.response.edit_message(
-            content=f"🔄 **Dedup Proposals**\n\n{status}", view=self.parent_view
+            content=truncate_for_discord(f"🔄 **Dedup Proposals**\n\n{status}"),
+            view=self.parent_view,
         )
         await self.parent_view._finalize(interaction)
 
@@ -203,7 +205,8 @@ class RejectGroupButton(discord.ui.Button):
 
         status = self.parent_view._get_status_text()
         await interaction.response.edit_message(
-            content=f"🔄 **Dedup Proposals**\n\n{status}", view=self.parent_view
+            content=truncate_for_discord(f"🔄 **Dedup Proposals**\n\n{status}"),
+            view=self.parent_view,
         )
         await self.parent_view._finalize(interaction)
 
@@ -258,7 +261,7 @@ class MaintenanceConfirmView(discord.ui.View):
 
         result_text = "\n\n".join(result_parts) if result_parts else "No actions executed."
         try:
-            await interaction.message.edit(content=result_text, view=self)
+            await interaction.message.edit(content=truncate_for_discord(result_text), view=self)
         except discord.errors.NotFound:
             pass
         self.stop()
@@ -375,7 +378,8 @@ class AddConceptConfirmView(discord.ui.View):
 
         try:
             original = interaction.message.content or ""
-            await interaction.response.edit_message(content=original + note, view=self)
+            await interaction.response.edit_message(
+                content=truncate_with_suffix(original, note), view=self)
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -391,7 +395,8 @@ class AddConceptConfirmView(discord.ui.View):
 
         try:
             original = interaction.message.content or ""
-            await interaction.response.edit_message(content=original, view=self)
+            await interaction.response.edit_message(
+                content=truncate_for_discord(original), view=self)
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -543,7 +548,7 @@ class _QuizExplainButton(discord.ui.Button):
                     text, str(interaction.user))
             # Explain is not an assess, so send plain (no nav buttons)
             await interaction.followup.send(
-                (response or "(no explanation generated)")[:2000])
+                truncate_for_discord(response or "(no explanation generated)"))
         except Exception as e:
             logger.error(f"QuizExplain callback error: {e}", exc_info=True)
             try:
@@ -569,7 +574,7 @@ class _QuizDoneButton(discord.ui.Button):
         original = interaction.message.content or ""
         try:
             await interaction.response.edit_message(
-                content=original + "\n\n✋ Quiz session ended.",
+                content=truncate_with_suffix(original, "\n\n✋ Quiz session ended."),
                 view=self.parent_view)
         except discord.errors.NotFound:
             pass
@@ -598,4 +603,4 @@ async def _send_quiz_response(interaction: discord.Interaction,
     # will return a quiz question (not assess) from these buttons, so this
     # is a safety net for unusual flows.
     # For now, send plain — buttons reappear on the *next* assess naturally.
-    await interaction.followup.send(response[:2000])
+    await interaction.followup.send(truncate_for_discord(response))

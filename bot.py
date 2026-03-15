@@ -45,6 +45,7 @@ import db
 from services import pipeline, scheduler, state
 from services.parser import parse_llm_response
 from services.views import AddConceptConfirmView, QuizNavigationView
+from services.formatting import truncate_with_suffix
 
 # ============================================================================
 # PENDING ADD-CONCEPT TRACKING
@@ -162,9 +163,10 @@ async def learn_command(ctx, *, text: str = ""):
         if pending_action:
             view = AddConceptConfirmView(pending_action)
             if is_interaction:
-                sent = await ctx.interaction.followup.send(response, view=view)
+                sent = await ctx.interaction.followup.send(
+                    response[:config.MAX_MESSAGE_LENGTH], view=view)
             else:
-                sent = await ctx.send(response, view=view)
+                sent = await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
             _pending_concepts[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
         elif assess_meta:
@@ -485,6 +487,10 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
     _ensure_db()
     state.last_activity_at = datetime.now()
 
+    # Set action source for audit trail
+    from services.tools import set_action_source
+    set_action_source('discord')
+
     # Full pipeline: context → LLM (+ fetch loop)
     llm_response = await pipeline.call_with_fetch_loop(
         "command", text, author
@@ -552,6 +558,18 @@ async def on_ready():
     # Start review scheduler
     scheduler.start(bot, config.AUTHORIZED_USER_ID)
     logger.info("[SCHEDULER] Review check started")
+
+    # Start web UI in a background thread
+    try:
+        import threading
+        import webui.server as webui_server
+        webui_thread = threading.Thread(
+            target=webui_server.main, kwargs={"skip_init": True}, daemon=True
+        )
+        webui_thread.start()
+        logger.info(f"[WEBUI] Started on http://localhost:{webui_server.PORT}")
+    except Exception as e:
+        logger.error(f"[WEBUI] Failed to start: {e}", exc_info=True)
 
     # Heartbeat
     bot.loop.create_task(_heartbeat())
@@ -626,7 +644,9 @@ async def on_message(message):
                     else f"\n\n✅ {result}"
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
-                    await orig.edit(content=(orig.content or '') + note, view=view)
+                    await orig.edit(
+                        content=truncate_with_suffix(orig.content or '', note),
+                        view=view)
                 except discord.errors.NotFound:
                     pass
                 _pending_concepts.pop(message.reference.message_id, None)

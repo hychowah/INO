@@ -83,6 +83,10 @@ async def chat(req: ChatRequest):
 
     state.last_activity_at = __import__("datetime").datetime.now()
 
+    # Set action source for audit trail
+    from services.tools import set_action_source
+    set_action_source('api')
+
     try:
         llm_response = await pipeline.call_with_fetch_loop(
             "command", req.message.strip(), "solo_user"

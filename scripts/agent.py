@@ -29,6 +29,9 @@ from services import tools
 from services import context as ctx
 from services.parser import parse_llm_response
 
+# Set action source for audit trail
+tools.set_action_source('cli')
+
 
 # ============================================================================
 # Action Execution

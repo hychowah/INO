@@ -3,7 +3,9 @@ Action executor for Learning Agent.
 Maps action verbs from LLM JSON responses to db operations.
 """
 
+import contextvars
 import json
+import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +13,28 @@ from typing import Optional, Dict, Any, List, Tuple
 
 import db
 
+logger = logging.getLogger("tools")
+
 PREFERENCES_PATH = Path(__file__).parent.parent / "preferences.md"
+
+# ============================================================================
+# Action source tracking via contextvars (task-scoped, no signature threading)
+# ============================================================================
+
+_action_source: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "action_source", default="discord"
+)
+
+def set_action_source(source: str) -> None:
+    """Set the action source for the current context (discord/scheduler/maintenance/api/cli)."""
+    _action_source.set(source)
+
+def get_action_source() -> str:
+    """Get the current action source."""
+    return _action_source.get()
+
+# Actions that are read-only / no-ops — don't log these
+_SKIP_LOG_ACTIONS = frozenset({"fetch", "list_topics", "none", "reply"})
 
 
 # ============================================================================
@@ -32,9 +55,24 @@ def execute_action(action: str, params: Dict[str, Any]) -> Tuple[str, Any]:
         return ('error', f"Unknown action: {action}")
 
     try:
-        return handler(params)
+        msg_type, result = handler(params)
     except Exception as e:
-        return ('error', f"Error executing '{action}': {e}")
+        msg_type, result = ('error', f"Error executing '{action}': {e}")
+
+    # Log mutating actions to the audit trail
+    if action not in _SKIP_LOG_ACTIONS:
+        try:
+            db.log_action(
+                action=action,
+                params=params,
+                result_type=msg_type,
+                result=str(result)[:500] if result else "",
+                source=_action_source.get(),
+            )
+        except Exception:
+            logger.warning(f"Failed to log action '{action}'", exc_info=True)
+
+    return (msg_type, result)
 
 
 # ============================================================================
@@ -77,6 +115,11 @@ def _handle_fetch(params: Dict) -> Tuple[str, Any]:
     if params.get('due'):
         limit = int(params.get('limit', 10))
         due = db.get_due_concepts(limit=limit)
+        if not due:
+            # Nothing overdue — fall back to the nearest upcoming concept
+            next_concept = db.get_next_review_concept()
+            if next_concept:
+                due = [next_concept]
         return ('fetch', {"due_concepts": due})
 
     if params.get('stats'):

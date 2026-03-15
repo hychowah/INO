@@ -14,6 +14,7 @@ import db
 from services import pipeline
 from services.dedup import format_dedup_suggestions
 from services.views import DedupConfirmView
+from services.formatting import truncate_for_discord
 
 logger = logging.getLogger("scheduler")
 
@@ -87,6 +88,11 @@ async def _send_review_quiz(payload: str):
 
         try:
             review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
+
+            # Set action source for audit trail
+            from services.tools import set_action_source
+            set_action_source('scheduler')
+
             llm_response = await pipeline.call_with_fetch_loop(
                 mode="reply",
                 text=review_text,
@@ -100,7 +106,8 @@ async def _send_review_quiz(payload: str):
             _msg_type, message = pipeline.process_output(final_result)
 
             if message and message.strip():
-                await user.send(f"📚 **Learning Review**\n{message}")
+                await user.send(truncate_for_discord(
+                    f"📚 **Learning Review**\n{message}"))
                 logger.info("Sent review DM")
                 # Track cooldown
                 try:
@@ -113,7 +120,8 @@ async def _send_review_quiz(payload: str):
 
         except ImportError as ie:
             logger.error(f"Import error: {ie}")
-            await user.send(f"📚 **Learning Review** — Time to review:\n{payload}")
+            await user.send(truncate_for_discord(
+                f"📚 **Learning Review** — Time to review:\n{payload}"))
 
     except discord.Forbidden:
         logger.error("Cannot send DM (forbidden)")

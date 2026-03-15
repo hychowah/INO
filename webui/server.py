@@ -11,6 +11,7 @@ import mimetypes
 import sys
 import os
 import urllib.parse
+from datetime import datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -58,6 +59,7 @@ def layout(title: str, body: str, active: str = "", extra_scripts: str = "") -> 
         ("topics", "Topics"),
         ("concepts", "Concepts"),
         ("reviews", "Reviews"),
+        ("actions", "Activity"),
     ]
     nav_html = ""
     for href, label in nav_items:
@@ -314,7 +316,32 @@ def page_dashboard() -> str:
     else:
         topic_html = '<div class="card"><p>No topics yet. Start learning via the Discord bot!</p></div>'
 
-    return layout("Dashboard", stats_html + due_html + topic_html, active="",
+    # Recent activity summary card
+    try:
+        activity = db.get_action_summary(days=7)
+        today_total = activity.get('today_total', 0)
+        week_total = activity.get('total', 0)
+        today_actions = activity.get('today_by_action', {})
+        week_actions = activity.get('by_action', {})
+
+        def _summarize(d):
+            parts = []
+            for key, label in [('assess', 'reviews'), ('add_concept', 'concepts added'),
+                               ('add_topic', 'topics created'), ('quiz', 'quizzes')]:
+                if d.get(key):
+                    parts.append(f"{d[key]} {label}")
+            return ', '.join(parts) if parts else 'no activity'
+
+        activity_html = f'''<div class="card">
+          <h3>📋 Recent Activity</h3>
+          <p style="font-size:14px;margin:6px 0">Today: {_summarize(today_actions)} ({today_total} total)</p>
+          <p style="font-size:14px;margin:6px 0;color:var(--text2)">This week: {_summarize(week_actions)} ({week_total} total)</p>
+          <p style="margin-top:10px"><a href="/actions">View full activity log →</a></p>
+        </div>'''
+    except Exception:
+        activity_html = ''
+
+    return layout("Dashboard", stats_html + due_html + activity_html + topic_html, active="",
                    extra_scripts='<script src="/static/tree.js"></script>')
 
 
@@ -674,6 +701,331 @@ def page_reviews() -> str:
 def page_404() -> str:
     return layout("404", '<div class="empty"><h2>404 — Page not found</h2><p><a href="/">Go home</a></p></div>')
 
+# ============================================================================
+# Activity (Action Log) page
+# ============================================================================
+
+# Humanized action labels for the Activity page
+_ACTION_LABELS = {
+    'add_concept': 'Added Concept',
+    'add_topic': 'Added Topic',
+    'update_concept': 'Updated Concept',
+    'update_topic': 'Updated Topic',
+    'delete_concept': 'Deleted Concept',
+    'delete_topic': 'Deleted Topic',
+    'link_concept': 'Linked Concept',
+    'unlink_concept': 'Unlinked Concept',
+    'link_topics': 'Linked Topics',
+    'assess': 'Assessment',
+    'quiz': 'Quiz Question',
+    'remark': 'Added Remark',
+    'suggest_topic': 'Suggested Topic',
+    'fetch': 'Data Fetch',
+    'list_topics': 'Listed Topics',
+}
+
+_SOURCE_CLASSES = {
+    'discord': 'source-discord',
+    'maintenance': 'source-maintenance',
+    'scheduler': 'source-scheduler',
+    'api': 'source-api',
+    'cli': 'source-cli',
+}
+
+
+def _relative_time(dt_str: str) -> str:
+    """Convert a datetime string to a human-friendly relative time."""
+    try:
+        dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        return dt_str or '—'
+    diff = datetime.now() - dt
+    secs = int(diff.total_seconds())
+    if secs < 60:
+        return 'just now'
+    if secs < 3600:
+        m = secs // 60
+        return f'{m} min ago'
+    if secs < 86400:
+        h = secs // 3600
+        return f'{h} hr{"s" if h > 1 else ""} ago'
+    days = secs // 86400
+    if days == 1:
+        return 'yesterday'
+    if days < 30:
+        return f'{days} days ago'
+    return dt.strftime('%Y-%m-%d')
+
+
+def _parse_action_summary(action: str, params_str: str) -> str:
+    """Parse action params JSON into a human-readable summary with deep links."""
+    try:
+        params = json.loads(params_str) if params_str else {}
+    except (json.JSONDecodeError, TypeError):
+        return ''
+
+    if action in ('add_concept', 'update_concept', 'delete_concept'):
+        title = params.get('title') or params.get('new_title') or ''
+        cid = params.get('concept_id', '')
+        if title and cid:
+            return f'<a href="/concept/{cid}">{_esc(title)}</a>'
+        if title:
+            return _esc(title)
+        if cid:
+            return f'<a href="/concept/{cid}">Concept #{cid}</a>'
+        return ''
+
+    if action in ('add_topic', 'update_topic', 'delete_topic'):
+        title = params.get('title', '')
+        tid = params.get('topic_id', '')
+        if title and tid:
+            return f'<a href="/topic/{tid}">{_esc(title)}</a>'
+        if title:
+            return _esc(title)
+        if tid:
+            return f'<a href="/topic/{tid}">Topic #{tid}</a>'
+        return ''
+
+    if action == 'assess':
+        cid = params.get('concept_id', '')
+        q = params.get('quality', '?')
+        summary = f'Quality {q}/5'
+        if cid:
+            summary = f'<a href="/concept/{cid}">Concept #{cid}</a> — {summary}'
+        return summary
+
+    if action == 'quiz':
+        cid = params.get('concept_id', '')
+        if cid:
+            return f'<a href="/concept/{cid}">Concept #{cid}</a>'
+        return ''
+
+    if action in ('link_concept', 'unlink_concept'):
+        cid = params.get('concept_id', '')
+        tids = params.get('topic_ids') or [params.get('topic_id', '')]
+        parts = []
+        if cid:
+            parts.append(f'<a href="/concept/{cid}">#{cid}</a>')
+        for tid in tids:
+            if tid:
+                parts.append(f'<a href="/topic/{tid}">Topic #{tid}</a>')
+        return ' → '.join(parts)
+
+    if action == 'remark':
+        cid = params.get('concept_id', '')
+        content = (params.get('content') or '')[:60]
+        if cid:
+            return f'<a href="/concept/{cid}">#{cid}</a> — {_esc(content)}'
+        return _esc(content)
+
+    if action == 'suggest_topic':
+        return _esc(params.get('title', ''))
+
+    if action == 'link_topics':
+        pid = params.get('parent_id', '')
+        cid_child = params.get('child_id', '')
+        return f'<a href="/topic/{pid}">#{pid}</a> → <a href="/topic/{cid_child}">#{cid_child}</a>'
+
+    return ''
+
+
+def _esc(s: str) -> str:
+    """HTML-escape a string."""
+    return (s.replace('&', '&amp;').replace('<', '&lt;')
+             .replace('>', '&gt;').replace('"', '&quot;'))
+
+
+def page_actions(query_string: str = "") -> str:
+    """Activity log page with server-side filtering and pagination."""
+    qs = urllib.parse.parse_qs(query_string)
+    action_filter = qs.get('action', [None])[0]
+    source_filter = qs.get('source', [None])[0]
+    search = qs.get('q', [None])[0]
+    time_filter = qs.get('time', ['all'])[0]
+    page = max(1, int(qs.get('page', [1])[0]))
+    per_page = 50
+
+    # Time filter
+    since = None
+    if time_filter == 'today':
+        since = datetime.now().replace(hour=0, minute=0, second=0)
+    elif time_filter == '7d':
+        since = datetime.now() - timedelta(days=7)
+    elif time_filter == '30d':
+        since = datetime.now() - timedelta(days=30)
+
+    # Filter params that are empty strings should be None
+    if action_filter == '':
+        action_filter = None
+    if source_filter == '':
+        source_filter = None
+    if search == '':
+        search = None
+
+    total = db.get_action_log_count(
+        action_filter=action_filter, source_filter=source_filter,
+        since=since, search=search,
+    )
+    entries = db.get_action_log(
+        limit=per_page, offset=(page - 1) * per_page,
+        action_filter=action_filter, source_filter=source_filter,
+        since=since, search=search,
+    )
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    # Get distinct values for filter dropdowns
+    distinct_actions = db.get_distinct_actions()
+    distinct_sources = db.get_distinct_sources()
+
+    # Build filter toolbar
+    action_options = '<option value="">All Actions</option>'
+    for a in distinct_actions:
+        sel = ' selected' if a == action_filter else ''
+        label = _ACTION_LABELS.get(a, a)
+        action_options += f'<option value="{a}"{sel}>{label}</option>'
+
+    source_options = '<option value="">All Sources</option>'
+    for s in distinct_sources:
+        sel = ' selected' if s == source_filter else ''
+        source_options += f'<option value="{s}"{sel}>{s.title()}</option>'
+
+    def _time_btn(val, label):
+        active = ' active' if time_filter == val else ''
+        return f'<a href="?{_build_qs(time=val)}" class="filter-btn{active}">{label}</a>'
+
+    def _build_qs(**overrides):
+        p = {}
+        if action_filter:
+            p['action'] = action_filter
+        if source_filter:
+            p['source'] = source_filter
+        if search:
+            p['q'] = search
+        p['time'] = time_filter
+        p['page'] = '1'
+        p.update({k: v for k, v in overrides.items() if v})
+        return urllib.parse.urlencode(p)
+
+    search_val = _esc(search) if search else ''
+
+    toolbar = f'''<div class="concepts-toolbar">
+      <div class="toolbar-search">
+        <form method="get" action="/actions" style="display:contents">
+          <input type="hidden" name="action" value="{action_filter or ''}">
+          <input type="hidden" name="source" value="{source_filter or ''}">
+          <input type="hidden" name="time" value="{time_filter}">
+          <input type="text" name="q" value="{search_val}" placeholder="Search actions\u2026" autocomplete="off">
+        </form>
+      </div>
+      <select onchange="location.href='/actions?'+new URLSearchParams({{action:this.value,source:'{source_filter or ''}',time:'{time_filter}',q:'{search_val}'}})">
+        {action_options}
+      </select>
+      <select onchange="location.href='/actions?'+new URLSearchParams({{source:this.value,action:'{action_filter or ''}',time:'{time_filter}',q:'{search_val}'}})">
+        {source_options}
+      </select>
+      <div class="filter-btn-group">
+        {_time_btn('today', 'Today')}
+        {_time_btn('7d', '7 days')}
+        {_time_btn('30d', '30 days')}
+        {_time_btn('all', 'All')}
+      </div>
+    </div>'''
+
+    # Table rows
+    if not entries:
+        table_html = '<div class="empty">No actions logged yet. Start learning via the Discord bot!</div>'
+    else:
+        rows_html = ''
+        for e in entries:
+            action = e.get('action', '')
+            source = e.get('source', 'discord')
+            result_type = e.get('result_type', '')
+            created = e.get('created_at', '')
+
+            # Humanized label
+            label = _ACTION_LABELS.get(action, action)
+
+            # Source pill
+            source_cls = _SOURCE_CLASSES.get(source, 'source-cli')
+            source_pill = f'<span class="tag {source_cls}">{source.title()}</span>'
+
+            # Status badge
+            if result_type == 'error':
+                status = '<span class="badge due">Error</span>'
+            else:
+                status = '<span class="badge ok">\u2713</span>'
+
+            # Summary
+            summary = _parse_action_summary(action, e.get('params', ''))
+
+            # Relative time
+            rel_time = _relative_time(created)
+
+            # Detail row content (for expand/collapse)
+            params_display = ''
+            try:
+                params_obj = json.loads(e.get('params', '{}') or '{}')
+                params_display = '\n'.join(
+                    f'<tr><td style="color:var(--text2);padding:3px 12px 3px 0;font-size:12px">{_esc(str(k))}</td>'
+                    f'<td style="font-size:12px;padding:3px 0">{_esc(str(v)[:200])}</td></tr>'
+                    for k, v in params_obj.items()
+                )
+            except (json.JSONDecodeError, TypeError):
+                params_display = f'<tr><td colspan="2" style="font-size:12px">{_esc(str(e.get("params", "")))[:200]}</td></tr>'
+
+            result_text = _esc(str(e.get('result', ''))[:300])
+
+            rows_html += f'''<tr class="action-row" onclick="this.classList.toggle('expanded');this.nextElementSibling.style.display=this.classList.contains('expanded')?'table-row':'none'">
+              <td title="{_esc(created)}"><span class="action-chevron">\u25b8</span> {rel_time}</td>
+              <td>{source_pill}</td>
+              <td>{label}</td>
+              <td>{summary}</td>
+              <td>{status}</td>
+            </tr>
+            <tr class="detail-row" style="display:none">
+              <td colspan="5">
+                <div class="action-detail">
+                  <table style="margin:0">{params_display}</table>
+                  {f'<div style="margin-top:8px;font-size:12px;color:var(--text2)">Result: {result_text}</div>' if result_text else ''}
+                  <div style="margin-top:4px;font-size:11px;color:var(--text2)">Raw action: {_esc(action)} | {_esc(created)}</div>
+                </div>
+              </td>
+            </tr>'''
+
+        table_html = f'''<table class="activity-table">
+          <thead><tr>
+            <th style="width:120px">Time</th>
+            <th style="width:100px">Source</th>
+            <th style="width:140px">Action</th>
+            <th>Summary</th>
+            <th style="width:60px">Status</th>
+          </tr></thead>
+          <tbody>{rows_html}</tbody>
+        </table>'''
+
+    # Pagination
+    pagination = ''
+    if total_pages > 1:
+        prev_link = ''
+        next_link = ''
+        if page > 1:
+            prev_link = f'<a href="/actions?{_build_qs(page=str(page-1))}" class="btn btn-sm" style="background:var(--surface);color:var(--text);border:1px solid var(--border)">← Prev</a>'
+        if page < total_pages:
+            next_link = f'<a href="/actions?{_build_qs(page=str(page+1))}" class="btn btn-sm" style="background:var(--surface);color:var(--text);border:1px solid var(--border)">Next →</a>'
+        pagination = f'''<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:13px">
+          {prev_link}
+          <span style="color:var(--text2)">Page {page} of {total_pages} ({total} entries)</span>
+          {next_link}
+        </div>'''
+
+    body = f'''
+    <h2 style="margin-bottom:4px">Activity Log</h2>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px">{total} action{"s" if total != 1 else ""} recorded</p>
+    {toolbar}
+    {table_html}
+    {pagination}'''
+
+    return layout("Activity", body, active="actions")
 
 # ============================================================================
 # HTTP Handler
@@ -714,6 +1066,8 @@ class Handler(BaseHTTPRequestHandler):
                 html = page_concept_detail(cid)
             elif path == "/reviews":
                 html = page_reviews()
+            elif path == "/actions":
+                html = page_actions(parsed.query or "")
             elif path == "/api/stats":
                 self._json_response(db.get_review_stats())
                 return
@@ -722,6 +1076,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             elif path == "/api/due":
                 self._json_response(db.get_due_concepts())
+                return
+            elif path == "/api/actions":
+                # Parse query params for filtering
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                limit = min(200, int(qs.get('limit', [50])[0]))
+                offset = int(qs.get('offset', [0])[0])
+                action_f = qs.get('action', [None])[0] or None
+                source_f = qs.get('source', [None])[0] or None
+                entries = db.get_action_log(
+                    limit=limit, offset=offset,
+                    action_filter=action_f, source_filter=source_f,
+                )
+                self._json_response({"entries": entries, "total": db.get_action_log_count(
+                    action_filter=action_f, source_filter=source_f)})
                 return
             else:
                 html = page_404()
@@ -817,8 +1185,9 @@ class Handler(BaseHTTPRequestHandler):
 # Main
 # ============================================================================
 
-def main():
-    db.init_databases()
+def main(skip_init: bool = False):
+    if not skip_init:
+        db.init_databases()
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     print(f"Learning Agent DB UI running at http://localhost:{PORT}")
     print("Press Ctrl+C to stop.")

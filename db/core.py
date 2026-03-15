@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 # ============================================================================
@@ -348,6 +348,27 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 6: pending_proposals table")
 
+    # --- Migration 7: action_log table for bot action audit trail ---
+    if current < 7:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS action_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                params TEXT,
+                result_type TEXT,
+                result TEXT,
+                source TEXT NOT NULL DEFAULT 'discord',
+                user_id TEXT DEFAULT 'default',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_action_log_filter
+                ON action_log(action, source, created_at);
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 7: action_log table")
+
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")
 
@@ -408,11 +429,12 @@ def _now_iso() -> str:
 
 
 def _conn(db_path=None):
-    """Get a connection with row_factory, foreign keys, and WAL mode enabled."""
+    """Get a connection with row_factory, foreign keys, WAL mode, and busy timeout."""
     c = sqlite3.connect(db_path or KNOWLEDGE_DB)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys = ON")
     c.execute("PRAGMA journal_mode = WAL")
+    c.execute("PRAGMA busy_timeout = 5000")
     return c
 
 

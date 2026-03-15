@@ -377,3 +377,56 @@ Removed "Potential duplicates" from auto-fix list. Added explicit boundary:
 - Maintenance handles structural issues (empty topics, untagged concepts)
 - Dedup handles duplicate detection (separate sub-agent)
 - Destructive actions are proposals, not auto-executed
+
+---
+
+## 7. Discord 2000-Character Limit Overflow
+**Date:** 2026-03-15
+
+### 7.1 Symptom
+Clicking "Add concept" on a confirmation button crashed with:
+```
+discord.errors.HTTPException: 400 Bad Request (error code: 50035): Invalid Form Body
+In data.content: Must be 2000 or fewer in length.
+```
+
+### 7.2 Root cause
+`AddConceptConfirmView.accept` in `services/views.py` appended a status note to the original message without checking combined length:
+```python
+original = interaction.message.content or ""  # up to 1900 chars
+await interaction.response.edit_message(content=original + note, view=self)  # note ~60-130 chars
+```
+Total: 1900 + 130 = 2030 > 2000. Same pattern existed in the text-reply confirmation path in `bot.py` and `_QuizDoneButton`.
+
+### 7.3 All affected locations (fixed)
+
+| File | Location | Pattern | Risk |
+|------|----------|---------|------|
+| `services/views.py` | `AddConceptConfirmView.accept` | `original + note` | **Crash (reported)** |
+| `bot.py` | Text-reply "yes" handler | `orig.content + note` | **Crash (same pattern)** |
+| `services/views.py` | `_QuizDoneButton.callback` | `original + "✋ Quiz session ended."` | Moderate |
+| `bot.py` | `/learn` with `pending_action` | `send(response, view=view)` — no truncation | Moderate |
+| `services/scheduler.py` | Review DM send | `f"📚 **Learning Review**\n{message}"` | Moderate |
+| `services/scheduler.py` | Fallback review DM | `f"📚 **Learning Review** — Time to review:\n{payload}"` | Low |
+| `services/views.py` | `DedupConfirmView._finalize` | `edit(content=result_text)` | Defensive |
+| `services/views.py` | `MaintenanceConfirmView._finalize` | Same | Defensive |
+| `services/views.py` | `ApproveGroupButton` / `RejectGroupButton` | Status text edit | Defensive |
+| `services/views.py` | `_QuizExplainButton` / `_send_quiz_response` | Hardcoded `[:2000]` | Normalized |
+
+### 7.4 Fix: `services/formatting.py`
+Created a shared utility module with:
+- `DISCORD_CHAR_LIMIT = 2000` — replaces magic `[:2000]` slices
+- `truncate_for_discord(text, max_len)` — truncate with `…` ellipsis
+- `truncate_with_suffix(original, suffix, max_len)` — truncates `original` to preserve `suffix`; handles suffix-only overflow
+
+Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or any pipeline/db module — this is a Discord transport concern.
+
+### 7.5 Convention: 1900 vs 2000
+
+| Constant | Value | Used for |
+|----------|-------|----------|
+| `config.MAX_MESSAGE_LENGTH` | 1900 | Initial sends — conservative buffer for Discord overhead |
+| `formatting.DISCORD_CHAR_LIMIT` | 2000 | Edits / appends — hard limit, every char counts |
+
+### 7.6 Architecture note
+`api.py` (FastAPI) is unaffected — it returns raw JSON with no character limit. The React Native app (PLAN.md Phase 3) will handle its own display constraints client-side. The truncation helpers live in `services/formatting.py` (pure string ops, no discord.py dependency) so they can be reused for future mobile push notification truncation (FCM has its own limits).
