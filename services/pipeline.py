@@ -1,0 +1,458 @@
+"""
+Learning agent pipeline — context → LLM (with fetch loop) → execute.
+
+Refactored: parsing, repair, and dedup extracted to separate modules.
+This file is now ~300 lines of pure orchestration.
+"""
+
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import config
+import db
+from services import context as ctx
+from services import tools
+
+from services.llm import get_provider, LLMError
+from services.parser import (
+    parse_llm_response,
+    extract_fetch_params,
+    extract_llm_action,
+    process_output,
+)
+from services.repair import repair_action
+from services.dedup import (
+    handle_dedup_check,
+    execute_dedup_merges,
+)
+
+logger = logging.getLogger("pipeline")
+
+AGENTS_MD_PATH = Path(__file__).parent.parent / "AGENTS.md"
+PREFERENCES_MD_PATH = Path(__file__).parent.parent / "preferences.md"
+MAX_FETCH_ITERATIONS = 3
+MAX_MAINTENANCE_ACTIONS = 5
+
+# Cached system prompt content (read once, reused)
+_system_prompt_cache: str | None = None
+
+
+def _get_system_prompt() -> str:
+    """Read AGENTS.md + preferences.md content.  Cached after first call.
+    Used as the system_prompt parameter for API-based providers.
+    KimiCliProvider ignores it (injects file-path references instead)."""
+    global _system_prompt_cache
+    if _system_prompt_cache is None:
+        agents = ctx._read_file(AGENTS_MD_PATH)
+        prefs = ctx._read_file(PREFERENCES_MD_PATH)
+        _system_prompt_cache = f"{agents}\n\n## User Preferences\n\n{prefs}"
+    return _system_prompt_cache
+
+# Conversation session state (see DEVNOTES.md §2.3)
+_conv_session_name: str | None = None
+_conv_session_last_used: datetime | None = None
+
+
+def _get_conv_session() -> tuple[str, bool]:
+    """Return a conversation session name, rotating after SESSION_TIMEOUT_MINUTES idle.
+    Returns (session_name, is_new) — is_new=True means first call needs full context."""
+    global _conv_session_name, _conv_session_last_used
+    now = datetime.now()
+    timeout = getattr(config, 'SESSION_TIMEOUT_MINUTES', 5)
+    if (_conv_session_name is None or _conv_session_last_used is None
+            or (now - _conv_session_last_used).total_seconds() > timeout * 60):
+        _conv_session_name = f"learn_{now.strftime('%H%M%S')}"
+        _conv_session_last_used = now
+        logger.info(f"New conversation session: {_conv_session_name}")
+        return _conv_session_name, True
+    _conv_session_last_used = now
+    return _conv_session_name, False
+
+
+# ============================================================================
+# Initialization
+# ============================================================================
+
+def init_databases():
+    """Ensure learning databases are initialised. Direct call, no subprocess."""
+    db.init_databases()
+
+
+# ============================================================================
+# Action Execution (direct calls, no subprocess)
+# ============================================================================
+
+async def execute_action(action_data: dict) -> str:
+    """Execute a parsed LLM action. Returns a prefixed output string.
+    Fetch actions return FETCH: prefix; everything else returns REPLY:.
+    On unknown-action errors, attempts repair via sub-agent (see DEVNOTES.md §2.2)."""
+    action = action_data.get("action", "").lower().strip()
+    params = action_data.get("params", {})
+    message = action_data.get("message", "")
+
+    # Defensive: if LLM put params at top level instead of in "params" dict,
+    # recover them. See DEVNOTES.md §1.1 / §1.2 — this is a recurring LLM bug.
+    if not params and action:
+        reserved = {'action', 'params', 'message'}
+        flat_params = {k: v for k, v in action_data.items() if k not in reserved}
+        if flat_params:
+            params = flat_params
+            logger.warning(f"Recovered flat params for '{action}': {list(flat_params.keys())}")
+
+    if action == "fetch":
+        msg_type, result = tools.execute_action(action, params)
+        if msg_type == 'fetch':
+            return f"FETCH: {json.dumps(result, default=str)}"
+        return f"REPLY: {result}"
+
+    msg_type, result = tools.execute_action(action, params)
+
+    # Repair sub-agent: if unknown action, try to fix via kimi session
+    if msg_type == 'error' and 'Unknown action' in str(result):
+        repaired = await repair_action(action_data)
+        if repaired:
+            r_action = repaired.get("action", "").lower().strip()
+            r_params = repaired.get("params", {})
+            r_message = repaired.get("message", message)
+            if not r_params and r_action:
+                reserved = {'action', 'params', 'message'}
+                r_flat = {k: v for k, v in repaired.items() if k not in reserved}
+                if r_flat:
+                    r_params = r_flat
+            msg_type, result = tools.execute_action(r_action, r_params)
+            if msg_type != 'error':
+                message = r_message
+
+    # Clear active concept after a successful assess (quiz cycle complete)
+    if action == 'assess' and msg_type != 'error':
+        db.set_session('active_concept_id', None)
+
+    if msg_type == 'error':
+        return f"REPLY: ⚠️ {result}"
+
+    if message:
+        return f"REPLY: {message}"
+    return f"REPLY: {result}"
+
+
+async def execute_llm_response(user_input: str, llm_response: str,
+                               mode: str = "command") -> str:
+    """Parse and execute an LLM response, save chat history."""
+    prefix, message, action_data = parse_llm_response(llm_response)
+
+    if action_data:
+        result = await execute_action(action_data)
+        history_msg = result
+        for pfx in ("REPLY: ", "FETCH: "):
+            if history_msg.startswith(pfx):
+                history_msg = history_msg[len(pfx):]
+                break
+    elif prefix in ("REPLY", "ASK", "REMINDER", "REVIEW"):
+        result = f"{prefix}: {message}"
+        history_msg = message
+    else:
+        result = f"REPLY: {message}"
+        history_msg = message
+
+    if user_input:
+        db.add_chat_message('user', user_input)
+    if history_msg:
+        db.add_chat_message('assistant', history_msg)
+
+    return result
+
+
+# ============================================================================
+# LLM Calls
+# ============================================================================
+
+async def _call_llm(mode: str, text: str, author: str,
+                    extra_context: str = "",
+                    session: str | None = None) -> str:
+    """Build prompt with dynamic context, call the configured LLM provider.
+    Returns the raw LLM response string."""
+    provider = get_provider()
+
+    dynamic_context = ctx.build_prompt_context(text, mode)
+
+    prompt = (
+        f"{dynamic_context}\n\n"
+        f"IMPORTANT — the user said: \"{text}\"\n"
+        f"Process this request RIGHT NOW using the response format from AGENTS.md "
+        f"(JSON action block, FETCH action, ASK:, or REPLY:). Do not describe your instructions."
+    )
+
+    if extra_context:
+        prompt += f"\n\n{extra_context}"
+
+    logger.info(
+        f"{author}: '{text[:50]}...' — calling LLM "
+        f"(prompt: {len(prompt)} chars{', session=' + session if session else ''})"
+    )
+
+    system_prompt = _get_system_prompt()
+
+    raw = await provider.send(
+        prompt,
+        session=session,
+        system_prompt=system_prompt,
+        timeout=config.COMMAND_TIMEOUT,
+    )
+
+    logger.debug(f"Raw LLM output length: {len(raw)}")
+
+    extracted = extract_llm_action(raw)
+    logger.debug(f"Extracted: {extracted[:300]!r}")
+
+    return extracted
+
+
+async def _call_llm_followup(session: str, fetch_data: str,
+                             text: str, author: str) -> str:
+    """Lightweight follow-up call within a fetch loop session.
+    See DEVNOTES.md §2.3."""
+    provider = get_provider()
+
+    prompt = (
+        f"Here is the data you requested:\n\n"
+        f"{fetch_data}\n\n"
+        f"Now process the original request: \"{text}\"\n"
+        f"Respond with a JSON action, FETCH for more data, ASK:, or REPLY:."
+    )
+
+    logger.info(
+        f"{author}: '{text[:50]}...' — fetch follow-up "
+        f"(prompt: {len(prompt)} chars, session={session})"
+    )
+
+    # system_prompt passed for stateless providers; session-based ones ignore it
+    system_prompt = _get_system_prompt()
+
+    raw = await provider.send(
+        prompt,
+        session=session,
+        system_prompt=system_prompt,
+        timeout=config.COMMAND_TIMEOUT,
+    )
+
+    logger.debug(f"Raw LLM output length: {len(raw)}")
+
+    extracted = extract_llm_action(raw)
+    logger.debug(f"Extracted: {extracted[:300]!r}")
+
+    return extracted
+
+
+# ============================================================================
+# Fetch Loop
+# ============================================================================
+
+async def call_with_fetch_loop(mode: str, text: str, author: str) -> str:
+    """
+    Main entry point for LLM calls. Implements the fetch loop:
+      1. Call LLM with lightweight context (reuse conversation session)
+      2. If LLM responds with a fetch action → execute directly → follow-up in session
+      3. Repeat up to MAX_FETCH_ITERATIONS times
+      4. Return the final non-fetch LLM response
+    """
+    extra_context = ""
+    session, is_new = _get_conv_session()
+
+    for iteration in range(MAX_FETCH_ITERATIONS + 1):
+        try:
+            if iteration == 0:
+                llm_response = await _call_llm(
+                    mode, text, author, extra_context=extra_context,
+                    session=session
+                )
+            else:
+                llm_response = await _call_llm_followup(
+                    session=session,
+                    fetch_data=extra_context,
+                    text=text,
+                    author=author,
+                )
+        except LLMError as exc:
+            logger.error(f"LLM call failed: {exc} (retryable={exc.retryable})")
+            if exc.retryable:
+                return "REPLY: ⚠️ LLM temporarily unavailable. Please try again."
+            return f"REPLY: ⚠️ LLM configuration error: {exc}"
+
+        if not llm_response:
+            return "REPLY: I didn't get a response. Could you try again?"
+
+        fetch_params = extract_fetch_params(llm_response)
+
+        if fetch_params and iteration < MAX_FETCH_ITERATIONS:
+            logger.info(f"Fetch loop iteration {iteration + 1}: {fetch_params}")
+
+            if 'concept_id' in fetch_params:
+                db.set_session('active_concept_id',
+                               str(fetch_params['concept_id']))
+
+            msg_type, fetch_data = tools.execute_action('fetch', fetch_params)
+
+            if msg_type == 'fetch':
+                formatted = ctx.format_fetch_result(fetch_data)
+            else:
+                formatted = f"## Fetch Error\n{fetch_data}"
+
+            extra_context += f"\n\n{formatted}"
+            continue
+
+        return llm_response
+
+    return llm_response
+
+
+# ============================================================================
+# Direct Mode Handlers (no subprocess)
+# ============================================================================
+
+def handle_review_check() -> list[str]:
+    """Find due concepts and return REVIEW payload strings."""
+    due = db.get_due_concepts(limit=5)
+    if not due:
+        return []
+
+    concept = due[0]
+    detail = db.get_concept_detail(concept['id'])
+    if not detail:
+        return []
+
+    topic_names = [t['title'] for t in detail.get('topics', [])]
+    recent_reviews = detail.get('recent_reviews', [])
+    remarks = detail.get('remarks', [])
+
+    context_parts = [
+        f"Concept: {detail['title']} (#{detail['id']})",
+        f"Description: {detail.get('description', 'N/A')}",
+        f"Topics: {', '.join(topic_names) if topic_names else 'untagged'}",
+        f"Score: {detail['mastery_level']}/100, "
+        f"Reviews: {detail['review_count']}",
+    ]
+
+    if remarks:
+        latest = remarks[0]['content'][:100]
+        context_parts.append(f"Latest remark: {latest}")
+
+    if recent_reviews:
+        last = recent_reviews[0]
+        context_parts.append(f"Last Q: {last.get('question_asked', 'N/A')}")
+        context_parts.append(f"Last quality: {last.get('quality', 'N/A')}/5")
+
+    context_str = " | ".join(context_parts)
+    lines = [f"{concept['id']}|{context_str}"]
+
+    if len(due) > 1:
+        logger.info(f"{len(due) - 1} more concept(s) due for review")
+
+    return lines
+
+
+def handle_maintenance() -> str | None:
+    """Run DB diagnostics and return diagnostic context string.
+    Returns None if no issues found."""
+    maint_context = ctx.build_maintenance_context()
+
+    if "No issues found" in maint_context:
+        return None
+
+    return maint_context
+
+
+async def call_maintenance_loop(diagnostic_context: str) -> str:
+    """Run the maintenance LLM in a loop, executing up to MAX_MAINTENANCE_ACTIONS.
+
+    Each iteration:
+      1. call_with_fetch_loop → LLM response (may include its own fetch sub-loop)
+      2. If LLM returns an action → execute it, record result, loop back
+      3. If LLM returns REPLY/ASK → done, return the final summary
+
+    The LLM's final REPLY becomes the user-facing maintenance report.
+    """
+    actions_taken = []
+    text = (
+        f"[MAINTENANCE] Triage these DB issues and fix what you can.\n\n"
+        f"{diagnostic_context}\n\n"
+        f"You may execute up to {MAX_MAINTENANCE_ACTIONS} actions this run. "
+        f"Output one JSON action at a time. After each, you'll see the result "
+        f"and can output another action or a final REPLY: summary."
+    )
+
+    for action_num in range(MAX_MAINTENANCE_ACTIONS):
+        llm_response = await call_with_fetch_loop(
+            mode="command",
+            text=text,
+            author="maintenance_agent",
+        )
+
+        prefix, message, action_data = parse_llm_response(llm_response)
+
+        if not action_data:
+            # LLM is done — returned a REPLY/ASK summary
+            final_msg = message or ""
+            # Prepend action summary if any actions were taken
+            if actions_taken:
+                action_summary = "\n".join(
+                    f"{i+1}. {a}" for i, a in enumerate(actions_taken)
+                )
+                final_msg = (
+                    f"**Actions taken ({len(actions_taken)}):**\n"
+                    f"{action_summary}\n\n{final_msg}"
+                )
+            return f"REPLY: {final_msg}"
+
+        # Execute the action
+        result = await execute_action(action_data)
+        action_name = action_data.get('action', 'unknown')
+        action_msg = action_data.get('message', '')
+
+        # Strip prefix from result for logging
+        result_clean = result
+        for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
+            if result_clean.startswith(pfx):
+                result_clean = result_clean[len(pfx):]
+                break
+
+        is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
+        status = "\u274c" if is_error else "\u2705"
+        actions_taken.append(f"{status} `{action_name}` — {action_msg[:80]}")
+
+        logger.info(
+            f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
+            f"{action_name} → {'error' if is_error else 'ok'}"
+        )
+
+        # Build continuation prompt with results so far
+        action_log = "\n".join(
+            f"{i+1}. {a}" for i, a in enumerate(actions_taken)
+        )
+        text = (
+            f"[MAINTENANCE continuation] Actions taken so far:\n{action_log}\n\n"
+            f"Original diagnostic report:\n{diagnostic_context[:1500]}\n\n"
+            f"You have {MAX_MAINTENANCE_ACTIONS - action_num - 1} action(s) remaining. "
+            f"Output the next JSON action, or REPLY: with a summary if you're done."
+        )
+
+    # Exhausted all action slots — ask LLM for final summary
+    text = (
+        f"[MAINTENANCE final] You've used all {MAX_MAINTENANCE_ACTIONS} actions:\n"
+        + "\n".join(f"{i+1}. {a}" for i, a in enumerate(actions_taken))
+        + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
+    )
+    llm_response = await call_with_fetch_loop(
+        mode="command", text=text, author="maintenance_agent"
+    )
+    _prefix, message, _action_data = parse_llm_response(llm_response)
+
+    action_summary = "\n".join(
+        f"{i+1}. {a}" for i, a in enumerate(actions_taken)
+    )
+    final_msg = (
+        f"**Actions taken ({len(actions_taken)}):**\n"
+        f"{action_summary}\n\n{message or ''}"
+    )
+    return f"REPLY: {final_msg}"
