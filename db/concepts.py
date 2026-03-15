@@ -188,6 +188,33 @@ def get_due_concepts(limit: int = 10) -> List[Dict]:
     return results
 
 
+def get_next_review_concept() -> Optional[Dict]:
+    """Get the single concept with the nearest next_review_at, regardless
+    of whether it's overdue or upcoming. Returns None if no concepts have
+    a scheduled review."""
+    conn = _conn()
+    row = conn.execute("""
+        SELECT c.*,
+               (SELECT content FROM concept_remarks
+                WHERE concept_id = c.id ORDER BY id DESC LIMIT 1) as latest_remark,
+               GROUP_CONCAT(ct.topic_id) as topic_id_list
+        FROM concepts c
+        LEFT JOIN concept_topics ct ON c.id = ct.concept_id
+        WHERE c.next_review_at IS NOT NULL
+        GROUP BY c.id
+        ORDER BY c.next_review_at ASC
+        LIMIT 1
+    """).fetchone()
+    conn.close()
+
+    if not row:
+        return None
+    d = dict(row)
+    tid_str = d.pop('topic_id_list', None)
+    d['topic_ids'] = [int(x) for x in tid_str.split(',')] if tid_str else []
+    return d
+
+
 def get_all_concepts_summary() -> List[Dict]:
     """Get all concepts with title, description, review count, and topic names.
     Lightweight query used by the dedup agent."""

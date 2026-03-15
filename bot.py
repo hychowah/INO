@@ -44,7 +44,7 @@ import config
 import db
 from services import pipeline, scheduler, state
 from services.parser import parse_llm_response
-from services.views import AddConceptConfirmView
+from services.views import AddConceptConfirmView, QuizNavigationView
 
 # ============================================================================
 # PENDING ADD-CONCEPT TRACKING
@@ -156,7 +156,8 @@ async def learn_command(ctx, *, text: str = ""):
 
     try:
         async with ctx.channel.typing():
-            response, pending_action = await _handle_user_message(text or "hello", str(ctx.author))
+            response, pending_action, assess_meta = await _handle_user_message(
+                text or "hello", str(ctx.author))
 
         if pending_action:
             view = AddConceptConfirmView(pending_action)
@@ -166,6 +167,17 @@ async def learn_command(ctx, *, text: str = ""):
                 sent = await ctx.send(response, view=view)
             _pending_concepts[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+        elif assess_meta:
+            view = QuizNavigationView(
+                concept_id=assess_meta['concept_id'],
+                quality=assess_meta['quality'],
+                message_handler=_handle_user_message,
+            )
+            if is_interaction:
+                await ctx.interaction.followup.send(
+                    response[:config.MAX_MESSAGE_LENGTH], view=view)
+            else:
+                await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
         else:
             await send_long(ctx, response)
     except Exception as e:
@@ -349,7 +361,7 @@ async def review_command(ctx):
 
     review_lines = pipeline.handle_review_check()
     if not review_lines:
-        msg = "✅ No concepts due for review right now!"
+        msg = "✅ No concepts to review — add some topics first!"
         if is_interaction:
             await ctx.interaction.followup.send(msg)
         else:
@@ -360,24 +372,27 @@ async def review_command(ctx):
     try:
         review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
         async with ctx.channel.typing():
-            llm_response = await pipeline.call_with_fetch_loop(
-                mode="reply",
-                text=review_text,
-                author=str(ctx.author),
-            )
+            response, _pending, assess_meta = await _handle_user_message(
+                review_text, str(ctx.author))
 
-        # Parse action JSON and extract human-readable message
-        final_result = await pipeline.execute_llm_response(
-            review_text, llm_response, "reply"
-        )
-        _msg_type, message = pipeline.process_output(final_result)
-
-        if message and message.strip():
-            response = f"📚 **Learning Review**\n{message}"
-        else:
+        if not response or not response.strip():
             response = "Could not generate a review quiz. Try again?"
+        else:
+            response = f"📚 **Learning Review**\n{response}"
 
-        await send_long(ctx, response)
+        if assess_meta:
+            view = QuizNavigationView(
+                concept_id=assess_meta['concept_id'],
+                quality=assess_meta['quality'],
+                message_handler=_handle_user_message,
+            )
+            if is_interaction:
+                await ctx.interaction.followup.send(
+                    response[:config.MAX_MESSAGE_LENGTH], view=view)
+            else:
+                await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
+        else:
+            await send_long(ctx, response)
     except Exception as e:
         logger.error(f"review_command error: {e}", exc_info=True)
         msg = f"Error: `{e}`"
@@ -399,12 +414,15 @@ def _ensure_db():
 # CORE HANDLER
 # ============================================================================
 
-async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None]:
-    """Core handler: text in → (response, pending_action | None).
+async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None, dict | None]:
+    """Core handler: text in → (response, pending_action | None, assess_meta | None).
 
-    If the LLM wants to add_concept, the action is NOT executed here.
-    Instead the raw action_data is returned so the caller can attach
-    an AddConceptConfirmView to the Discord message.
+    If the LLM wants to add_concept (and this is not a button callback),
+    the action is NOT executed — raw action_data is returned so the caller
+    can attach an AddConceptConfirmView.
+
+    If the action was a successful assess, assess_meta is returned with
+    concept_id and quality so the caller can attach QuizNavigationView.
     """
     _ensure_db()
     state.last_activity_at = datetime.now()
@@ -414,9 +432,11 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
         "command", text, author
     )
 
-    # --- intercept add_concept before execution ---
+    # --- intercept add_concept before execution (skip for button callbacks) ---
     prefix, message, action_data = parse_llm_response(llm_response)
-    if action_data and action_data.get('action', '').lower().strip() == 'add_concept':
+    if (action_data
+            and action_data.get('action', '').lower().strip() == 'add_concept'
+            and not text.startswith('[BUTTON]')):
         # Save chat history (message only, concept not created yet)
         if text:
             db.add_chat_message('user', text)
@@ -424,7 +444,7 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
         if display_msg:
             db.add_chat_message('assistant', display_msg)
         logger.info(f"Intercepted add_concept — pending user confirmation")
-        return display_msg, action_data
+        return display_msg, action_data, None
 
     # All other actions: execute normally
     final_result = await pipeline.execute_llm_response(text, llm_response, "command")
@@ -433,7 +453,21 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
 
     msg_type, msg = pipeline.process_output(final_result)
     logger.info(f"Completed: '{text[:50]}' → {msg_type}")
-    return msg, None
+
+    # Detect successful assess → populate metadata for QuizNavigationView
+    assess_meta = None
+    if (action_data
+            and action_data.get('action', '').lower().strip() == 'assess'
+            and '⚠️' not in (msg or '')):
+        cid = db.get_session('last_assess_concept_id')
+        quality = db.get_session('last_assess_quality')
+        if cid and quality:
+            assess_meta = {
+                'concept_id': int(cid),
+                'quality': int(quality),
+            }
+
+    return msg, None, assess_meta
 
 
 # ============================================================================
@@ -556,7 +590,8 @@ async def on_message(message):
     # Route every plain message through the learning pipeline
     try:
         async with message.channel.typing():
-            response, pending_action = await _handle_user_message(text, str(message.author))
+            response, pending_action, assess_meta = await _handle_user_message(
+                text, str(message.author))
 
         if not response or not response.strip():
             response = "(empty response)"
@@ -567,6 +602,14 @@ async def on_message(message):
             sent = await message.reply(response[:config.MAX_MESSAGE_LENGTH], view=view)
             _pending_concepts[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+        elif assess_meta:
+            # Show assessment feedback + quiz navigation buttons
+            view = QuizNavigationView(
+                concept_id=assess_meta['concept_id'],
+                quality=assess_meta['quality'],
+                message_handler=_handle_user_message,
+            )
+            await message.reply(response[:config.MAX_MESSAGE_LENGTH], view=view)
         else:
             # Send, handling Discord's 2000-char limit
             while response:

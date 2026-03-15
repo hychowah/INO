@@ -273,6 +273,9 @@ async def _loop():
     maint_every_n_cycles = max(1, int((maint_interval * 60) / interval))
 
     while not _bot.is_closed():
+        # Delay first cycle to avoid racing with commands typed at startup
+        if review_cycle == 0:
+            await asyncio.sleep(30)
         review_cycle += 1
         maint_counter += 1
         logger.debug(f"Review cycle #{review_cycle}")

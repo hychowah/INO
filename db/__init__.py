@@ -31,7 +31,7 @@ from db.topics import (
 from db.concepts import (
     add_concept, get_concept, update_concept, delete_concept,
     link_concept, unlink_concept,
-    get_concepts_for_topic, get_due_concepts,
+    get_concepts_for_topic, get_due_concepts, get_next_review_concept,
     get_all_concepts_summary, get_all_concepts_with_topics,
     search_concepts,
     get_concept_detail,

@@ -167,7 +167,7 @@ async def execute_llm_response(user_input: str, llm_response: str,
         result = f"REPLY: {message}"
         history_msg = message
 
-    if user_input:
+    if user_input and not user_input.startswith('[BUTTON]'):
         db.add_chat_message('user', user_input)
     if history_msg:
         db.add_chat_message('assistant', history_msg)
@@ -327,12 +327,16 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
 # ============================================================================
 
 def handle_review_check() -> list[str]:
-    """Find due concepts and return REVIEW payload strings."""
+    """Find due concepts and return REVIEW payload strings.
+    Falls back to the nearest upcoming concept if nothing is overdue."""
     due = db.get_due_concepts(limit=5)
-    if not due:
-        return []
-
-    concept = due[0]
+    if due:
+        concept = due[0]
+    else:
+        # Nothing overdue — fall back to the next upcoming concept
+        concept = db.get_next_review_concept()
+        if not concept:
+            return []
     detail = db.get_concept_detail(concept['id'])
     if not detail:
         return []

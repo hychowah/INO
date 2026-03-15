@@ -350,7 +350,7 @@ class AddConceptConfirmView(discord.ui.View):
     buttons are appended to that same message.
     """
 
-    def __init__(self, action_data: dict, on_resolved: callable | None = None):
+    def __init__(self, action_data: dict, on_resolved: Callable | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.action_data = action_data
         self.decided = False
@@ -407,3 +407,195 @@ class AddConceptConfirmView(discord.ui.View):
         self._disable_all()
         if self.on_resolved:
             self.on_resolved()
+
+
+# ============================================================================
+# Quiz navigation view (post-assessment buttons)
+# ============================================================================
+
+class QuizNavigationView(discord.ui.View):
+    """Buttons shown after a quiz assessment: continue, explain, or stop.
+
+    Visual hierarchy swaps based on quality:
+      - quality >= 3 (correct): "Next due" primary, "Quiz again" secondary
+      - quality <= 2 (wrong):   "Explain" primary, "Quiz again" secondary
+
+    The message_handler callable avoids a circular import with bot.py.
+    It must have signature: async (str, str) -> tuple[str, dict|None, dict|None]
+    """
+
+    def __init__(self, concept_id: int, quality: int,
+                 message_handler: Callable[..., Awaitable]):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.concept_id = concept_id
+        self.quality = quality
+        self.message_handler = message_handler
+        self.clicked = False
+
+        if quality >= 3:
+            # Correct: emphasize "Next due", secondary "Quiz again"
+            self.add_item(_QuizNextDueButton(self, style=discord.ButtonStyle.primary))
+            self.add_item(_QuizAgainButton(self, style=discord.ButtonStyle.secondary))
+        else:
+            # Wrong: emphasize "Explain", secondary "Quiz again", then "Next due"
+            self.add_item(_QuizExplainButton(self, style=discord.ButtonStyle.primary))
+            self.add_item(_QuizAgainButton(self, style=discord.ButtonStyle.secondary))
+            self.add_item(_QuizNextDueButton(self, style=discord.ButtonStyle.secondary))
+
+        # "Done" always present, always secondary
+        self.add_item(_QuizDoneButton(self))
+
+    def _disable_all(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    async def on_timeout(self):
+        self._disable_all()
+
+
+class _QuizAgainButton(discord.ui.Button):
+    """Quiz the same concept again."""
+
+    def __init__(self, parent_view: QuizNavigationView,
+                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+        super().__init__(label="Quiz again", emoji="🔄", style=style, row=0)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.clicked:
+            return
+        self.parent_view.clicked = True
+        self.parent_view._disable_all()
+        await interaction.response.edit_message(view=self.parent_view)
+
+        concept = db.get_concept(self.parent_view.concept_id)
+        title = concept['title'] if concept else f'#{self.parent_view.concept_id}'
+        text = f"[BUTTON] Quiz me again on concept #{self.parent_view.concept_id} ({title})"
+
+        try:
+            async with interaction.channel.typing():
+                response, _, _ = await self.parent_view.message_handler(
+                    text, str(interaction.user))
+            await _send_quiz_response(interaction, response, self.parent_view.message_handler)
+        except Exception as e:
+            logger.error(f"QuizAgain callback error: {e}", exc_info=True)
+            try:
+                await interaction.followup.send(f"⚠️ Error: {e}")
+            except discord.errors.NotFound:
+                pass
+        self.parent_view.stop()
+
+
+class _QuizNextDueButton(discord.ui.Button):
+    """Quiz the next concept that's due for review."""
+
+    def __init__(self, parent_view: QuizNavigationView,
+                 style: discord.ButtonStyle = discord.ButtonStyle.primary):
+        super().__init__(label="Next due", emoji="⏭️", style=style, row=0)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.clicked:
+            return
+        self.parent_view.clicked = True
+        self.parent_view._disable_all()
+        await interaction.response.edit_message(view=self.parent_view)
+
+        text = "[BUTTON] Quiz me on the next due concept"
+        try:
+            async with interaction.channel.typing():
+                response, _, _ = await self.parent_view.message_handler(
+                    text, str(interaction.user))
+            await _send_quiz_response(interaction, response, self.parent_view.message_handler)
+        except Exception as e:
+            logger.error(f"QuizNextDue callback error: {e}", exc_info=True)
+            try:
+                await interaction.followup.send(f"⚠️ Error: {e}")
+            except discord.errors.NotFound:
+                pass
+        self.parent_view.stop()
+
+
+class _QuizExplainButton(discord.ui.Button):
+    """Explain the concept (shown only when quality <= 2)."""
+
+    def __init__(self, parent_view: QuizNavigationView,
+                 style: discord.ButtonStyle = discord.ButtonStyle.primary):
+        super().__init__(label="Explain", emoji="💡", style=style, row=0)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.clicked:
+            return
+        self.parent_view.clicked = True
+        self.parent_view._disable_all()
+        await interaction.response.edit_message(view=self.parent_view)
+
+        concept = db.get_concept(self.parent_view.concept_id)
+        title = concept['title'] if concept else f'#{self.parent_view.concept_id}'
+        text = (f"[BUTTON] Explain concept #{self.parent_view.concept_id} ({title}) "
+                f"in detail — I got the quiz wrong and need help understanding it")
+
+        try:
+            async with interaction.channel.typing():
+                response, _, _ = await self.parent_view.message_handler(
+                    text, str(interaction.user))
+            # Explain is not an assess, so send plain (no nav buttons)
+            await interaction.followup.send(
+                (response or "(no explanation generated)")[:2000])
+        except Exception as e:
+            logger.error(f"QuizExplain callback error: {e}", exc_info=True)
+            try:
+                await interaction.followup.send(f"⚠️ Error: {e}")
+            except discord.errors.NotFound:
+                pass
+        self.parent_view.stop()
+
+
+class _QuizDoneButton(discord.ui.Button):
+    """End the quiz session."""
+
+    def __init__(self, parent_view: QuizNavigationView):
+        super().__init__(label="Done", emoji="✋",
+                         style=discord.ButtonStyle.secondary, row=0)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.clicked:
+            return
+        self.parent_view.clicked = True
+        self.parent_view._disable_all()
+        original = interaction.message.content or ""
+        try:
+            await interaction.response.edit_message(
+                content=original + "\n\n✋ Quiz session ended.",
+                view=self.parent_view)
+        except discord.errors.NotFound:
+            pass
+        self.parent_view.stop()
+
+
+async def _send_quiz_response(interaction: discord.Interaction,
+                              response: str,
+                              message_handler: Callable[..., Awaitable]) -> None:
+    """Send the LLM response from a quiz button click.
+
+    If the LLM just did another assess (recursive quiz chain), attach a new
+    QuizNavigationView to the response. Otherwise send plain text.
+    """
+    if not response or not response.strip():
+        response = "✅ No concepts due right now!"
+
+    # Check if this response itself was an assess (for recursive button chaining)
+    assess_cid = db.get_session('last_assess_concept_id')
+    assess_q = db.get_session('last_assess_quality')
+
+    # The session values are set by _handle_assess — but we only use them
+    # if the LLM response looks like it came from an assess (heuristic: the
+    # response was generated from a quiz-me button, so if session has fresh
+    # values, it's likely another assess completed). In practice, the LLM
+    # will return a quiz question (not assess) from these buttons, so this
+    # is a safety net for unusual flows.
+    # For now, send plain — buttons reappear on the *next* assess naturally.
+    await interaction.followup.send(response[:2000])

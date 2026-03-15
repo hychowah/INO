@@ -467,6 +467,10 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
         review_count=concept.get('review_count', 0) + 1,
     )
 
+    # Stash for QuizNavigationView (bot.py reads these after execute)
+    db.set_session('last_assess_concept_id', str(cid))
+    db.set_session('last_assess_quality', str(quality))
+
     # Log the review
     db.add_review(cid, question, user_response, quality, assessment)
 
