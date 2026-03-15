@@ -18,7 +18,10 @@ def add_concept(title: str, description: Optional[str] = None,
                 next_review_at: Optional[str] = None) -> int:
     """Create a concept and optionally link it to topic(s).
     If next_review_at is None, defaults to tomorrow.
-    Returns the new concept ID."""
+    Returns the new concept ID.
+
+    # TODO: Phase 3 — accept user_id, validate topic ownership before cross-table links
+    """
     conn = _conn()
     now = _now_iso()
 

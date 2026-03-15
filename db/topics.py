@@ -82,7 +82,10 @@ def delete_topic(topic_id: int) -> bool:
 
 
 def link_topics(parent_id: int, child_id: int) -> bool:
-    """Create a parent→child edge between two topics. Returns True on success."""
+    """Create a parent→child edge between two topics. Returns True on success.
+
+    # TODO: Phase 3 — accept user_id, validate ownership before cross-table links
+    """
     if parent_id == child_id:
         return False
     conn = _conn()

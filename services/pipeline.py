@@ -249,13 +249,17 @@ async def _call_llm_followup(session: str, fetch_data: str,
 # Fetch Loop
 # ============================================================================
 
-async def call_with_fetch_loop(mode: str, text: str, author: str) -> str:
+async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str = "default") -> str:
     """
     Main entry point for LLM calls. Implements the fetch loop:
       1. Call LLM with lightweight context (reuse conversation session)
       2. If LLM responds with a fetch action → execute directly → follow-up in session
       3. Repeat up to MAX_FETCH_ITERATIONS times
       4. Return the final non-fetch LLM response
+
+    Args:
+        user_id: User identifier for multi-user support. Currently unused
+                 (all data is global). Will be threaded to DB queries in Phase 3.
     """
     extra_context = ""
     session, is_new = _get_conv_session()
@@ -363,7 +367,7 @@ def handle_maintenance() -> str | None:
     return maint_context
 
 
-async def call_maintenance_loop(diagnostic_context: str) -> str:
+async def call_maintenance_loop(diagnostic_context: str, user_id: str = "default") -> str:
     """Run the maintenance LLM in a loop, executing up to MAX_MAINTENANCE_ACTIONS.
 
     Each iteration:
@@ -372,6 +376,9 @@ async def call_maintenance_loop(diagnostic_context: str) -> str:
       3. If LLM returns REPLY/ASK → done, return the final summary
 
     The LLM's final REPLY becomes the user-facing maintenance report.
+
+    Args:
+        user_id: User identifier for multi-user support. Currently unused.
     """
     actions_taken = []
     text = (
@@ -387,6 +394,7 @@ async def call_maintenance_loop(diagnostic_context: str) -> str:
             mode="command",
             text=text,
             author="maintenance_agent",
+            # TODO: Phase 3 — forward user_id for multi-user scoping
         )
 
         prefix, message, action_data = parse_llm_response(llm_response)
@@ -443,6 +451,7 @@ async def call_maintenance_loop(diagnostic_context: str) -> str:
         + "\n".join(f"{i+1}. {a}" for i, a in enumerate(actions_taken))
         + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
     )
+    # TODO: Phase 3 — forward user_id for multi-user scoping
     llm_response = await call_with_fetch_loop(
         mode="command", text=text, author="maintenance_agent"
     )

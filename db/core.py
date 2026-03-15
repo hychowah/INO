@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 # ============================================================================
@@ -127,6 +127,8 @@ def _init_chat_db():
         CREATE INDEX IF NOT EXISTS idx_conversations_lookup
         ON conversations(session_id, timestamp DESC);
 
+        -- TODO: Phase 3 — session_state PK is (key), needs user scoping
+        -- (prefix keys with user_id or rebuild as composite PK)
         CREATE TABLE IF NOT EXISTS session_state (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -158,9 +160,10 @@ def _set_schema_version(version: int):
     conn.close()
 
 
-def _has_column(table: str, column: str) -> bool:
-    """Check if a column exists in a table (safe for migrations)."""
-    conn = sqlite3.connect(KNOWLEDGE_DB)
+def _has_column(table: str, column: str, db_path=None) -> bool:
+    """Check if a column exists in a table (safe for migrations).
+    Uses KNOWLEDGE_DB by default; pass db_path for other databases."""
+    conn = sqlite3.connect(db_path or KNOWLEDGE_DB)
     cursor = conn.execute(f"PRAGMA table_info({table})")
     columns = [row[1] for row in cursor.fetchall()]
     conn.close()
@@ -298,6 +301,26 @@ def _run_migrations():
         conn.commit()
         conn.close()
         print("[LEARN DB] Migration 4: Score-based review system (0-100)")
+
+    # --- Migration 5: Add user_id columns for multi-user prep ---
+    if current < 5:
+        # knowledge.db tables
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        for table in ('topics', 'concepts', 'review_log', 'concept_remarks'):
+            if not _has_column(table, 'user_id'):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT DEFAULT 'default'")
+                conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON {table}(user_id)")
+        conn.commit()
+        conn.close()
+
+        # chat_history.db tables
+        chat_conn = sqlite3.connect(CHAT_DB)
+        if not _has_column('conversations', 'user_id', db_path=CHAT_DB):
+            chat_conn.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT 'default'")
+            chat_conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)")
+        chat_conn.commit()
+        chat_conn.close()
+        print("[LEARN DB] Migration 5: Added user_id columns for multi-user prep")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")
