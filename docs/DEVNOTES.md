@@ -17,6 +17,7 @@
 3. [Score-Based Review System](#3-score-based-review-system)
 4. [Codebase Restructuring for LLM Dev Scalability](#4-codebase-restructuring-for-llm-dev-scalability)
 5. [FastAPI Backend & Project Restructuring](#5-fastapi-backend--project-restructuring)
+6. [Concept/Topic ID Confusion After add_concept Confirmation](#6-concepttopic-id-confusion-after-add_concept-confirmation)
 
 ---
 
@@ -430,3 +431,32 @@ Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or an
 
 ### 7.6 Architecture note
 `api.py` (FastAPI) is unaffected — it returns raw JSON with no character limit. The React Native app (PLAN.md Phase 3) will handle its own display constraints client-side. The truncation helpers live in `services/formatting.py` (pure string ops, no discord.py dependency) so they can be reused for future mobile push notification truncation (FCM has its own limits).
+
+---
+
+## 6. Concept/Topic ID Confusion After add_concept Confirmation
+
+### 6.1 Concept_id lost after button confirmation → "Concept #35 not found"
+**Date:** 2026-03-16
+
+**Symptom:** User asked about Python GIL → LLM created concept #70 under auto-created topic "Python" (#35). User confirmed via button. On follow-up question, bot replied "⚠️ Concept #35 not found" — it used the topic ID (35) instead of the concept ID (70).
+
+**Root cause (two layers):**
+
+1. **Primary — concept_id never persisted after confirmation.** When the user clicks "Add concept" (button in `views.py`) or replies "yes" (text handler in `bot.py`), `execute_action` creates the concept and returns a result string containing `#70`. But neither handler saved the concept_id to session state or chat history. The `"✅ Added concept #70..."` note was only appended to the Discord message via `edit_message()` — the LLM never saw it.
+
+2. **Secondary — ambiguous ID format in Knowledge Map.** Topics and concepts both used bare `[N]` bracket format: `[35] Python` (topic) and `[70] GIL` (concept). With no type prefix, the LLM confused the only visible ID `[35]` (the topic) for a concept_id.
+
+**Fix (three layers):**
+
+1. **Session stash in `_handle_add_concept` (tools.py):** After `db.add_concept()`, stash `db.set_session('last_added_concept_id', str(concept_id))`. Follows the same pattern as `_handle_assess` which stashes `last_assess_concept_id`. Uses a separate key (`last_added_concept_id`) instead of reusing `active_concept_id` — the latter powers the "Active Quiz Context" section and would mislead the LLM into thinking there's an active quiz.
+
+2. **Chat history persistence (views.py + bot.py):** After successful `execute_action`, save `[confirmed: add concept]` (user) and `✅ {result}` (assistant) to chat history. Also save `[declined: add concept]` on decline. This ensures the LLM sees the concept_id in its chat history on subsequent turns.
+
+3. **Type-prefixed IDs in context (context.py):** Changed all bracket IDs from `[N]` to `[topic:N]` or `[concept:N]` across 15+ locations (Knowledge Map, Due list, fetch results, maintenance diagnostics). Added matching note in AGENTS.md explaining the format. This makes ID confusion structurally impossible.
+
+**Why NOT reuse `active_concept_id`?** This key powers the "Active Quiz Context" section in `context.py` which tells the LLM: "Use this concept_id for `assess` actions." Setting it after *creation* (not quiz) would mislead the LLM into attempting phantom assessments. It also wouldn't be cleared until the next `assess`, persisting across many turns.
+
+**Why NOT regex-parse the result string?** The result from `_handle_add_concept` contains multiple `#N` patterns (concept and topic IDs): `"Added concept **GIL** (#70) under Python (auto-created topic: 'Python' (#35))"`. Regex `r'#(\d+)'` happens to grab `#70` first, but this is fragile — if the format changes, it silently grabs the wrong ID. The session stash approach is coupling-free.
+
+**Lesson:** When an action creates an entity whose ID is needed by a future turn, stash the ID in session state at creation time — don't rely on parsing it from formatted strings or hoping it appears in the LLM's context. Follow the existing stash pattern (`last_assess_concept_id`, `last_assess_quality`).

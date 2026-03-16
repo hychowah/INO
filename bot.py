@@ -284,7 +284,7 @@ async def due_command(ctx):
             remark = c.get('latest_remark', '')
             remark_str = f"\n  └ _{remark[:80]}_" if remark else ""
             lines.append(
-                f"• [{c['id']}] **{c['title']}** — score {c['mastery_level']}/100, "
+                f"• [concept:{c['id']}] **{c['title']}** — score {c['mastery_level']}/100, "
                 f"interval {c['interval_days']}d{remark_str}"
             )
     else:
@@ -642,6 +642,11 @@ async def on_message(message):
                 )
                 note = f"\n\n⚠️ Could not add concept: {result}" if msg_type == 'error' \
                     else f"\n\n✅ {result}"
+                if msg_type != 'error':
+                    # Persist confirmation to chat history so the LLM sees the
+                    # concept_id on subsequent turns
+                    db.add_chat_message('user', '[confirmed: add concept]')
+                    db.add_chat_message('assistant', f"✅ {result}")
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(
@@ -655,6 +660,8 @@ async def on_message(message):
             elif _is_negative(reply_text):
                 view.decided = True
                 view._disable_all()
+                # Record decline so the LLM doesn't re-suggest the same concept
+                db.add_chat_message('user', '[declined: add concept]')
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(view=view)

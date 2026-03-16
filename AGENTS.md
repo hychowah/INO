@@ -31,6 +31,8 @@ Each call is **stateless** — you get a fresh prompt every time with:
 5. The user's new message
 6. (Optional) Fetched data from a previous fetch action in this turn
 
+**ID format in context:** IDs are type-prefixed to avoid confusion — `[topic:N]` for topics, `[concept:N]` for concepts. When using `fetch`, `quiz`, `assess`, etc., pass only the numeric ID (e.g. `"topic_id": 3`, `"concept_id": 7`). Never confuse a topic ID for a concept ID — they are different entities.
+
 You read all of this, reason about intent, and respond with **one** structured output.
 
 ## Response Format

@@ -276,6 +276,9 @@ def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
         next_review_at=params.get('next_review_at'),
     )
 
+    # Stash for AddConceptConfirmView (views.py/bot.py read this after execute)
+    db.set_session('last_added_concept_id', str(concept_id))
+
     # Optional initial remark
     if params.get('remark'):
         db.add_remark(concept_id, params['remark'])

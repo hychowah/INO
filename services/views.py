@@ -375,6 +375,10 @@ class AddConceptConfirmView(discord.ui.View):
             note = f"\n\n⚠️ Could not add concept: {result}"
         else:
             note = f"\n\n✅ {result}"
+            # Persist confirmation to chat history so the LLM sees the
+            # concept_id on subsequent turns (fixes topic_id/concept_id confusion)
+            db.add_chat_message('user', '[confirmed: add concept]')
+            db.add_chat_message('assistant', f"✅ {result}")
 
         try:
             original = interaction.message.content or ""
@@ -392,6 +396,9 @@ class AddConceptConfirmView(discord.ui.View):
             return
         self.decided = True
         self._disable_all()
+
+        # Record decline so the LLM doesn't re-suggest the same concept
+        db.add_chat_message('user', '[declined: add concept]')
 
         try:
             original = interaction.message.content or ""

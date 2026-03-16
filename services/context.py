@@ -67,7 +67,7 @@ def build_lightweight_context(mode: str = "command") -> str:
                 remark = c.get('latest_remark', '')
                 remark_preview = f" | remark: {remark[:60]}" if remark else ""
                 parts.append(
-                    f"- [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+                    f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                     f"interval {c['interval_days']}d, "
                     f"reviews: {c['review_count']}, topics: {c.get('topic_ids', [])}{remark_preview})"
                 )
@@ -79,12 +79,12 @@ def build_lightweight_context(mode: str = "command") -> str:
     # --- COMMAND/REPLY: full context ---
     # Topic map (root topics only)
     topic_map = db.get_hierarchical_topic_map()
-    parts.append("## Knowledge Map (root topics — fetch topic_id to explore subtopics)")
+    parts.append("## Knowledge Map (root topics — use `fetch` with `topic_id` to explore subtopics)")
     if topic_map:
         for t in topic_map:
             sub = f", {t['subtopic_count']} subtopics" if t['subtopic_count'] > 0 else ""
             parts.append(
-                f"- [{t['id']}] {t['title']}: "
+                f"- [topic:{t['id']}] {t['title']}: "
                 f"{t['total_concepts']} concepts{sub}, "
                 f"score {t['avg_mastery']}/100, {t['due_count']} due"
             )
@@ -101,7 +101,7 @@ def build_lightweight_context(mode: str = "command") -> str:
             remark = c.get('latest_remark', '')
             remark_preview = f" | remark: {remark[:60]}" if remark else ""
             parts.append(
-                f"- [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+                f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                 f"interval {c['interval_days']}d, "
                 f"reviews: {c['review_count']}, topics: {topic_ids}{remark_preview})"
             )
@@ -265,7 +265,7 @@ def format_fetch_result(data: Any) -> str:
                 remark = c.get('latest_remark', '')
                 remark_str = f" | {remark[:50]}" if remark else ""
                 parts.append(
-                    f"  - [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+                    f"  - [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                     f"next: {c.get('next_review_at', 'N/A')}{remark_str})"
                 )
             parts.append("")
@@ -278,12 +278,12 @@ def format_fetch_result(data: Any) -> str:
             if topics:
                 parts.append(f"Topics ({len(topics)}):")
                 for t in topics:
-                    parts.append(f"  - [{t['id']}] {t['title']}")
+                    parts.append(f"  - [topic:{t['id']}] {t['title']}")
             if concepts:
                 parts.append(f"Concepts ({len(concepts)}):")
                 for c in concepts:
                     parts.append(
-                        f"  - [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+                        f"  - [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                         f"topics: {c.get('topic_ids', [])})"
                     )
             if not topics and not concepts:
@@ -296,7 +296,7 @@ def format_fetch_result(data: Any) -> str:
             parts.append(f"### Due Concepts ({len(due)})")
             for c in due:
                 parts.append(
-                    f"  - [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+                    f"  - [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                     f"next: {c.get('next_review_at', 'N/A')}, topics: {c.get('topic_ids', [])})"
                 )
             parts.append("")
@@ -342,7 +342,7 @@ def build_maintenance_context() -> str:
     if topic_map:
         for t in topic_map:
             sub = f", {t['subtopic_count']} subtopics" if t['subtopic_count'] > 0 else ""
-            parts.append(f"- [{t['id']}] {t['title']}: "
+            parts.append(f"- [topic:{t['id']}] {t['title']}: "
                          f"{t['total_concepts']} concepts{sub}, score {t['avg_mastery']}/100")
     else:
         parts.append("No topics yet.")
@@ -353,7 +353,7 @@ def build_maintenance_context() -> str:
     if len(all_topics) > len(topic_map):
         parts.append("### All Topic Titles (scan for similar/mergeable pairs)")
         for t in all_topics:
-            parts.append(f"- [{t['id']}] {t['title']}")
+            parts.append(f"- [topic:{t['id']}] {t['title']}")
         parts.append("")
 
     issue_count = 0
@@ -367,7 +367,7 @@ def build_maintenance_context() -> str:
         issue_count += n
         parts.append(f"### ⚠️ Untagged Concepts ({_cap_label(n)})")
         for c in diag['untagged_concepts']:
-            parts.append(f"- [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+            parts.append(f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                          f"reviews: {c['review_count']}, created: {c['created_at']})")
         parts.append("")
 
@@ -376,7 +376,7 @@ def build_maintenance_context() -> str:
         issue_count += n
         parts.append(f"### ⚠️ Empty Topics ({_cap_label(n)})")
         for t in diag['empty_topics']:
-            parts.append(f"- [{t['id']}] {t['title']} (created: {t['created_at']})")
+            parts.append(f"- [topic:{t['id']}] {t['title']} (created: {t['created_at']})")
         parts.append("")
 
     if diag['oversized_topics']:
@@ -384,7 +384,7 @@ def build_maintenance_context() -> str:
         issue_count += n
         parts.append(f"### ⚠️ Oversized Topics ({_cap_label(n)})")
         for t in diag['oversized_topics']:
-            parts.append(f"- [{t['id']}] {t['title']}: {t['concept_count']} concepts — consider splitting")
+            parts.append(f"- [topic:{t['id']}] {t['title']}: {t['concept_count']} concepts — consider splitting")
         parts.append("")
 
     if diag['stale_concepts']:
@@ -393,7 +393,7 @@ def build_maintenance_context() -> str:
         parts.append(f"### ⚠️ Stale Concepts ({_cap_label(n)})")
         parts.append("(Created >14 days ago, never reviewed)")
         for c in diag['stale_concepts']:
-            parts.append(f"- [{c['id']}] {c['title']} (created: {c['created_at']})")
+            parts.append(f"- [concept:{c['id']}] {c['title']} (created: {c['created_at']})")
         parts.append("")
 
     if diag['struggling_concepts']:
@@ -402,7 +402,7 @@ def build_maintenance_context() -> str:
         parts.append(f"### ⚠️ Struggling Concepts ({_cap_label(n)})")
         parts.append("(5+ reviews but score ≤ 25)")
         for c in diag['struggling_concepts']:
-            parts.append(f"- [{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
+            parts.append(f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
                          f"{c['review_count']} reviews)")
         parts.append("")
 
@@ -411,7 +411,7 @@ def build_maintenance_context() -> str:
         issue_count += n
         parts.append(f"### ⚠️ Over-tagged Concepts ({_cap_label(n)})")
         for c in diag['over_tagged_concepts']:
-            parts.append(f"- [{c['id']}] {c['title']}: in {c['topic_count']} topics")
+            parts.append(f"- [concept:{c['id']}] {c['title']}: in {c['topic_count']} topics")
         parts.append("")
 
     # Note: potential_duplicates are handled by the dedicated dedup sub-agent
