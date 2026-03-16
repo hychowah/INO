@@ -487,7 +487,11 @@ async def call_maintenance_loop(
         f"**Note:** Destructive actions (delete_concept, unlink_concept) will be "
         f"proposed to the user for approval rather than executed immediately. "
         f"Do NOT attempt to merge duplicate concepts — that is handled by a "
-        f"separate dedup sub-agent."
+        f"separate dedup sub-agent.\n\n"
+        f"**IMPORTANT:** Do NOT use update_concept to change mastery_level, "
+        f"interval_days, next_review_at, ease_factor, or review_count. "
+        f"Scores are managed exclusively by the assess action during quiz sessions. "
+        f"For struggling concepts, add remarks or suggest splitting — never adjust scores."
     )
 
     for action_num in range(MAX_MAINTENANCE_ACTIONS):
@@ -583,6 +587,10 @@ async def call_maintenance_loop(
 async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
     """Execute a list of maintenance actions that were approved by the user.
     Returns summary strings for each executed action."""
+    # Ensure approved maintenance proposals keep the 'maintenance' source
+    # so code-level guards (e.g. score-field stripping) still apply.
+    tools.set_action_source('maintenance')
+
     summaries = []
     for action_data in actions:
         action_name = action_data.get('action', 'unknown')

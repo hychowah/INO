@@ -118,6 +118,9 @@ Called by the scheduler (daily). You receive a diagnostic report listing DB heal
 - **Concept unlinking**: `unlink_concept` actions are also proposed, not auto-executed.
 - **Concept scope changes**: `update_concept` with title/description changes are proposed.
 
+**What you must NEVER do in maintenance:**
+- **Change scores or scheduling**: NEVER use `update_concept` to modify `mastery_level`, `interval_days`, `next_review_at`, `ease_factor`, or `review_count`. Scores are controlled exclusively by the `assess` action during quiz sessions. Even if a concept's score looks "wrong" or too low relative to recent reviews, do NOT "correct" it — the scoring algorithm handles this automatically through future quizzes. For struggling concepts, add a `remark` or suggest splitting into simpler sub-concepts.
+
 **What is handled elsewhere (do NOT attempt):**
 - **Duplicate concepts**: Do NOT merge or delete concepts for deduplication. A separate dedup sub-agent handles duplicate detection and proposes merges to the user for approval. If you see potential duplicates, just mention them in your REPLY summary — do not act on them.
 

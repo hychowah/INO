@@ -400,10 +400,11 @@ def build_maintenance_context() -> str:
         n = len(diag['struggling_concepts'])
         issue_count += n
         parts.append(f"### ⚠️ Struggling Concepts ({_cap_label(n)})")
-        parts.append("(5+ reviews but score ≤ 25)")
+        parts.append("(5+ reviews but score ≤ 25 — DO NOT adjust scores. "
+                     "Suggest remarks or concept splitting only.)")
         for c in diag['struggling_concepts']:
-            parts.append(f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
-                         f"{c['review_count']} reviews)")
+            parts.append(f"- [concept:{c['id']}] {c['title']} "
+                         f"({c['review_count']} reviews, still building)")
         parts.append("")
 
     if diag['over_tagged_concepts']:

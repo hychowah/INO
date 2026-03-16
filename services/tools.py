@@ -317,6 +317,17 @@ def _handle_update_concept(params: Dict) -> Tuple[str, Any]:
         if key in params and params[key] is not None:
             update_fields[key] = params[key]
 
+    # Guard: maintenance must never manipulate score/scheduling fields.
+    # Scores change only via the assess action during quiz sessions.
+    SCORE_FIELDS = {'mastery_level', 'ease_factor', 'interval_days',
+                    'next_review_at', 'last_reviewed_at', 'review_count'}
+    if get_action_source() == 'maintenance':
+        stripped = [k for k in SCORE_FIELDS if k in update_fields]
+        if stripped:
+            logger.warning(f"Blocked maintenance score manipulation on concept #{cid}: {stripped}")
+            for k in stripped:
+                del update_fields[k]
+
     # New title passed separately when it's for renaming
     if 'new_title' in params:
         update_fields['title'] = params['new_title']

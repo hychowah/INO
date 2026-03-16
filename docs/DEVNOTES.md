@@ -460,3 +460,34 @@ Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or an
 **Why NOT regex-parse the result string?** The result from `_handle_add_concept` contains multiple `#N` patterns (concept and topic IDs): `"Added concept **GIL** (#70) under Python (auto-created topic: 'Python' (#35))"`. Regex `r'#(\d+)'` happens to grab `#70` first, but this is fragile — if the format changes, it silently grabs the wrong ID. The session stash approach is coupling-free.
 
 **Lesson:** When an action creates an entity whose ID is needed by a future turn, stash the ID in session state at creation time — don't rely on parsing it from formatted strings or hoping it appears in the LLM's context. Follow the existing stash pattern (`last_assess_concept_id`, `last_assess_quality`).
+
+---
+
+## 7. Maintenance LLM Overwriting mastery_level on Struggling Concepts
+
+### 7.1 Bug: maintenance artificially raised concept scores
+**Date:** 2026-03-16
+
+**Symptom:** Concept "BehaviorTree.CPP Library" had its `mastery_level` raised from 18→45→55 by the maintenance agent across two runs, despite the user's actual quiz-derived score being ~21. The maintenance remarks said "mastery_level raised to 55. Recent reviews demonstrate solid understanding."
+
+**Root cause (two layers):**
+
+1. **LLM ignored prompt instructions.** AGENTS.md said `mastery_level` should only change via `assess`, but the "Struggling Concepts" diagnostic showed the raw score (`score 18/100, 7 reviews`) which tempted the LLM to "correct" it via `update_concept` with `mastery_level: 55`.
+
+2. **No code-level guard.** While `update_concept` is a non-safe maintenance action (requires user approval via Discord buttons), the proposal UI only showed the action name — not which fields were being changed. The user likely clicked "Approve All" without realizing a score change was embedded. Even if the user caught it, there was nothing preventing the action from executing with arbitrary score values.
+
+3. **`execute_maintenance_actions` didn't set action source.** When the user approved proposals via Discord buttons, the execution ran with `action_source='discord'` (the default), so even if a guard existed, it would have been bypassed.
+
+### 7.2 Fix: defense-in-depth (code guard + prompt + context)
+
+1. **Hard guard in `_handle_update_concept` (tools.py):** When `get_action_source() == 'maintenance'`, strip `mastery_level`, `ease_factor`, `interval_days`, `next_review_at`, `last_reviewed_at`, and `review_count` from the update fields. Log a warning when stripping occurs. This is the primary defense — the LLM can propose whatever it wants, but score fields are silently dropped.
+
+2. **Action source in `execute_maintenance_actions` (pipeline.py):** Added `tools.set_action_source('maintenance')` at the top so approved proposals also get the code guard.
+
+3. **Explicit prohibition in AGENTS.md:** Added "What you must NEVER do in maintenance" section with clear instruction to never modify score/scheduling fields.
+
+4. **Reduced temptation in diagnostics (context.py):** Struggling concepts no longer show the raw score. Changed from `(score 18/100, 7 reviews)` to `(7 reviews, still building)` with an inline note: "DO NOT adjust scores. Suggest remarks or concept splitting only."
+
+5. **Reinforced in maintenance prompt (pipeline.py):** Added explicit reminder in the `[MAINTENANCE]` prompt text that score fields must not be changed via `update_concept`.
+
+**Lesson:** When the LLM has both the data (raw scores) and the tool (`update_concept`) to modify it, prompt instructions alone are insufficient — add a code-level guard. Defense in depth: remove the temptation (hide raw scores from maintenance), add the prompt instruction, AND enforce at the code layer.
