@@ -181,7 +181,19 @@ def _handle_link_topics(params: Dict) -> Tuple[str, Any]:
     ok = db.link_topics(int(parent_id), int(child_id))
     if ok:
         return ('reply', f"Linked topic #{parent_id} → #{child_id}")
-    return ('error', f"Could not link topics (same ID or already linked)")
+    return ('error', f"Could not link topics (same ID, already linked, or would create cycle)")
+
+
+def _handle_unlink_topics(params: Dict) -> Tuple[str, Any]:
+    parent_id = params.get('parent_id')
+    child_id = params.get('child_id')
+    if not parent_id or not child_id:
+        return ('error', "unlink_topics requires parent_id and child_id")
+
+    ok = db.unlink_topics(int(parent_id), int(child_id))
+    if ok:
+        return ('reply', f"Unlinked topic #{child_id} from parent #{parent_id}")
+    return ('error', f"No parent→child link found between #{parent_id} and #{child_id}")
 
 
 def _handle_list_topics(params: Dict) -> Tuple[str, Any]:
@@ -471,6 +483,17 @@ def _handle_remark(params: Dict) -> Tuple[str, Any]:
     return ('reply', f"Added remark to concept #{cid}")
 
 
+def _handle_remove_relation(params: Dict) -> Tuple[str, Any]:
+    a = params.get('concept_id_a')
+    b = params.get('concept_id_b')
+    if not a or not b:
+        return ('error', "remove_relation requires concept_id_a and concept_id_b")
+    ok = db.remove_relation(int(a), int(b))
+    if ok:
+        return ('reply', f"Removed relation between concept #{a} and #{b}")
+    return ('error', f"No relation found between concept #{a} and #{b}")
+
+
 # ============================================================================
 # Quiz / Assess Handlers
 # ============================================================================
@@ -610,6 +633,16 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     if params.get('remark'):
         db.add_remark(cid, params['remark'])
 
+    # Auto-create concept relationships if LLM identified related concepts
+    related_ids = params.get('related_concept_ids')
+    if related_ids and isinstance(related_ids, list):
+        rel_type = params.get('relation_type', 'builds_on')
+        if rel_type not in db.VALID_RELATION_TYPES:
+            rel_type = 'builds_on'
+        added = db.add_relations_from_assess(cid, related_ids, rel_type)
+        if added:
+            logger.info(f"[assess] Auto-linked {added} related concept(s) for #{cid}")
+
     score_change = new_score - current_score
     sign = '+' if score_change >= 0 else ''
     return ('reply', params.get('message', f"Assessed concept #{cid}: quality {quality}/5, "
@@ -662,6 +695,7 @@ ACTION_HANDLERS = {
     'update_topic': _handle_update_topic,
     'delete_topic': _handle_delete_topic,
     'link_topics': _handle_link_topics,
+    'unlink_topics': _handle_unlink_topics,
     'list_topics': _handle_list_topics,
     'add_concept': _handle_add_concept,
     'update_concept': _handle_update_concept,
@@ -669,6 +703,7 @@ ACTION_HANDLERS = {
     'link_concept': _handle_link_concept,
     'unlink_concept': _handle_unlink_concept,
     'remark': _handle_remark,
+    'remove_relation': _handle_remove_relation,
     'quiz': _handle_quiz,
     'assess': _handle_assess,
     'suggest_topic': _handle_suggest_topic,

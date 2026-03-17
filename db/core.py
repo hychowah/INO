@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 # ============================================================================
@@ -387,6 +387,30 @@ def _run_migrations():
         conn.commit()
         conn.close()
         print("[LEARN DB] Migration 8: UNIQUE index on concept titles (dedup guard)")
+
+    # --- Migration 9: concept_relations table for cross-concept edges ---
+    if current < 9:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS concept_relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                concept_id_low INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+                concept_id_high INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+                relation_type TEXT NOT NULL CHECK(relation_type IN
+                    ('builds_on','contrasts_with','commonly_confused','applied_together','same_phenomenon')),
+                note TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(concept_id_low, concept_id_high),
+                CHECK(concept_id_low < concept_id_high)
+            );
+            CREATE INDEX IF NOT EXISTS idx_concept_relations_low
+                ON concept_relations(concept_id_low);
+            CREATE INDEX IF NOT EXISTS idx_concept_relations_high
+                ON concept_relations(concept_id_high);
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 9: concept_relations table")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

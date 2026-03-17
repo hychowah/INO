@@ -3,6 +3,7 @@ Maintenance diagnostics and duplicate detection.
 """
 
 import re
+import sqlite3
 from typing import List, Dict, Any
 
 from db.core import _conn, _now_iso
@@ -41,6 +42,77 @@ def _title_similarity(a: str, b: str) -> float:
     jaccard = len(intersection) / len(union)
     containment = len(intersection) / min(len(words_a), len(words_b))
     return max(jaccard, containment)
+
+
+def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
+    """Find concept pairs that share FTS5 keywords but don't have a relation yet.
+
+    Uses FTS5-based candidate generation (O(n log n) via index) instead of
+    pairwise comparison (O(n²)). Returns up to `limit` candidate pairs.
+    """
+    # Get concepts with meaningful titles (>1 word after stop-word removal)
+    all_concepts = conn.execute(
+        "SELECT id, title FROM concepts ORDER BY id"
+    ).fetchall()
+
+    if len(all_concepts) < 2:
+        return []
+
+    # Build keyword map for FTS queries
+    candidates = []
+    seen_pairs = set()
+
+    # Get existing relations to exclude
+    try:
+        existing = conn.execute(
+            "SELECT concept_id_low, concept_id_high FROM concept_relations"
+        ).fetchall()
+        existing_pairs = {(r['concept_id_low'], r['concept_id_high']) for r in existing}
+    except sqlite3.OperationalError:
+        existing_pairs = set()
+
+    for concept in all_concepts:
+        # Extract meaningful keywords from title
+        words = {_stem(w) for w in re.findall(r'[a-z0-9]+', concept['title'].lower())} - _STOP_WORDS
+        keywords = [w for w in words if len(w) >= 3]
+        if not keywords:
+            continue
+
+        # FTS5 query: OR-join keywords to find related concepts
+        fts_query = ' OR '.join(f'"{kw}"' for kw in keywords[:5])  # cap at 5 keywords
+        try:
+            matches = conn.execute("""
+                SELECT c.id, c.title
+                FROM concepts c
+                JOIN concepts_fts fts ON c.id = fts.rowid
+                WHERE concepts_fts MATCH ? AND c.id != ?
+                ORDER BY rank
+                LIMIT 5
+            """, (fts_query, concept['id'])).fetchall()
+        except sqlite3.OperationalError:
+            continue
+
+        for match in matches:
+            low, high = min(concept['id'], match['id']), max(concept['id'], match['id'])
+            if (low, high) in existing_pairs or (low, high) in seen_pairs:
+                continue
+
+            # Verify title similarity is meaningful
+            sim = _title_similarity(concept['title'], match['title'])
+            if sim >= 0.3:
+                candidates.append({
+                    'concept_a': {'id': concept['id'], 'title': concept['title']},
+                    'concept_b': {'id': match['id'], 'title': match['title']},
+                    'similarity': round(sim, 2),
+                })
+                seen_pairs.add((low, high))
+
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+
+    return candidates
 
 
 def get_maintenance_diagnostics() -> Dict[str, Any]:
@@ -128,6 +200,23 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         if len(potential_dupes) >= DIAG_LIMIT:
             break
 
+    # 8. Relationship candidates — FTS5-based concept pairs that share keywords
+    #    but don't yet have a relation.
+    relationship_candidates = _get_relationship_candidates(conn, limit=DIAG_LIMIT)
+
+    # 9. Cluttered root topics — roots with >10 direct concepts and no subtopics
+    cluttered_roots = conn.execute("""
+        SELECT t.id, t.title, COUNT(ct.concept_id) as concept_count
+        FROM topics t
+        JOIN concept_topics ct ON t.id = ct.topic_id
+        WHERE t.id NOT IN (SELECT child_id FROM topic_relations)
+          AND t.id NOT IN (SELECT parent_id FROM topic_relations)
+        GROUP BY t.id
+        HAVING concept_count > 10
+        ORDER BY concept_count DESC
+        LIMIT ?
+    """, (DIAG_LIMIT,)).fetchall()
+
     conn.close()
 
     return {
@@ -138,4 +227,6 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         'struggling_concepts': [dict(r) for r in struggling],
         'over_tagged_concepts': [dict(r) for r in over_tagged],
         'potential_duplicates': potential_dupes,
+        'relationship_candidates': relationship_candidates,
+        'cluttered_root_topics': [dict(r) for r in cluttered_roots],
     }

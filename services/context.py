@@ -77,12 +77,17 @@ def build_lightweight_context(mode: str = "command") -> str:
         return "\n".join(parts)
 
     # --- COMMAND/REPLY: full context ---
-    # Topic map (root topics only)
+    # Topic map (root topics with inline subtopic names)
     topic_map = db.get_hierarchical_topic_map()
     parts.append("## Knowledge Map (root topics — use `fetch` with `topic_id` to explore subtopics)")
     if topic_map:
         for t in topic_map:
-            sub = f", {t['subtopic_count']} subtopics" if t['subtopic_count'] > 0 else ""
+            sub = ""
+            if t['subtopic_count'] > 0:
+                children = db.get_topic_children(t['id'])
+                child_names = ', '.join(c['title'] for c in children[:5])
+                extra = f", +{len(children)-5} more" if len(children) > 5 else ""
+                sub = f", {t['subtopic_count']} subtopics ({child_names}{extra})"
             parts.append(
                 f"- [topic:{t['id']}] {t['title']}: "
                 f"{t['total_concepts']} concepts{sub}, "
@@ -246,6 +251,17 @@ def format_fetch_result(data: Any) -> str:
                     parts.append(f"  - Q: {q[:200]}")
                     parts.append(f"    A: {a[:200]}")
                     parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
+
+            # Cross-concept relationships
+            relations = db.get_relations(c['id'])
+            if relations:
+                parts.append("\nRelated Concepts:")
+                for rel in relations:
+                    parts.append(
+                        f"  - [{rel['relation_type']}] "
+                        f"[concept:{rel['other_concept_id']}] {rel['other_title']} "
+                        f"(score {rel['other_mastery']}/100)"
+                    )
             parts.append("")
 
         # Topic detail with concepts
@@ -413,6 +429,25 @@ def build_maintenance_context() -> str:
         parts.append(f"### ⚠️ Over-tagged Concepts ({_cap_label(n)})")
         for c in diag['over_tagged_concepts']:
             parts.append(f"- [concept:{c['id']}] {c['title']}: in {c['topic_count']} topics")
+        parts.append("")
+
+    if diag.get('relationship_candidates'):
+        n = len(diag['relationship_candidates'])
+        parts.append(f"### 🔗 Relationship Candidates ({_cap_label(n)})")
+        parts.append("(Concepts that share keywords but have no relation — review for pedagogical connections)")
+        for pair in diag['relationship_candidates']:
+            a, b = pair['concept_a'], pair['concept_b']
+            parts.append(f"- [concept:{a['id']}] {a['title']} ↔ [concept:{b['id']}] {b['title']}"
+                         f" (similarity: {pair['similarity']})")
+        parts.append("")
+
+    if diag.get('cluttered_root_topics'):
+        n = len(diag['cluttered_root_topics'])
+        issue_count += n
+        parts.append(f"### ⚠️ Cluttered Root Topics ({_cap_label(n)})")
+        parts.append("(Root topics with >10 concepts and no subtopics — suggest splitting)")
+        for t in diag['cluttered_root_topics']:
+            parts.append(f"- [topic:{t['id']}] {t['title']}: {t['concept_count']} concepts")
         parts.append("")
 
     # Note: potential_duplicates are handled by the dedicated dedup sub-agent

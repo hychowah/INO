@@ -136,6 +136,10 @@ def delete_concept(concept_id: int) -> bool:
     conn.execute("DELETE FROM concept_topics WHERE concept_id = ?", (concept_id,))
     conn.execute("DELETE FROM concept_remarks WHERE concept_id = ?", (concept_id,))
     conn.execute("DELETE FROM review_log WHERE concept_id = ?", (concept_id,))
+    conn.execute(
+        "DELETE FROM concept_relations WHERE concept_id_low = ? OR concept_id_high = ?",
+        (concept_id, concept_id)
+    )
     cursor = conn.execute("DELETE FROM concepts WHERE id = ?", (concept_id,))
     conn.commit()
     deleted = cursor.rowcount > 0

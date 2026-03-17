@@ -84,12 +84,28 @@ def delete_topic(topic_id: int) -> bool:
 def link_topics(parent_id: int, child_id: int) -> bool:
     """Create a parent→child edge between two topics. Returns True on success.
 
+    Rejects self-links and links that would create a cycle in the DAG.
     # TODO: Phase 3 — accept user_id, validate ownership before cross-table links
     """
     if parent_id == child_id:
         return False
     conn = _conn()
     try:
+        # Cycle detection: check if child_id is already an ancestor of parent_id.
+        # If so, adding parent_id → child_id would create a cycle.
+        cycle_check = conn.execute("""
+            WITH RECURSIVE ancestors AS (
+                SELECT parent_id AS id FROM topic_relations WHERE child_id = ?
+                UNION ALL
+                SELECT tr.parent_id
+                FROM topic_relations tr
+                JOIN ancestors a ON tr.child_id = a.id
+            )
+            SELECT 1 FROM ancestors WHERE id = ? LIMIT 1
+        """, (parent_id, child_id)).fetchone()
+        if cycle_check:
+            return False  # would create cycle
+
         conn.execute(
             "INSERT OR IGNORE INTO topic_relations (parent_id, child_id, created_at) VALUES (?, ?, ?)",
             (parent_id, child_id, _now_iso())
@@ -100,6 +116,19 @@ def link_topics(parent_id: int, child_id: int) -> bool:
         return False
     finally:
         conn.close()
+
+
+def unlink_topics(parent_id: int, child_id: int) -> bool:
+    """Remove a parent→child edge between two topics. Returns True if it existed."""
+    conn = _conn()
+    cursor = conn.execute(
+        "DELETE FROM topic_relations WHERE parent_id = ? AND child_id = ?",
+        (parent_id, child_id)
+    )
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
 
 
 def get_all_topics() -> List[Dict]:

@@ -21,7 +21,7 @@ from db.core import (
 # Topics
 from db.topics import (
     add_topic, get_topic, update_topic, delete_topic,
-    link_topics, get_all_topics, get_topic_relations,
+    link_topics, unlink_topics, get_all_topics, get_topic_relations,
     get_topic_children, get_topic_parents,
     search_topics,
     get_topic_map, get_hierarchical_topic_map,
@@ -68,6 +68,14 @@ from db.action_log import (
     log_action, get_action_log, get_action_log_count,
     get_action_summary, get_distinct_actions, get_distinct_sources,
     cleanup_old_actions,
+)
+
+# Concept Relations (cross-concept edges)
+from db.relations import (
+    add_relation, get_relations, remove_relation,
+    add_relations_from_assess, get_all_relations,
+    search_related,
+    MAX_RELATIONS_PER_CONCEPT, VALID_RELATION_TYPES,
 )
 
 # Preferences (persona selection)
