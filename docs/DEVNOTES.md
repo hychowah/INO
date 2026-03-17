@@ -19,6 +19,7 @@
 5. [FastAPI Backend & Project Restructuring](#5-fastapi-backend--project-restructuring)
 6. [Concept/Topic ID Confusion After add_concept Confirmation](#6-concepttopic-id-confusion-after-add_concept-confirmation)
 7. [Pending Review Tracking & Phantom Answer Bug](#7-pending-review-tracking--phantom-answer-bug)
+8. [Web UI Graph Visualization](#8-web-ui-graph-visualization)
 
 ---
 
@@ -541,4 +542,43 @@ Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or an
 - **Single JSON blob** over multiple session keys — atomic read/write, stores question text for context.
 - **Set pending AFTER `user.send()`** — avoids race condition with concurrent assess during LLM await.
 - **Static reminders** — saves LLM tokens, avoids the LLM generating phantom assessments during reminders.
+
+---
+
+## 8. Web UI Graph Visualization
+
+### 8.1 Signal handlers crash when webui runs in a background thread
+**Date:** 2026-03-17
+
+**Symptom:** `ValueError: signal only works in main thread of the main interpreter` when starting `bot.py`. The webui server started in Thread-1 tried to register `signal.SIGINT`.
+
+**Root cause:** The fast-shutdown signal handler added for standalone `python webui/server.py` runs unconditionally, but `bot.py` spawns the webui in a background thread where `signal.signal()` is forbidden.
+
+**Fix:** Guard with `if threading.current_thread() is threading.main_thread()`. The signal handler only applies when the webui is the main process; when spawned by the bot, the bot handles its own shutdown.
+
+**Lesson:** Any code that calls `signal.signal()` must check it's running in the main thread, especially in projects with multiple entry points that may embed the server in a thread.
+
+### 8.2 Static file caching hides code changes
+**Date:** 2026-03-17
+
+**Symptom:** CSS and JS changes to graph edges were not visible in the browser despite server restarts. Multiple rounds of edits appeared to have no effect.
+
+**Root cause:** `_serve_static()` sent `Cache-Control: public, max-age=3600` — the browser served stale files from disk cache for up to 1 hour. The `?v=1` query-string bust on `graph.js` was never incremented.
+
+**Fix:** Changed to `Cache-Control: no-cache` for development. For production, switch to fingerprinted filenames or increment `?v=N` on every change.
+
+**Lesson:** During active development, never cache static files aggressively. A 1-hour max-age means your last 4 rounds of CSS tweaks were invisible. Use `no-cache` and bump version strings.
+
+### 8.3 SVG edge visibility: CSS classes vs inline D3 attrs on dark backgrounds
+**Date:** 2026-03-17
+
+**Symptom:** Graph edges (concept→topic membership lines) were nearly invisible on the dark background (`#0d1117`), even after increasing CSS stroke color and opacity multiple times.
+
+**Root cause (two layers):**
+1. **Caching** (§8.2 above) — the real blocker. CSS changes weren't reaching the browser.
+2. **CSS specificity with SVG:** SVG presentation attributes set via D3 `.attr('stroke', ...)` become inline attributes on the `<line>` element, which override CSS class rules. The initial code only set `stroke-width` inline but relied on CSS for color/opacity — a fragile split.
+
+**Fix:** Set all edge visual properties (stroke, stroke-opacity, stroke-width, stroke-dasharray) directly via D3 `.attr()` calls in `graph.js`. CSS classes remain for hover/dim states but the base rendering is self-contained in JS. Membership edges use accent blue (`#58a6ff`) at 0.45 opacity with 1.5px width.
+
+**Lesson:** For D3/SVG visualizations, prefer setting visual properties as inline SVG attributes via `.attr()` rather than relying on CSS classes. This avoids specificity issues between inline attrs and stylesheet rules, and makes the rendering self-documenting in the JS code. Use CSS only for interactive states (hover, dimmed, highlighted) applied via `.classed()`.
 - **`/review` command does NOT set pending state** — user-initiated reviews are active engagement, not unsolicited DMs.

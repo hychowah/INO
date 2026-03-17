@@ -47,19 +47,24 @@ ROOT
 ├── db/                    # Database layer (SQLite)
 │   ├── core.py            # Connections, init, migrations, datetime utils
 │   ├── topics.py          # Topic CRUD, topic maps
-│   ├── concepts.py        # Concept CRUD, search, detail views
+│   ├── concepts.py        # Concept CRUD, search, detail views, graph data
+│   ├── relations.py       # Concept↔concept relations
 │   ├── reviews.py         # Review log, remarks
 │   ├── chat.py            # Chat history, session state
 │   ├── preferences.py     # Persona selection (get/set via session_state)
 │   ├── diagnostics.py     # Maintenance diagnostics
+│   ├── proposals.py       # Maintenance action proposals (user approval)
+│   ├── action_log.py      # Action audit log
 │   └── __init__.py        # Re-exports all public functions
 │
 ├── data/
 │   └── personas/          # Persona preset .md files (mentor, coach, buddy)
 │
-├── tests/                 # Manual test scripts (not pytest)
-├── webui/                 # Standalone web UI for DB browsing
-├── docs/                  # ARCHITECTURE.md, DEVNOTES.md, PLAN.md
+├── tests/                 # pytest test suite
+├── webui/                 # Web UI: DB browser + knowledge graph visualization
+│   ├── server.py          # stdlib HTTP server, all routes + page renderers
+│   └── static/            # CSS, JS (graph.js for D3 graph, concepts.js, tree.js)
+├── docs/                  # ARCHITECTURE.md, DEVNOTES.md, PLAN.md, CONCEPT_RELATIONS_PLAN.md
 ├── scripts/               # start.bat, start_api.bat, agent.py (legacy CLI)
 └── .env                   # Secrets (git-ignored)
 ```
@@ -277,6 +282,7 @@ Web Dashboard        ──→  webui/server.py           ──→  db/  (direc
 | `/api/due` | GET | Bearer | Due concepts for review |
 | `/api/stats` | GET | Bearer | Aggregate review stats |
 | `/api/persona` | GET/POST | Bearer | Get/switch persona |
+| `/api/graph` | GET | Bearer | Knowledge graph nodes + edges (filterable) |
 | `/api/health` | GET | None | Health check |
 
 ### API Gaps (to fill before mobile development)
@@ -297,11 +303,10 @@ These endpoints don't exist yet. They should be added to `api.py` when the backe
 - `POST /api/topics/link` — link parent→child → `db.link_topics()`
 - `POST /api/topics/unlink` — unlink → `db.unlink_topics()`
 
-**Relations & graph:**
+**Relations:**
 - `GET /api/concepts/{id}/relations` → `db.get_relations()`
 - `POST /api/relations` — add → `db.add_relation()`
 - `DELETE /api/relations` — remove → `db.remove_relation()`
-- `GET /api/graph` — nodes + edges for visualization
 
 **Reviews & logs:**
 - `GET /api/reviews` — review log with pagination
