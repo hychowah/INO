@@ -1284,13 +1284,15 @@ def main(skip_init: bool = False):
     print("Press Ctrl+C to stop.")
 
     # Fast shutdown on Windows: signal handler calls shutdown() from a thread
-    def _signal_shutdown(sig, frame):
-        print("\nShutting down...")
-        threading.Thread(target=server.shutdown, daemon=True).start()
+    # Only works when running in the main thread (not when bot spawns webui in a thread)
+    if threading.current_thread() is threading.main_thread():
+        def _signal_shutdown(sig, frame):
+            print("\nShutting down...")
+            threading.Thread(target=server.shutdown, daemon=True).start()
 
-    signal.signal(signal.SIGINT, _signal_shutdown)
-    if hasattr(signal, 'SIGTERM'):
-        signal.signal(signal.SIGTERM, _signal_shutdown)
+        signal.signal(signal.SIGINT, _signal_shutdown)
+        if hasattr(signal, 'SIGTERM'):
+            signal.signal(signal.SIGTERM, _signal_shutdown)
 
     try:
         server.serve_forever(poll_interval=0.25)
