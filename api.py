@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import config
 import db
 from services import pipeline
-from services.parser import process_output
+from services.parser import process_output, parse_llm_response
 from services import state
 
 logger = logging.getLogger("api")
@@ -70,6 +70,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     type: str
     message: str
+    pending_action: dict | None = None
 
 # ============================================================================
 # Endpoints
@@ -91,6 +92,18 @@ async def chat(req: ChatRequest):
         llm_response = await pipeline.call_with_fetch_loop(
             "command", req.message.strip(), "solo_user"
         )
+
+        # Intercept add_concept — mirror bot.py's confirmation flow
+        prefix, message, action_data = parse_llm_response(llm_response)
+        if (action_data
+                and action_data.get('action', '').lower().strip() == 'add_concept'):
+            display_msg = action_data.get('message', message or '')
+            return ChatResponse(
+                type="pending_confirm",
+                message=display_msg,
+                pending_action=action_data,
+            )
+
         final_result = await pipeline.execute_llm_response(
             req.message.strip(), llm_response, "command"
         )
@@ -98,6 +111,33 @@ async def chat(req: ChatRequest):
         return ChatResponse(type=msg_type, message=message)
     except Exception as e:
         logger.exception("Chat endpoint error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ConfirmRequest(BaseModel):
+    action_data: dict
+
+
+@app.post("/api/chat/confirm", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+async def confirm_action(req: ConfirmRequest):
+    """Confirm a pending add_concept (or other intercepted action) from /api/chat."""
+    from services.tools import execute_action, set_action_source
+    set_action_source('api')
+
+    action = req.action_data.get('action', '')
+    params = req.action_data.get('params', {})
+    if not action:
+        raise HTTPException(status_code=400, detail="Missing 'action' in action_data")
+
+    try:
+        msg_type, result = execute_action(action, params)
+        display_msg = req.action_data.get('message', '')
+        if msg_type == 'error':
+            return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {result}")
+        else:
+            return ChatResponse(type="reply", message=f"{display_msg}\n\n✅ {result}")
+    except Exception as e:
+        logger.exception("Confirm endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
 
 

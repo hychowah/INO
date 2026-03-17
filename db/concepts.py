@@ -31,12 +31,24 @@ def add_concept(title: str, description: Optional[str] = None,
     else:
         next_review_at = _normalize_dt_str(next_review_at) or next_review_at
 
-    cursor = conn.execute(
-        """INSERT INTO concepts
-           (title, description, next_review_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (title, description, next_review_at, now, now)
-    )
+    try:
+        cursor = conn.execute(
+            """INSERT INTO concepts
+               (title, description, next_review_at, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (title, description, next_review_at, now, now)
+        )
+    except sqlite3.IntegrityError:
+        # UNIQUE constraint on title — concept already exists.
+        # Return the existing concept's ID instead of creating a duplicate.
+        row = conn.execute(
+            "SELECT id FROM concepts WHERE LOWER(title) = LOWER(?)", (title,)
+        ).fetchone()
+        conn.close()
+        if row:
+            return row['id']
+        raise  # Shouldn't happen, but re-raise if we can't find the match
+
     concept_id = cursor.lastrowid
 
     if topic_ids:
@@ -52,6 +64,24 @@ def add_concept(title: str, description: Optional[str] = None,
     conn.commit()
     conn.close()
     return concept_id
+
+
+def find_concept_by_title(title: str) -> Optional[Dict]:
+    """Find a concept by exact title (case-insensitive). Returns concept with topic_ids or None."""
+    conn = _conn()
+    row = conn.execute(
+        "SELECT * FROM concepts WHERE LOWER(title) = LOWER(?)", (title,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+    d = dict(row)
+    topic_rows = conn.execute(
+        "SELECT topic_id FROM concept_topics WHERE concept_id = ?", (d['id'],)
+    ).fetchall()
+    d['topic_ids'] = [r['topic_id'] for r in topic_rows]
+    conn.close()
+    return d
 
 
 def get_concept(concept_id: int) -> Optional[Dict]:

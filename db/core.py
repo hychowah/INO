@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 # ============================================================================
@@ -368,6 +368,25 @@ def _run_migrations():
         conn.commit()
         conn.close()
         print("[LEARN DB] Migration 7: action_log table")
+
+    # --- Migration 8: UNIQUE index on concept titles (case-insensitive) ---
+    if current < 8:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        # Clean up any existing exact-title duplicates before creating UNIQUE index.
+        # Keeps the concept with the lowest ID (= the original) for each title.
+        conn.execute("""
+            DELETE FROM concepts
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM concepts GROUP BY LOWER(title)
+            )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_title_nocase
+            ON concepts(title COLLATE NOCASE)
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 8: UNIQUE index on concept titles (dedup guard)")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

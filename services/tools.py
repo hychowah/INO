@@ -245,22 +245,24 @@ def _mastery_bar(avg: float) -> str:
 # Concept Handlers
 # ============================================================================
 
-def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
+def _resolve_topic_ids(params: Dict) -> Tuple[List[int], List[Tuple[int, str]]]:
+    """Resolve topic_ids and topic_titles into a flat list of topic IDs.
+    Returns (topic_ids, created_topics) where created_topics is [(id, title), ...].
+    """
     topic_ids = params.get('topic_ids', [])
     if isinstance(topic_ids, int):
         topic_ids = [topic_ids]
+    else:
+        topic_ids = list(topic_ids)  # copy to avoid mutating params
 
-    # Auto-create topics from titles — lets the LLM do topic + concept in one action
     topic_titles = params.get('topic_titles', [])
     if isinstance(topic_titles, str):
         topic_titles = [topic_titles]
-    # Legacy single-title param
     if params.get('topic_title'):
         topic_titles.append(params['topic_title'])
 
     created_topics = []
     for title in topic_titles:
-        # Find existing or create new
         matches = db.search_topics(title, limit=1)
         if matches and matches[0]['title'].lower() == title.lower():
             topic_ids.append(matches[0]['id'])
@@ -268,6 +270,70 @@ def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
             new_id = db.add_topic(title=title)
             topic_ids.append(new_id)
             created_topics.append((new_id, title))
+
+    return topic_ids, created_topics
+
+
+def _check_concept_duplicate(title: str, topic_ids: List[int]) -> Optional[Tuple[str, str]]:
+    """Check if a concept with the same or very similar title already exists.
+
+    Returns:
+        None if no duplicate found (safe to create).
+        ('exact', message) if exact case-insensitive match found.
+        ('fuzzy', message) if a very similar title found (warning only).
+    """
+    # --- Exact match (case-insensitive) ---
+    existing = db.find_concept_by_title(title)
+    if existing:
+        return ('exact', _link_existing_concept(existing, topic_ids))
+
+    # --- Fuzzy match (soft warning) ---
+    candidates = db.search_concepts(title, limit=10)
+    for candidate in candidates:
+        sim = db._title_similarity(title, candidate['title'])
+        if sim >= 0.85:
+            return ('fuzzy',
+                    f"⚠️ Very similar concept exists: **{candidate['title']}** "
+                    f"(#{candidate['id']}, similarity {sim:.0%}). "
+                    f"Consider using `link_concept` or `update_concept` instead.")
+
+    return None
+
+
+def _link_existing_concept(existing: Dict, topic_ids: List[int]) -> str:
+    """Link an existing concept to any new topics it isn't already under.
+    Returns a user-friendly message."""
+    concept_id = existing['id']
+    existing_topic_ids = set(existing.get('topic_ids', []))
+    new_links = [tid for tid in topic_ids if tid not in existing_topic_ids]
+
+    if new_links:
+        db.link_concept(concept_id, new_links)
+        linked_topics = [db.get_topic(tid) for tid in new_links]
+        linked_names = [t['title'] for t in linked_topics if t]
+        return (f"Concept **{existing['title']}** already exists (#{concept_id}). "
+                f"Linked to additional topic(s): {', '.join(linked_names)}.")
+    else:
+        return (f"Concept **{existing['title']}** already exists (#{concept_id}) "
+                f"and is already linked to the requested topic(s). No changes made.")
+
+
+def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
+    # Resolve topics first (same as before)
+    topic_ids, created_topics = _resolve_topic_ids(params)
+
+    # --- Dedup guard: check for existing concept with same/similar title ---
+    dup_check = _check_concept_duplicate(params['title'], topic_ids)
+    if dup_check:
+        dup_type, dup_msg = dup_check
+        if dup_type == 'exact':
+            # Exact match: reuse existing concept, don't create a new one
+            existing = db.find_concept_by_title(params['title'])
+            if existing:
+                db.set_session('last_added_concept_id', str(existing['id']))
+            return ('reply', dup_msg)
+        # Fuzzy match: warn but still create (soft warning)
+        # The warning is appended to the success message below
 
     concept_id = db.add_concept(
         title=params['title'],
@@ -294,8 +360,14 @@ def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
         created_strs = [f"'{t}' (#{tid})" for tid, t in created_topics]
         created_note = f" (auto-created topic{'s' if len(created_topics) > 1 else ''}: {', '.join(created_strs)})"
 
-    return ('reply', f"Added concept **{params['title']}** (#{concept_id}){topic_names}{created_note}. "
-                      f"First review scheduled for tomorrow.")
+    result = (f"Added concept **{params['title']}** (#{concept_id}){topic_names}{created_note}. "
+              f"First review scheduled for tomorrow.")
+
+    # Append fuzzy warning if applicable
+    if dup_check and dup_check[0] == 'fuzzy':
+        result += f"\n\n{dup_check[1]}"
+
+    return ('reply', result)
 
 
 def _handle_update_concept(params: Dict) -> Tuple[str, Any]:
