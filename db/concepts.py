@@ -195,7 +195,7 @@ def get_concepts_for_topic(topic_id: int) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
-def get_due_concepts(limit: int = 10) -> List[Dict]:
+def get_due_concepts(limit: int = 10, offset: int = 0) -> List[Dict]:
     """Get concepts due for review (next_review_at <= now), ordered by most overdue."""
     conn = _conn()
     now = _now_iso()
@@ -209,8 +209,8 @@ def get_due_concepts(limit: int = 10) -> List[Dict]:
         WHERE c.next_review_at IS NOT NULL AND c.next_review_at <= ?
         GROUP BY c.id
         ORDER BY c.next_review_at ASC
-        LIMIT ?
-    """, (now, limit)).fetchall()
+        LIMIT ? OFFSET ?
+    """, (now, limit, offset)).fetchall()
     conn.close()
 
     results = []
@@ -249,21 +249,58 @@ def get_next_review_concept() -> Optional[Dict]:
     return d
 
 
-def get_all_concepts_summary() -> List[Dict]:
-    """Get all concepts with title, description, review count, and topic names.
-    Lightweight query used by the dedup agent."""
+def get_all_concepts_summary(limit: int | None = None, offset: int = 0) -> List[Dict]:
+    """Get all concepts with title, description, review count, topic names/IDs,
+    and scheduling fields. Used by dedup agent and graph visualization.
+    Optional limit/offset for paginated access."""
     conn = _conn()
-    rows = conn.execute("""
+    sql = """
         SELECT c.id, c.title, c.description, c.review_count, c.mastery_level,
-               GROUP_CONCAT(t.title, ', ') as topic_names
+               c.next_review_at, c.interval_days,
+               GROUP_CONCAT(DISTINCT t.title) as topic_names,
+               GROUP_CONCAT(DISTINCT ct.topic_id) as topic_id_list
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
         LEFT JOIN topics t ON ct.topic_id = t.id
         GROUP BY c.id
         ORDER BY c.id
-    """).fetchall()
+    """
+    params: list = []
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params = [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        tid_str = d.pop('topic_id_list', None)
+        d['topic_ids'] = [int(x) for x in tid_str.split(',')] if tid_str else []
+        results.append(d)
+    return results
+
+
+def get_concept_topic_edges() -> List[Dict]:
+    """All concept→topic membership edges for graph visualization."""
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT concept_id, topic_id FROM concept_topics"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_due_count() -> int:
+    """Count concepts currently due for review."""
+    conn = _conn()
+    now = _now_iso()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM concepts WHERE next_review_at IS NOT NULL AND next_review_at <= ?",
+        (now,)
+    ).fetchone()
+    conn.close()
+    return row['cnt'] if row else 0
 
 
 def get_all_concepts_with_topics() -> List[Dict]:

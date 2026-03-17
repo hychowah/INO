@@ -62,6 +62,9 @@ REVIEW_NAG_COOLDOWN_HOURS = 4
 # Max reminders for an unanswered review before moving on to the next concept
 REVIEW_REMINDER_MAX = int(os.environ.get("LEARN_REVIEW_REMINDER_MAX", "3"))
 
+# Graph visualization — max concept nodes before filtering
+MAX_GRAPH_NODES = int(os.environ.get("LEARN_MAX_GRAPH_NODES", "500"))
+
 # ============================================================================
 # LLM PROVIDER SETTINGS
 # ============================================================================

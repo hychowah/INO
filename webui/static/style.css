@@ -393,3 +393,120 @@ tr:hover .btn-delete { opacity: 1; }
   .filter-btn-group { flex-wrap: wrap; }
   .concepts-toolbar { flex-wrap: wrap; gap: 8px; }
 }
+
+/* ============================================================================
+   Knowledge Graph
+   ============================================================================ */
+
+/* Full-bleed layout for graph page */
+.container.graph-page { max-width: none; padding: 0 0 0 0; }
+.container.graph-page .nav { padding: 12px 20px; }
+
+/* Graph container — fills viewport below nav */
+#graph-container {
+  width: 100%; height: calc(100vh - 110px);
+  position: relative; overflow: hidden;
+  background: var(--bg);
+}
+#graph-container svg { width: 100%; height: 100%; display: block; }
+
+/* Controls bar */
+.graph-controls {
+  display: flex; gap: 10px; padding: 10px 20px;
+  align-items: center; flex-wrap: wrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.graph-controls .toolbar-search { flex: 0 1 220px; min-width: 160px; }
+.graph-controls .toolbar-search input[type="text"] {
+  width: 100%; padding: 7px 28px 7px 10px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 13px;
+  font-family: inherit; outline: none; transition: border-color .15s;
+}
+.graph-controls .toolbar-search input:focus { border-color: var(--accent); }
+.graph-controls .toolbar-search input::placeholder { color: var(--text2); }
+.graph-controls .toolbar-search .search-clear {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text2); cursor: pointer;
+  font-size: 12px; padding: 3px; display: none;
+}
+.graph-controls select {
+  padding: 7px 28px 7px 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 13px;
+  font-family: inherit; cursor: pointer; outline: none;
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b949e' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+}
+.graph-controls select:focus { border-color: var(--accent); }
+
+/* Mastery node colors (4-bucket, with opacity for colorblind safety) */
+.node-struggling { fill: #ef4444; fill-opacity: 0.6; }
+.node-building   { fill: #f59e0b; fill-opacity: 0.75; }
+.node-solid      { fill: #84cc16; fill-opacity: 0.9; }
+.node-mastered   { fill: #22c55e; fill-opacity: 1.0; }
+.node-topic      { fill: var(--accent); fill-opacity: 0.85; }
+
+/* Edges */
+.graph-edge { stroke: #c9d1d9; stroke-opacity: 0.6; stroke-width: 1.5; }
+.graph-edge.membership { stroke-dasharray: 4 2; stroke: #58a6ff; stroke-opacity: 0.35; stroke-width: 1.5; }
+.graph-edge.edge-builds_on       { stroke: #4CAF50; stroke-opacity: 0.8; }
+.graph-edge.edge-contrasts_with  { stroke: #FF9800; stroke-opacity: 0.8; }
+.graph-edge.edge-commonly_confused { stroke: #F44336; stroke-opacity: 0.8; }
+.graph-edge.edge-applied_together  { stroke: #2196F3; stroke-opacity: 0.8; }
+.graph-edge.edge-same_phenomenon   { stroke: #9C27B0; stroke-opacity: 0.8; }
+
+/* Node interaction states */
+.node-dimmed { opacity: 0.15; }
+.node-match { filter: drop-shadow(0 0 5px var(--accent)); }
+.edge-dimmed { stroke-opacity: 0.08 !important; }
+
+/* Tooltip */
+.graph-tooltip {
+  position: absolute; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; max-width: 300px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  font-size: 13px; z-index: 100; line-height: 1.5;
+}
+.graph-tooltip .tt-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.graph-tooltip .tt-score { margin-bottom: 2px; }
+.graph-tooltip .tt-meta { color: var(--text2); font-size: 12px; }
+.graph-tooltip .tt-remark { color: var(--text2); font-size: 11px; margin-top: 4px; font-style: italic; max-height: 36px; overflow: hidden; }
+.graph-tooltip .mastery-bar { width: 120px; }
+
+/* Legend overlay */
+.graph-legend {
+  position: absolute; top: 12px; right: 12px; z-index: 50;
+  background: rgba(22,27,34,.92); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px; min-width: 180px;
+  font-size: 12px; line-height: 1.8;
+  backdrop-filter: blur(8px);
+}
+.graph-legend.collapsed { display: none; }
+.graph-legend h4 { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; margin: 8px 0 4px; }
+.graph-legend h4:first-child { margin-top: 0; }
+.graph-legend .legend-item { display: flex; align-items: center; gap: 8px; }
+.graph-legend .legend-swatch {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 50%; flex-shrink: 0;
+}
+.graph-legend .legend-line {
+  display: inline-block; width: 20px; height: 2px;
+  flex-shrink: 0; border-radius: 1px;
+}
+
+/* Cap notice banner */
+.graph-cap-notice {
+  background: rgba(210,153,34,.15); color: var(--yellow);
+  border-bottom: 1px solid rgba(210,153,34,.3);
+  padding: 8px 20px; font-size: 13px; text-align: center;
+}
+
+/* Mobile — hide graph, show fallback */
+@media (max-width: 699px) {
+  #graph-container, .graph-controls { display: none !important; }
+  #graph-mobile-fallback { display: block !important; }
+  .graph-cap-notice { display: none; }
+}

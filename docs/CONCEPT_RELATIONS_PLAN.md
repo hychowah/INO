@@ -1,6 +1,6 @@
 # Concept Relations & Topic Hierarchy — Implementation Plan
 
-> **Status:** MVP Complete (Phases 1-6)  
+> **Status:** Complete (Phases 1-9)  
 > **Created:** 2026-03-17  
 > **Goal:** Transform flat-topic structure into a knowledge graph with cross-concept relationships and better hierarchy.
 
@@ -224,25 +224,56 @@ Ship Phases 1-6 and validate with real usage for 1-2 weeks before continuing.
 
 ---
 
-## Phase 7: User Pruning (post-MVP, 30min)
+## Phase 7: User Pruning ✅
 
-- Add `_handle_remove_relation` to `services/tools.py`
-- Register in `ACTION_HANDLERS`
+- `_handle_remove_relation` added to `services/tools.py`
+- Registered in `ACTION_HANDLERS`
+- `remove_relation` documented in AGENTS.md
 
-## Phase 8: Web UI Graph (deferred)
+## Phase 8: Web UI Graph ✅
 
-- Bundle `d3.min.js` in `webui/static/`
-- `/graph` route with force-directed layout (nodes = concepts, colored by topic, sized by mastery)
-- `GET /api/graph` → `{nodes, edges}` JSON  
-- `POST /api/relations` + `DELETE /api/relations/{id}` on FastAPI (not custom HTTP server) with action logging
-- Click-to-connect mode, zoom/pan, search highlight
-- "Graph" nav link in page header
+**D3.js force-directed knowledge graph at `/graph` in the web UI.**
 
-## Phase 9: Scalability (deferred)
+### Implemented
+- `("graph", "Graph")` nav item in `webui/server.py` layout
+- `page_graph()` function — assembles same data shape as `/api/graph`, injects via `window.__GRAPH_DATA`
+- `webui/static/graph.js` — D3 v7 force-directed visualization with data/render layer separation
+- Full-bleed layout (`body_class` param on `layout()`, CSS override for `.graph-page`)
+- D3 v7 loaded from CDN
 
-- Paged due-concepts in context when count > 200
-- Lazy graph loading with topic-level clustering for 500+ nodes
-- `MAX_GRAPH_NODES = 500` cap with score-based filtering
+### Graph features
+- **Concept nodes**: uniform circles, 4-bucket discrete mastery colors (struggling/building/solid/mastered) with opacity variation for colorblind safety
+- **Topic nodes**: larger circles, accent blue, with labels
+- **Edges**: muted gray by default; relation type colors revealed on node hover/click
+- **Relation types**: 5 colors — builds_on (green), contrasts_with (orange), commonly_confused (red), applied_together (blue), same_phenomenon (purple)
+- **Concept→topic membership edges**: dashed, light gray
+- **Click**: navigates to `/concept/{id}` or `/topic/{id}`
+- **Hover tooltips**: title, mastery bar, due date, interval, review count, topics, description snippet
+- **Zoom/pan**: D3 zoom with auto-fit on load
+- **Node drag**: force simulation reheats on drag
+- **Search**: debounced (200ms), dims non-matches to 0.15 opacity, accent glow on matches
+- **Topic filter**: dropdown to show only concepts under a specific topic
+- **Mastery filter**: btn-group (All/Struggling/Building/Solid/Mastered)
+- **Layout toggle**: "Free Layout" (force-directed) / "Group by Topic" (cluster by topic positions)
+- **Legend**: collapsible overlay (ⓘ button), shows mastery buckets + relation type colors
+- **Edge states**: <5 nodes shows "getting started" notice; no relations hides relation layer
+- **Mobile**: `<700px` hides graph, shows fallback message with links to Topics/Concepts pages
+- **`MAX_GRAPH_NODES` cap**: configurable via `config.py` / env var, top N by mastery with banner notice
+
+### API enrichments
+- `get_all_concepts_summary()` — added `topic_ids` (int[]), `next_review_at`, `interval_days`; optional `limit`/`offset` params
+- `get_concept_topic_edges()` — new function returning concept→topic membership edges
+- `GET /api/graph` — added `concept_topic_edges`, `total_concepts` to response; added `topic_id`, `min_mastery`, `max_mastery`, `max_nodes` query params for server-side filtering
+
+## Phase 9: Scalability ✅
+
+- `MAX_GRAPH_NODES = 500` config constant with env var override
+- `get_all_concepts_summary()` accepts optional `limit`/`offset` params
+- `get_due_concepts()` accepts `offset` param (backward compatible)
+- `get_due_count()` helper for efficient COUNT query
+- Dynamic due-concept header in LLM context: shows "(top 5 of N)" when total > 5
+- `/api/graph` server-side filtering: `?topic_id=&min_mastery=&max_mastery=&max_nodes=`
+- Client-side: auto-switch to cluster layout for large graphs, concept labels hidden at 30+ nodes
 
 ---
 

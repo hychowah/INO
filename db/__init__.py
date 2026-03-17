@@ -32,8 +32,10 @@ from db.concepts import (
     add_concept, get_concept, update_concept, delete_concept,
     link_concept, unlink_concept,
     find_concept_by_title,
-    get_concepts_for_topic, get_due_concepts, get_next_review_concept,
+    get_concepts_for_topic, get_due_concepts, get_due_count,
+    get_next_review_concept,
     get_all_concepts_summary, get_all_concepts_with_topics,
+    get_concept_topic_edges,
     search_concepts,
     get_concept_detail,
 )

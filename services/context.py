@@ -97,9 +97,11 @@ def build_lightweight_context(mode: str = "command") -> str:
         parts.append("No topics yet.")
     parts.append("")
 
-    # Due concepts (top 5)
+    # Due concepts (top 5, with total count)
     due = db.get_due_concepts(limit=5)
-    parts.append("## Due for Review (top 5)")
+    total_due = db.get_due_count()
+    due_header = f"## Due for Review (top 5 of {total_due})" if total_due > 5 else "## Due for Review (top 5)"
+    parts.append(due_header)
     if due:
         for c in due:
             topic_ids = c.get('topic_ids', [])
