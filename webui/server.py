@@ -512,6 +512,7 @@ def page_concepts() -> str:
             'interval_days': c.get('interval_days', 1),
             'review_count': c.get('review_count', 0),
             'next_review_at': c.get('next_review_at'),
+            'last_reviewed_at': c.get('last_reviewed_at'),
             'latest_remark': c.get('latest_remark'),
             'topics': c.get('topics', []),
         })
@@ -524,7 +525,7 @@ window.__TOPICS = {json.dumps(topic_list, default=str)};
     body = f"""
     {data_script}
     <div class="concepts-header">
-      <h2>All Concepts <span id="concepts-count" class="concepts-count-badge"></span></h2>
+      <h2>All Concepts <span id="concepts-count" class="concepts-count-badge">({len(concepts_json)})</span></h2>
     </div>
     <div class="concepts-toolbar">
       <div class="toolbar-search">
@@ -538,6 +539,7 @@ window.__TOPICS = {json.dumps(topic_list, default=str)};
         <button class="filter-btn active" data-status="all">All</button>
         <button class="filter-btn" data-status="due">🔴 Due</button>
         <button class="filter-btn" data-status="upcoming">Upcoming</button>
+        <button class="filter-btn" data-status="never">New</button>
       </div>
     </div>
     <table id="concepts-table">
@@ -549,11 +551,12 @@ window.__TOPICS = {json.dumps(topic_list, default=str)};
         <th class="sortable th-interval" data-sort="interval_days">Interval</th>
         <th class="sortable th-reviews" data-sort="review_count">Reviews</th>
         <th class="sortable" data-sort="next_review_at">Next Review</th>
+        <th class="sortable th-last-review" data-sort="last_reviewed_at">Last Review</th>
         <th class="th-actions"></th>
       </tr></thead>
       <tbody id="concepts-body"></tbody>
     </table>
-    <div id="concepts-empty" class="empty" style="display:none">No concepts match your filters.</div>
+    <div id="concepts-empty" class="empty" style="display:none"></div>
 
     <!-- Delete confirmation modal -->
     <div id="delete-modal" class="modal-overlay" style="display:none">

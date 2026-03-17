@@ -528,6 +528,9 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     db.set_session('last_assess_concept_id', str(cid))
     db.set_session('last_assess_quality', str(quality))
 
+    # Clear pending review state — the quiz has been answered
+    db.set_session('pending_review', None)
+
     # Log the review
     db.add_review(cid, question, user_response, quality, assessment)
 

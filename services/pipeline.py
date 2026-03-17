@@ -242,7 +242,21 @@ async def execute_llm_response(user_input: str, llm_response: str,
         history_msg = message
 
     if user_input and not user_input.startswith('[BUTTON]'):
-        db.add_chat_message('user', user_input)
+        if user_input.startswith('[SCHEDULED_REVIEW]'):
+            # Save a sanitized marker instead of the raw synthetic prompt.
+            # This prevents the LLM from seeing a fake "user" message while
+            # still giving it context that a review quiz is pending.
+            # Payload format: "... concept: <id>|<context_string>"
+            import re
+            try:
+                m = re.search(r':\s*(\d+)\|', user_input)
+                cid = m.group(1) if m else '?'
+                db.add_chat_message('user',
+                    f'[system: review quiz sent for concept #{cid} — awaiting response]')
+            except Exception:
+                pass  # don't let marker extraction break the pipeline
+        else:
+            db.add_chat_message('user', user_input)
     if history_msg:
         db.add_chat_message('assistant', history_msg)
 

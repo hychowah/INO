@@ -1,9 +1,17 @@
 """
 Learning review scheduler — background task that checks for due reviews
 every N minutes and sends Discord DMs with quiz questions.
+
+Pending review tracking (DB-backed, survives restarts):
+  session_state key 'pending_review' stores a JSON blob:
+  {"concept_id": 12, "concept_title": "...", "question": "...",
+   "sent_at": "ISO-datetime", "reminder_count": 0}
+  Set AFTER a review DM is confirmed sent; cleared only by _handle_assess
+  or when max reminders are exhausted.
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -22,13 +30,67 @@ logger = logging.getLogger("scheduler")
 _bot = None
 _authorized_user_id = None
 
-# Cooldown tracking: {concept_id: datetime_last_sent}
-_review_sent_at: dict[int, datetime] = {}
 
+# ============================================================================
+# Pending review helpers
+# ============================================================================
+
+def _get_pending_review() -> dict | None:
+    """Read pending review blob from session state. Returns dict or None."""
+    raw = db.get_session('pending_review')
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Corrupt pending_review in session state — clearing")
+        db.set_session('pending_review', None)
+        return None
+
+
+def _set_pending_review(concept_id: int, concept_title: str,
+                        question: str) -> None:
+    """Write a new pending review blob. Called AFTER DM is confirmed sent."""
+    blob = {
+        'concept_id': concept_id,
+        'concept_title': concept_title,
+        'question': question,
+        'sent_at': datetime.now().isoformat(),
+        'reminder_count': 0,
+    }
+    db.set_session('pending_review', json.dumps(blob))
+    logger.debug(f"Set pending review: concept #{concept_id}")
+
+
+def _update_pending_reminder(pending: dict) -> None:
+    """Increment reminder count + reset sent_at after sending a reminder."""
+    pending['reminder_count'] = pending.get('reminder_count', 0) + 1
+    pending['sent_at'] = datetime.now().isoformat()
+    db.set_session('pending_review', json.dumps(pending))
+
+
+def _clear_pending_review() -> None:
+    """Clear pending review state (max reminders exhausted or concept deleted)."""
+    db.set_session('pending_review', None)
+    logger.debug("Cleared pending review state")
+
+
+# ============================================================================
+# Review check & send
+# ============================================================================
 
 async def _check_reviews():
     """Check for due concepts and send review quizzes via DM.
-    Suppressed if user has been active within SESSION_TIMEOUT_MINUTES."""
+
+    Flow:
+    1. Suppress if user is in an active session.
+    2. If a review is pending (unanswered):
+       a. Concept deleted? → clear pending, fall through to normal flow.
+       b. < cooldown elapsed? → skip entirely (wait for user).
+       c. ≥ cooldown & reminders left? → send static reminder, return.
+       d. Max reminders reached? → clear pending, fall through.
+    3. No pending review → pick next due concept, send LLM-generated quiz.
+    """
     # Suppress during active session to avoid interrupting conversation
     from services.state import last_activity_at
     if last_activity_at:
@@ -38,34 +100,112 @@ async def _check_reviews():
             return
 
     logger.debug("Running review-check...")
+
+    # --- Handle pending (unanswered) review ---
+    pending = _get_pending_review()
+    if pending:
+        cid = pending.get('concept_id')
+        title = pending.get('concept_title', 'Unknown')
+
+        # Guard: concept might have been deleted while pending
+        if cid and not db.get_concept(cid):
+            logger.info(f"Pending concept #{cid} no longer exists — clearing")
+            _clear_pending_review()
+            # Fall through to normal flow below
+        else:
+            # Check cooldown since last send/reminder
+            sent_at_str = pending.get('sent_at', '')
+            try:
+                sent_at = datetime.fromisoformat(sent_at_str)
+            except (ValueError, TypeError):
+                sent_at = datetime.now()
+
+            cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
+            elapsed = datetime.now() - sent_at
+
+            if elapsed < cooldown:
+                logger.debug(
+                    f"Pending review #{cid} — {elapsed.total_seconds()/3600:.1f}h "
+                    f"< {config.REVIEW_NAG_COOLDOWN_HOURS}h cooldown, skipping"
+                )
+                return
+
+            # Cooldown expired — check reminder count
+            reminder_count = pending.get('reminder_count', 0)
+            max_reminders = getattr(config, 'REVIEW_REMINDER_MAX', 3)
+
+            if reminder_count >= max_reminders:
+                logger.info(
+                    f"Pending review #{cid} — {reminder_count} reminders sent, "
+                    f"giving up and moving to next concept"
+                )
+                _clear_pending_review()
+                # Fall through to normal flow below
+            else:
+                # Send a static reminder (no LLM call)
+                await _send_review_reminder(pending)
+                return
+
+    # --- Normal flow: pick next due concept and send LLM-generated quiz ---
     try:
-        # Direct call — no subprocess
         review_lines = pipeline.handle_review_check()
 
         if not review_lines:
             logger.debug("No pending reviews")
             return
 
-        cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
-        now = datetime.now()
-
-        for line in review_lines:
-            # Extract concept_id from "id|context" format
-            try:
-                cid = int(line.split("|", 1)[0])
-            except (ValueError, IndexError):
-                cid = None
-
-            if cid and cid in _review_sent_at:
-                if now - _review_sent_at[cid] < cooldown:
-                    logger.debug(f"Skipping concept #{cid} — sent within cooldown")
-                    continue
-
-            logger.info(f"Review due: {line[:80]}")
-            await _send_review_quiz(line)
+        line = review_lines[0]
+        logger.info(f"Review due: {line[:80]}")
+        await _send_review_quiz(line)
 
     except Exception as e:
         logger.error(f"Error in review-check: {e}", exc_info=True)
+
+
+async def _send_review_reminder(pending: dict):
+    """Send a static reminder DM for an unanswered review (no LLM call).
+    Also re-sets active_concept_id so the assess pipeline works when the
+    user eventually replies."""
+    if not _bot or not _authorized_user_id:
+        return
+
+    cid = pending.get('concept_id')
+    title = pending.get('concept_title', 'Unknown')
+    reminder_count = pending.get('reminder_count', 0) + 1
+    max_reminders = getattr(config, 'REVIEW_REMINDER_MAX', 3)
+    remaining = max_reminders - reminder_count
+
+    try:
+        user = await _bot.fetch_user(_authorized_user_id)
+        if not user:
+            return
+
+        if remaining > 0:
+            msg = (
+                f"📚 **Reminder** — You have a pending review question on "
+                f"**{title}**. Reply when you're ready! "
+                f"({remaining} reminder{'s' if remaining != 1 else ''} left before I move on)"
+            )
+        else:
+            msg = (
+                f"📚 **Reminder** — Last nudge about **{title}**! "
+                f"Reply when you're ready, or I'll move to a new concept next time."
+            )
+
+        await user.send(msg)
+        logger.info(f"Sent review reminder #{reminder_count} for concept #{cid}")
+
+        # Re-set active_concept_id so the assess pipeline knows which
+        # concept the user's eventual reply is about
+        db.set_session('active_concept_id', str(cid))
+
+        # Update pending state (increment counter, reset timer)
+        _update_pending_reminder(pending)
+
+    except discord.Forbidden:
+        logger.error("Cannot send DM (forbidden)")
+    except Exception as e:
+        logger.error(f"Error sending review reminder: {e}", exc_info=True)
 
 
 async def _send_review_quiz(payload: str):
@@ -73,8 +213,8 @@ async def _send_review_quiz(payload: str):
     Send a review quiz DM.
     payload format: concept_id|context_string
 
-    Uses kimi-cli via the pipeline to generate a question,
-    then DMs it and activates the chat session.
+    Calls the LLM to generate a quiz question, DMs it to the user,
+    then sets pending review state (AFTER confirmed send).
     """
     if not _bot or not _authorized_user_id:
         logger.error("Bot not initialized, can't send review")
@@ -85,6 +225,12 @@ async def _send_review_quiz(payload: str):
         if not user:
             logger.error(f"Could not find user {_authorized_user_id}")
             return
+
+        # Extract concept_id and title from payload for pending state
+        try:
+            cid = int(payload.split("|", 1)[0])
+        except (ValueError, IndexError):
+            cid = None
 
         try:
             review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
@@ -109,12 +255,15 @@ async def _send_review_quiz(payload: str):
                 await user.send(truncate_for_discord(
                     f"📚 **Learning Review**\n{message}"))
                 logger.info("Sent review DM")
-                # Track cooldown
-                try:
-                    cid = int(payload.split("|", 1)[0])
-                    _review_sent_at[cid] = datetime.now()
-                except (ValueError, IndexError):
-                    pass
+
+                # Set pending review state AFTER DM is confirmed sent.
+                # This avoids the race condition where pending is set
+                # during the LLM await but the user answers a previous
+                # quiz in the meantime.
+                if cid:
+                    concept = db.get_concept(cid)
+                    concept_title = concept['title'] if concept else 'Unknown'
+                    _set_pending_review(cid, concept_title, message[:500])
             else:
                 logger.debug("Empty result for review quiz")
 

@@ -40,6 +40,7 @@ tr:hover { background: rgba(88,166,255,.06); }
 /* Score bar */
 .mastery-bar { display: inline-flex; position: relative; width: 80px; height: 16px; background: var(--border); border-radius: 8px; vertical-align: middle; overflow: hidden; }
 .mastery-bar .score-fill { height: 100%; border-radius: 8px; transition: width 0.3s ease; }
+.mastery-bar .score-fill.mastered { background: #2ea043; }
 .mastery-bar .score-fill.filled { background: var(--green); }
 .mastery-bar .score-fill.mid { background: var(--yellow); }
 .mastery-bar .score-fill.low { background: var(--red); }
@@ -50,7 +51,7 @@ tr:hover { background: rgba(88,166,255,.06); }
 
 /* Badge */
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.badge.due { background: rgba(248,81,73,.2); color: var(--red); }
+.badge.due { background: rgba(248,81,73,.35); color: var(--red); border: 1px solid rgba(248,81,73,.5); }
 .badge.ok { background: rgba(63,185,80,.2); color: var(--green); }
 
 /* Detail section */
@@ -280,7 +281,24 @@ tr:hover { background: rgba(88,166,255,.06); }
 .th-score { width: 100px; }
 .th-interval { width: 80px; }
 .th-reviews { width: 80px; }
+.th-last-review { width: 110px; }
 .th-actions { width: 44px; }
+
+/* Sticky table header */
+#concepts-table thead th { position: sticky; top: 0; z-index: 10; background: var(--bg); }
+
+/* Title cell truncation */
+#concepts-table td.td-title { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Due row left-edge highlight (box-shadow avoids border-collapse conflict) */
+#concepts-table tr[data-due] { box-shadow: inset 3px 0 0 var(--red); }
+
+/* Remark preview below concept title */
+.concept-remark-preview {
+  color: var(--text2); font-size: 12px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 260px;
+}
 
 /* Delete button in table */
 .btn-delete {

@@ -49,13 +49,46 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
+  function formatRelative(dateStr) {
+    if (!dateStr) return "—";
+    // Normalise space-separated DB format to ISO T-format (required for Safari)
+    const d = new Date(dateStr.replace(" ", "T"));
+    if (isNaN(d)) return dateStr;
+    const now = new Date();
+    const diffMs = d - now;
+    const diffDays = Math.round(diffMs / 86400000);
+    if (diffDays < 0) {
+      const over = Math.abs(diffDays);
+      return over === 0 ? "Today" : `Overdue ${over}d`;
+    }
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Tomorrow";
+    if (diffDays <= 30) return `in ${diffDays}d`;
+    const months = Math.round(diffDays / 30);
+    return `in ~${months}mo`;
+  }
+
+  // For past-only dates (e.g. last reviewed): "3d ago", "today", "never"
+  function formatAgo(dateStr) {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr.replace(" ", "T"));
+    if (isNaN(d)) return dateStr;
+    const now = new Date();
+    const diffDays = Math.round((now - d) / 86400000);
+    if (diffDays <= 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays <= 30) return `${diffDays}d ago`;
+    const months = Math.round(diffDays / 30);
+    return `~${months}mo ago`;
+  }
+
   function scoreBarHtml(score) {
     score = Math.max(0, Math.min(100, parseInt(score) || 0));
     let cls = "low";
-    if (score >= 75) cls = "filled";
+    if (score >= 75) cls = "mastered";
     else if (score >= 50) cls = "filled";
     else if (score >= 25) cls = "mid";
-    return `<span class="mastery-bar"><span class="score-fill ${cls}" style="width:${score}%"></span><span class="score-label">${score}</span></span>`;
+    return `<span class="mastery-bar" title="Score: ${score}/100"><span class="score-fill ${cls}" style="width:${score}%"></span><span class="score-label">${score}</span></span>`;
   }
 
   // ── Filtering ──────────────────────────────────────────────────────
@@ -66,8 +99,13 @@
     const now = nowIso();
 
     return concepts.filter(c => {
-      // Text search
-      if (q && !(c.title || "").toLowerCase().includes(q)) return false;
+      // Text search — title, topic names, and remark
+      if (q) {
+        const inTitle  = (c.title || "").toLowerCase().includes(q);
+        const inTopics = (c.topics || []).some(t => (t.title || "").toLowerCase().includes(q));
+        const inRemark = (c.latest_remark || "").toLowerCase().includes(q);
+        if (!inTitle && !inTopics && !inRemark) return false;
+      }
 
       // Topic filter (by ID — no substring false matches)
       if (topicId) {
@@ -80,6 +118,8 @@
         if (!c.next_review_at || c.next_review_at > now) return false;
       } else if (state.status === "upcoming") {
         if (!c.next_review_at || c.next_review_at <= now) return false;
+      } else if (state.status === "never") {
+        if (c.review_count !== 0) return false;
       }
 
       return true;
@@ -133,6 +173,13 @@
 
     if (sorted.length === 0) {
       tbody.innerHTML = "";
+      if (concepts.length === 0) {
+        emptyEl.textContent = "No concepts yet — start a learning session in Discord to add your first one.";
+      } else if (state.status === "never") {
+        emptyEl.textContent = "No new concepts — all have been reviewed at least once.";
+      } else {
+        emptyEl.textContent = "No concepts match your current filters.";
+      }
       emptyEl.style.display = "";
       return;
     }
@@ -141,37 +188,37 @@
     const now = nowIso();
     let html = "";
     for (const c of sorted) {
-      // Topic tags
+      // Topic tags — include data-topic-id for in-place filter
       let tags = "";
       if (c.topics && c.topics.length > 0) {
         tags = c.topics.map(t =>
-          `<a href="/topic/${t.id}" class="tag">${escapeHtml(t.title)}</a>`
+          `<a href="/topic/${t.id}" class="tag tag-filter" data-topic-id="${t.id}">${escapeHtml(t.title)}</a>`
         ).join("");
       } else {
         tags = '<span style="color:var(--text2)">untagged</span>';
       }
 
       // Due badge
-      let due = "";
-      if (c.next_review_at) {
-        if (c.next_review_at <= now) {
-          due = ' <span class="badge due">DUE</span>';
-        }
-      }
+      const isDue = !!(c.next_review_at && c.next_review_at <= now);
+      const due = isDue ? ' <span class="badge due">DUE</span>' : "";
 
-      // Remark (truncated)
+      // Remark preview (truncated)
       const remark = c.latest_remark
         ? escapeHtml(c.latest_remark.length > 60 ? c.latest_remark.slice(0, 60) + "…" : c.latest_remark)
         : "";
 
-      html += `<tr data-id="${c.id}">
+      // Interval: hide for never-reviewed concepts
+      const intervalCell = c.review_count > 0 ? `${c.interval_days || 1}d` : "—";
+
+      html += `<tr data-id="${c.id}"${isDue ? ' data-due="true"' : ''}>
         <td><a href="/concept/${c.id}">#${c.id}</a></td>
-        <td><a href="/concept/${c.id}">${escapeHtml(c.title)}</a></td>
+        <td class="td-title"><a href="/concept/${c.id}" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</a>${remark ? `<div class="concept-remark-preview">${remark}</div>` : ""}</td>
         <td>${tags}</td>
         <td>${scoreBarHtml(c.mastery_level)}</td>
-        <td>${c.interval_days || 1}d</td>
+        <td>${intervalCell}</td>
         <td>${c.review_count || 0}</td>
-        <td>${c.next_review_at || "—"}${due}</td>
+        <td title="${c.next_review_at || ''}">${formatRelative(c.next_review_at)}${due}</td>
+        <td title="${c.last_reviewed_at || ''}">${formatAgo(c.last_reviewed_at)}</td>
         <td><button class="btn-delete" data-id="${c.id}" data-title="${escapeHtml(c.title)}" data-reviews="${c.review_count || 0}" title="Delete concept"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H5.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1h2a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button></td>
       </tr>`;
     }
@@ -360,6 +407,11 @@
     }
 
     // Sortable column headers
+    const SORT_DEFAULTS = {
+      mastery_level: "desc", review_count: "desc",
+      interval_days: "desc", last_reviewed_at: "desc",
+      title: "asc", id: "asc", next_review_at: "asc",
+    };
     document.querySelectorAll("#concepts-table th.sortable").forEach(th => {
       th.addEventListener("click", () => {
         const field = th.dataset.sort;
@@ -367,13 +419,32 @@
           state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
         } else {
           state.sortField = field;
-          state.sortDir = "asc";
+          state.sortDir = SORT_DEFAULTS[field] ?? "asc";
         }
         saveState();
         updateSortIndicators();
         renderTable();
       });
     });
+
+    // Topic tag in-place filter (event delegation on static table element)
+    const conceptsTable = document.getElementById("concepts-table");
+    if (conceptsTable) {
+      conceptsTable.addEventListener("click", e => {
+        const tag = e.target.closest(".tag-filter");
+        if (!tag) return;
+        // Allow Ctrl/Meta/middle-click to navigate normally
+        if (e.ctrlKey || e.metaKey || e.button === 1) return;
+        e.preventDefault();
+        const id = tag.dataset.topicId;
+        // Toggle off if same topic already active
+        state.topicId = (state.topicId === id) ? "" : id;
+        const dropdown = document.getElementById("concept-topic-filter");
+        if (dropdown) dropdown.value = state.topicId;
+        saveState();
+        renderTable();
+      });
+    }
 
     // Delete modal events
     const modal = document.getElementById("delete-modal");

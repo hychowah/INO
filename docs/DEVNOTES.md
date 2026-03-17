@@ -18,6 +18,7 @@
 4. [Codebase Restructuring for LLM Dev Scalability](#4-codebase-restructuring-for-llm-dev-scalability)
 5. [FastAPI Backend & Project Restructuring](#5-fastapi-backend--project-restructuring)
 6. [Concept/Topic ID Confusion After add_concept Confirmation](#6-concepttopic-id-confusion-after-add_concept-confirmation)
+7. [Pending Review Tracking & Phantom Answer Bug](#7-pending-review-tracking--phantom-answer-bug)
 
 ---
 
@@ -491,3 +492,53 @@ Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or an
 5. **Reinforced in maintenance prompt (pipeline.py):** Added explicit reminder in the `[MAINTENANCE]` prompt text that score fields must not be changed via `update_concept`.
 
 **Lesson:** When the LLM has both the data (raw scores) and the tool (`update_concept`) to modify it, prompt instructions alone are insufficient — add a code-level guard. Defense in depth: remove the temptation (hide raw scores from maintenance), add the prompt instruction, AND enforce at the code layer.
+
+---
+
+## 7. Pending Review Tracking & Phantom Answer Bug
+
+### 7.1 Bug: scheduler sends new questions when user hasn't answered
+**Date:** 2026-03-17
+
+**Symptom:** The scheduler sent 3-4 unanswered review quiz DMs in sequence. The user didn't reply to any of them, but each 15-minute cycle picked a new concept and sent a fresh question. Additionally, the LLM sometimes "perceived" that the user had answered a previous review quiz — generating assessment remarks like "user nailed the vacancy jump" — even though the user never replied.
+
+**Root cause (three layers):**
+
+1. **No pending review tracking.** The scheduler had no concept of "there's an unanswered quiz." The only guard was `_review_sent_at` — an in-memory per-concept cooldown dict (lost on restart). After the cooldown expired (4h), or after a restart, the same concept could be re-sent. Nothing prevented picking a *different* concept every 15 minutes while the first remained unanswered.
+
+2. **Chat history pollution from `[SCHEDULED_REVIEW]`.** When the scheduler generated a quiz, `execute_llm_response()` saved the synthetic `[SCHEDULED_REVIEW] Start a review quiz for...` string as a `role='user'` message in chat history. The LLM's quiz was saved as `role='assistant'`. On the next LLM call (whether scheduler or user-initiated), the history showed what looked like a user→agent exchange — the LLM could interpret this as "the user engaged with the quiz" when they never did. Combined with existing remarks from prior reviews (e.g., "user nailed the vacancy jump last time"), the LLM hallucinated that the user had answered.
+
+3. **No reminder mechanism.** When the user ignored a review DM, the system went silent until the cooldown expired and picked a new concept. No nudge, no escalation, just a growing pile of unanswered questions.
+
+### 7.2 Fix: DB-backed pending state + sanitized chat history + reminders
+
+**a) Pending review state (scheduler.py):**
+- Added `pending_review` session state key storing a JSON blob: `{concept_id, concept_title, question, sent_at, reminder_count}`.
+- Set AFTER `user.send()` succeeds (not before the LLM call) to avoid a race condition where the user answers a previous quiz during the `await`.
+- `_check_reviews()` now checks pending state first:
+  - Pending + concept deleted → clear, fall through to normal flow.
+  - Pending + cooldown not elapsed → skip entirely (no new question).
+  - Pending + cooldown elapsed + reminders left → send static reminder DM (no LLM call), re-set `active_concept_id` for the assess pipeline, return.
+  - Pending + max reminders exhausted → clear, fall through to pick new concept.
+- Replaced the in-memory `_review_sent_at` dict entirely — single DB-backed system.
+
+**b) Chat history sanitization (pipeline.py `execute_llm_response`):**
+- Messages starting with `[SCHEDULED_REVIEW]` are no longer saved raw as `role='user'`.
+- Instead, a sanitized marker is saved: `[system: review quiz sent for concept #12 — awaiting response]`.
+- The assistant's quiz question is still saved normally, giving the LLM the full picture: a quiz was sent, here's the question, the user hasn't answered yet.
+
+**c) Pending cleared on assess only (tools.py `_handle_assess`):**
+- `db.set_session('pending_review', None)` added after successful assessment.
+- This is the only place pending state is cleared (besides max-reminder expiry and concept-deletion guard).
+- Casual messages about unrelated topics do NOT clear the pending review — only an actual answer does.
+
+**d) Static reminders (scheduler.py):**
+- `_send_review_reminder()` sends a fixed-template nudge (no LLM call).
+- Re-sets `active_concept_id` so the assess pipeline works when the user eventually replies.
+- `REVIEW_REMINDER_MAX` config (default 3) limits total reminders before moving on.
+
+**Design decisions:**
+- **Single JSON blob** over multiple session keys — atomic read/write, stores question text for context.
+- **Set pending AFTER `user.send()`** — avoids race condition with concurrent assess during LLM await.
+- **Static reminders** — saves LLM tokens, avoids the LLM generating phantom assessments during reminders.
+- **`/review` command does NOT set pending state** — user-initiated reviews are active engagement, not unsolicited DMs.
