@@ -20,7 +20,7 @@ from db.core import (
 
 # Topics
 from db.topics import (
-    add_topic, get_topic, update_topic, delete_topic,
+    add_topic, get_topic, find_topic_by_title, update_topic, delete_topic,
     link_topics, unlink_topics, get_all_topics, get_topic_relations,
     get_topic_children, get_topic_parents,
     search_topics,

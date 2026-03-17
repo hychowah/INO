@@ -8,9 +8,9 @@ Run with: uvicorn api:app --host 0.0.0.0 --port 8080 --reload
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config
 import db
@@ -71,6 +71,45 @@ class ChatResponse(BaseModel):
     type: str
     message: str
     pending_action: dict | None = None
+
+# ============================================================================
+# Request / Response Models — CRUD
+# ============================================================================
+
+class CreateConceptRequest(BaseModel):
+    title: str = Field(..., max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    topic_ids: list[int] | None = None
+    topic_titles: list[str] | None = None
+
+class UpdateConceptRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+
+class RemarkRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+
+class CreateTopicRequest(BaseModel):
+    title: str = Field(..., max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    parent_ids: list[int] | None = None
+
+class UpdateTopicRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+
+class TopicLinkRequest(BaseModel):
+    parent_id: int
+    child_id: int
+
+class CreateRelationRequest(BaseModel):
+    concept_id_a: int
+    concept_id_b: int
+    relation_type: str = "builds_on"
+
+class RemoveRelationRequest(BaseModel):
+    concept_id_a: int
+    concept_id_b: int
 
 # ============================================================================
 # Endpoints
@@ -166,6 +205,89 @@ async def get_topic(topic_id: int):
     }
 
 
+# ============================================================================
+# Topic CRUD
+# ============================================================================
+
+@app.post("/api/topics", status_code=201, dependencies=[Depends(verify_token)])
+async def create_topic(req: CreateTopicRequest):
+    """Create a new learning topic."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    topic_id = db.add_topic(
+        title=req.title,
+        description=req.description,
+        parent_ids=req.parent_ids,
+    )
+    return {"id": topic_id, "title": req.title, "message": f"Created topic '{req.title}'."}
+
+
+@app.put("/api/topics/{topic_id}", dependencies=[Depends(verify_token)])
+async def update_topic(topic_id: int, req: UpdateTopicRequest):
+    """Update topic fields."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    existing = db.get_topic(topic_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    fields = req.model_dump(exclude_unset=True)
+    if fields:
+        db.update_topic(topic_id, **fields)
+
+    return db.get_topic(topic_id)
+
+
+@app.delete("/api/topics/{topic_id}", dependencies=[Depends(verify_token)])
+async def delete_topic(topic_id: int):
+    """Delete a topic."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    if not db.delete_topic(topic_id):
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return {"message": f"Topic {topic_id} deleted."}
+
+
+@app.post("/api/topics/link", dependencies=[Depends(verify_token)])
+async def link_topics(req: TopicLinkRequest):
+    """Create a parent→child relationship between two topics."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    if req.parent_id == req.child_id:
+        raise HTTPException(status_code=400, detail="Cannot link a topic to itself")
+
+    # Check if already linked (idempotent — not an error)
+    children = db.get_topic_children(req.parent_id)
+    if any(c['id'] == req.child_id for c in children):
+        return {"message": "Already linked."}
+
+    success = db.link_topics(req.parent_id, req.child_id)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Cycle detected — this link would create a circular dependency",
+        )
+    return {"message": f"Linked topic {req.child_id} under topic {req.parent_id}."}
+
+
+@app.post("/api/topics/unlink", dependencies=[Depends(verify_token)])
+async def unlink_topics(req: TopicLinkRequest):
+    """Remove a parent→child relationship between two topics."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    db.unlink_topics(req.parent_id, req.child_id)
+    return {"message": f"Unlinked topic {req.child_id} from topic {req.parent_id}."}
+
+
+# ============================================================================
+# Concept CRUD
+# ============================================================================
+
 @app.get("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
 async def get_concept(concept_id: int):
     """Concept detail with remarks and review history."""
@@ -174,6 +296,215 @@ async def get_concept(concept_id: int):
         raise HTTPException(status_code=404, detail="Concept not found")
     return detail
 
+
+@app.get("/api/concepts", dependencies=[Depends(verify_token)])
+async def list_concepts(
+    topic_id: int | None = None,
+    search: str | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+):
+    """List concepts with optional filtering and pagination."""
+    if search:
+        # FTS search — no offset support, return matching page
+        all_items = db.search_concepts(query=search, limit=per_page * page)
+        total = len(all_items)
+        offset = (page - 1) * per_page
+        items = all_items[offset:offset + per_page]
+    elif topic_id is not None:
+        all_items = db.get_concepts_for_topic(topic_id)
+        total = len(all_items)
+        offset = (page - 1) * per_page
+        items = all_items[offset:offset + per_page]
+    else:
+        all_items = db.get_all_concepts_with_topics()
+        total = len(all_items)
+        offset = (page - 1) * per_page
+        items = all_items[offset:offset + per_page]
+
+    return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+
+@app.post("/api/concepts", status_code=201, dependencies=[Depends(verify_token)])
+async def create_concept(req: CreateConceptRequest):
+    """Create a new concept under one or more topics."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    # Duplicate check
+    existing = db.find_concept_by_title(req.title)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Concept already exists with id {existing['id']}",
+        )
+
+    # Resolve topic_titles to IDs (exact match or create)
+    topic_ids = list(req.topic_ids) if req.topic_ids else []
+    if req.topic_titles:
+        for title in req.topic_titles:
+            found = db.find_topic_by_title(title)
+            if found:
+                topic_ids.append(found['id'])
+            else:
+                new_id = db.add_topic(title=title)
+                topic_ids.append(new_id)
+
+    concept_id = db.add_concept(
+        title=req.title,
+        description=req.description,
+        topic_ids=topic_ids or None,
+    )
+    return {"id": concept_id, "title": req.title, "message": f"Created concept '{req.title}'."}
+
+
+@app.put("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
+async def update_concept(concept_id: int, req: UpdateConceptRequest):
+    """Update concept fields (title, description)."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    existing = db.get_concept(concept_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Concept not found")
+
+    fields = req.model_dump(exclude_unset=True)
+    if fields:
+        db.update_concept(concept_id, **fields)
+
+    return db.get_concept(concept_id)
+
+
+@app.delete("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
+async def delete_concept(concept_id: int):
+    """Delete a concept and all its relations, remarks, and review logs."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    if not db.delete_concept(concept_id):
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return {"message": f"Concept {concept_id} deleted."}
+
+
+@app.post("/api/concepts/{concept_id}/remarks", status_code=201, dependencies=[Depends(verify_token)])
+async def add_remark(concept_id: int, req: RemarkRequest):
+    """Add a remark (note) to a concept."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    existing = db.get_concept(concept_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Concept not found")
+
+    remark_id = db.add_remark(concept_id, req.content)
+    return {"id": remark_id, "concept_id": concept_id, "content": req.content}
+
+
+# ============================================================================
+# Relations
+# ============================================================================
+
+@app.get("/api/concepts/{concept_id}/relations", dependencies=[Depends(verify_token)])
+async def get_concept_relations(concept_id: int):
+    """Get all relationships for a concept."""
+    existing = db.get_concept(concept_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return db.get_relations(concept_id)
+
+
+@app.post("/api/relations", status_code=201, dependencies=[Depends(verify_token)])
+async def create_relation(req: CreateRelationRequest):
+    """Create a relationship between two concepts."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    if req.relation_type not in db.VALID_RELATION_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid relation_type. Must be one of: {', '.join(sorted(db.VALID_RELATION_TYPES))}",
+        )
+
+    relation_id = db.add_relation(req.concept_id_a, req.concept_id_b, req.relation_type)
+    if relation_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Relation rejected (duplicate, cap exceeded, self-referential, or invalid concept IDs)",
+        )
+    return {"id": relation_id}
+
+
+@app.post("/api/relations/remove", dependencies=[Depends(verify_token)])
+async def remove_relation(req: RemoveRelationRequest):
+    """Remove a relationship between two concepts."""
+    from services.tools import set_action_source
+    set_action_source('api')
+
+    db.remove_relation(req.concept_id_a, req.concept_id_b)
+    return {"message": "Relation removed."}
+
+
+# ============================================================================
+# Reviews & Logs
+# ============================================================================
+
+@app.get("/api/reviews", dependencies=[Depends(verify_token)])
+async def get_reviews(
+    concept_id: int | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """Get review history for a concept."""
+    if concept_id is None:
+        raise HTTPException(status_code=400, detail="concept_id query parameter is required")
+    return db.get_recent_reviews(concept_id, limit=limit)
+
+
+@app.get("/api/reviews/next", dependencies=[Depends(verify_token)])
+async def get_next_review():
+    """Get the next concept due for review (nearest next_review_at)."""
+    return db.get_next_review_concept()
+
+
+@app.get("/api/actions", dependencies=[Depends(verify_token)])
+async def get_actions(
+    action: str | None = None,
+    source: str | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1, le=100),
+):
+    """Audit log with optional filters and pagination."""
+    offset = (page - 1) * per_page
+    items = db.get_action_log(
+        limit=per_page,
+        offset=offset,
+        action_filter=action,
+        source_filter=source,
+    )
+    total = db.get_action_log_count(
+        action_filter=action,
+        source_filter=source,
+    )
+    return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+
+# ============================================================================
+# Graph
+# ============================================================================
+
+@app.get("/api/graph", dependencies=[Depends(verify_token)])
+async def get_graph():
+    """Knowledge graph: concept nodes, topic nodes, and all edges."""
+    return {
+        "concept_nodes": db.get_all_concepts_summary(),
+        "topic_nodes": db.get_all_topics(),
+        "concept_edges": db.get_all_relations(),
+        "topic_edges": db.get_topic_relations(),
+    }
+
+
+# ============================================================================
+# Due / Stats / Health
+# ============================================================================
 
 @app.get("/api/due", dependencies=[Depends(verify_token)])
 async def get_due(limit: int = 10):

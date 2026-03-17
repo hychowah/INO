@@ -48,6 +48,16 @@ def get_topic(topic_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
+def find_topic_by_title(title: str) -> Optional[Dict]:
+    """Find a topic by exact title (case-insensitive). Returns topic dict or None."""
+    conn = _conn()
+    row = conn.execute(
+        "SELECT * FROM topics WHERE LOWER(title) = LOWER(?)", (title,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def update_topic(topic_id: int, **kwargs) -> bool:
     """Update topic fields. Returns True if topic was found."""
     allowed = {'title', 'description'}

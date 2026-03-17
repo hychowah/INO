@@ -239,3 +239,87 @@ python bot.py                        # Start Discord bot
 ```
 
 Both entry points can run simultaneously — SQLite WAL mode handles concurrent access.
+
+---
+
+## Future Direction — Mobile App (React Native)
+
+> **Status:** Not started. Current priority is reliable backend + prompt instructions.
+> The plan is to eventually ship this as a React Native / Expo mobile app.
+> All work below is about making the **backend app-ready** — no mobile code yet.
+
+### Why This Matters Now
+
+The web UI (`webui/server.py`) uses a stdlib HTTP server with direct `import db` calls — HTML is built in Python f-strings. This is fine as a localhost dashboard but **not reusable** as an app frontend. The FastAPI API (`api.py`) is the intended backend for any future client (mobile, desktop, or web SPA).
+
+**Current goal:** Expand `api.py` to cover all CRUD operations so that:
+1. Any future frontend (React Native, web SPA) has a complete REST API to consume
+2. The web dashboard could optionally be migrated to use the API too (not required)
+3. No business logic lives in transport-specific code (bot.py, webui/server.py)
+
+### Architecture (current + future)
+
+```
+[Future] Mobile App  ──→  api.py (FastAPI :8080)  ──→  services/pipeline.py  ──→  db/
+Discord Bot          ──→  bot.py                   ──→  services/pipeline.py  ──→  db/
+Web Dashboard        ──→  webui/server.py           ──→  db/  (direct, read-only)
+```
+
+### Current API Coverage (api.py)
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/api/chat` | POST | Bearer | Send message to LLM agent |
+| `/api/chat/confirm` | POST | Bearer | Confirm pending add_concept |
+| `/api/topics` | GET | Bearer | Hierarchical topic map |
+| `/api/topics/{id}` | GET | Bearer | Topic detail + concepts |
+| `/api/concepts/{id}` | GET | Bearer | Concept detail + remarks + reviews |
+| `/api/due` | GET | Bearer | Due concepts for review |
+| `/api/stats` | GET | Bearer | Aggregate review stats |
+| `/api/persona` | GET/POST | Bearer | Get/switch persona |
+| `/api/health` | GET | None | Health check |
+
+### API Gaps (to fill before mobile development)
+
+These endpoints don't exist yet. They should be added to `api.py` when the backend is stable enough to start mobile work. Listed here as a roadmap — **do not implement until backend + prompt are solid.**
+
+**Concept CRUD:**
+- `GET /api/concepts` — list/search/filter with pagination
+- `POST /api/concepts` — create concept → `db.add_concept()`
+- `PUT /api/concepts/{id}` — update → `db.update_concept()`
+- `DELETE /api/concepts/{id}` — delete → `db.delete_concept()`
+- `POST /api/concepts/{id}/remarks` — add remark → `db.add_remark()`
+
+**Topic CRUD:**
+- `POST /api/topics` — create → `db.add_topic()`
+- `PUT /api/topics/{id}` — update → `db.update_topic()`
+- `DELETE /api/topics/{id}` — delete → `db.delete_topic()`
+- `POST /api/topics/link` — link parent→child → `db.link_topics()`
+- `POST /api/topics/unlink` — unlink → `db.unlink_topics()`
+
+**Relations & graph:**
+- `GET /api/concepts/{id}/relations` → `db.get_relations()`
+- `POST /api/relations` — add → `db.add_relation()`
+- `DELETE /api/relations` — remove → `db.remove_relation()`
+- `GET /api/graph` — nodes + edges for visualization
+
+**Reviews & logs:**
+- `GET /api/reviews` — review log with pagination
+- `GET /api/reviews/next` — pull-based review (replaces Discord DM push)
+- `GET /api/actions` — audit log with filters
+
+### Design Rules (for when endpoints are added)
+
+1. **Add to `api.py` only** — the webui server stays as a separate localhost dashboard.
+2. **Always `dependencies=[Depends(verify_token)]`** except health check.
+3. **RESTful verbs** — GET reads, POST creates, PUT updates, DELETE deletes.
+4. **JSON in/out** — Pydantic request models, dict responses.
+5. **`set_action_source('api')`** on all mutating endpoints.
+6. **Pagination:** `?page=1&per_page=20` → `{items, total, page, per_page}`.
+
+### Mobile-Specific Concerns (future, not now)
+
+- **Quiz flow:** The `/api/chat` conversational loop handles quizzes naturally — no special quiz endpoints needed. The LLM manages the ask→answer→assess→next cycle.
+- **Push notifications:** Reviews are delivered via Discord DM today. Mobile will need pull-based (`/api/due`) short-term, push (Expo/FCM) long-term.
+- **Auth:** Current Bearer token is fine for single-user. Multi-user would need JWT with `/api/auth/login`.
+- **CORS:** Already configured (`allow_origins=["*"]`) — ready for mobile.
