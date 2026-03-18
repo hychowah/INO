@@ -582,3 +582,65 @@ Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or an
 
 **Lesson:** For D3/SVG visualizations, prefer setting visual properties as inline SVG attributes via `.attr()` rather than relying on CSS classes. This avoids specificity issues between inline attrs and stylesheet rules, and makes the rendering self-documenting in the JS code. Use CSS only for interactive states (hover, dimmed, highlighted) applied via `.classed()`.
 - **`/review` command does NOT set pending state** — user-initiated reviews are active engagement, not unsolicited DMs.
+
+---
+
+## 9. Message Truncation & Raw JSON Exposure
+
+### 9.1 Discord messages with button views silently truncated
+**Date:** 2026-03-18
+
+**Symptom:** Long educational answers (e.g. C++ decorator breakdown with code samples) were silently cut off at 1900 characters when the response included Discord button views (add_concept confirmation, quiz navigation). Users saw incomplete answers with no indication content was lost.
+
+**Root cause:** The `send_long()` helper properly splits messages into chunks, but it was only used for plain-text responses (no views). Every code path that attached a view used `response[:config.MAX_MESSAGE_LENGTH]` — a hard truncation with no splitting:
+
+```python
+# Was: silent truncation (5 locations in bot.py)
+sent = await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
+```
+
+**Fix:** Added `send_long_with_view(send_fn, text, view)` helper that:
+1. Splits text at newline boundaries near the 1900-char limit (prefers `\n` within last 200 chars)
+2. Sends all chunks except the last as plain messages
+3. Sends the final chunk with the view (buttons) attached
+4. Returns the `sent` Message object from the view-bearing chunk (critical for `_pending_concepts[sent.id]` tracking)
+
+Uses a `send_fn` closure pattern so callers provide their own send method (`ctx.send`, `ctx.interaction.followup.send`, or `message.reply`). Also refactored `send_long()` and the inline `on_message` chunking to use the shared `_split_message()` helper.
+
+**All 5 truncation sites replaced:** `learn_command` (pending_action, assess_meta), `review_command` (assess_meta), `on_message` (pending_action, assess_meta). The plain-text `on_message` path was also unified.
+
+### 9.2 Raw JSON shown to user — brace-counting parser breaks on code in strings
+**Date:** 2026-03-18
+
+**Symptom:** When the LLM returned an `add_concept` action whose `message` field contained C++ code with curly braces (e.g. `"int f() { return 1; }"`), the entire raw JSON action block was displayed to the user instead of just the educational message.
+
+**Root cause:** Both `_extract_json_object()` and `_extract_json_str()` used naive brace counting to find where a JSON object ends. Braces inside JSON string values (C++ code, LaTeX `\frac{a}{b}`, regex `[a-z]{3,5}`, etc.) caused premature depth-0 detection, producing a truncated substring that `json.loads()` rejected. The extraction returned `None`, and the fallback path treated the raw JSON as plain text:
+
+```python
+# Old approach — broken by braces in string values
+depth = 0
+for i, ch in enumerate(text[start:]):
+    if ch == '{': depth += 1
+    elif ch == '}':
+        depth -= 1
+        if depth == 0:  # ← hit too early on "{ return 1; }"
+            return json.loads(text[start:start + i + 1])  # ← fails
+```
+
+Additionally, the old code returned `None` on the **first** `json.loads` failure instead of trying subsequent `}` positions — a secondary bug that caused premature give-up even in simpler cases.
+
+**Fix (three layers):**
+
+1. **Try-each-`}` with last-valid-parse** (root cause fix): Replaced brace counting in `_extract_json_object()` and `_extract_json_str()`. New approach tries `json.loads()` at every `}` position and keeps the **last** successful parse — which is the largest valid JSON starting from the first `{`. This handles all edge cases natively because `json.loads()` correctly handles string escaping, nested objects, etc.
+
+   Why "last valid" and not "first valid": a partial JSON like `{"action":"add_concept","params":{"code":"..."}}` can be valid but missing the `"message"` field. The complete object (with `message`) at the final `}` is what we want.
+
+2. **Refactored `extract_fetch_params()`**: Had its own inline brace counter (third copy of the same bug). Now reuses `_extract_json_object()`.
+
+3. **Safety net in `process_output()`**: If output has no recognized prefix but contains `"action"`, tries `_extract_json_object()` and returns the `message` field. This is the single chokepoint before user-visible output for all paths (Discord, API, maintenance).
+
+**Performance note:** The try-each-`}` approach calls `json.loads()` at every `}` in the text. For LLM outputs (typically 1-4KB), this is negligible. `json.loads()` fails fast on truncated input.
+
+**Triggers beyond C++:** LaTeX braces, regex quantifiers `{3,5}`, JSON examples in descriptions, Python dict literals in code blocks, user code echoed in message fields.
+
+**Lesson:** Don't re-implement JSON parsing. The `json` module handles all string/escape edge cases — use it as the validator instead of building a brace-counting state machine.

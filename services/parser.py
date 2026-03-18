@@ -46,22 +46,25 @@ def parse_llm_response(response: str) -> tuple:
 
 
 def _extract_json_object(text: str) -> dict | None:
-    """Extract the first complete JSON object via brace counting."""
+    """Extract the most complete JSON object from text.
+
+    Tries json.loads at every '}' and keeps the last successful parse,
+    which yields the largest valid JSON starting from the first '{'.
+    This handles braces inside string values (C++ code, LaTeX, regex, etc.)
+    that broke the old brace-counting approach.
+    See DEVNOTES.md §9.2 for details.
+    """
     start = text.find('{')
     if start == -1:
         return None
-    depth = 0
+    last_valid = None
     for i, ch in enumerate(text[start:]):
-        if ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(text[start:start + i + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None
+        if ch == '}':
+            try:
+                last_valid = json.loads(text[start:start + i + 1])
+            except json.JSONDecodeError:
+                continue
+    return last_valid
 
 
 # ============================================================================
@@ -69,33 +72,25 @@ def _extract_json_object(text: str) -> dict | None:
 # ============================================================================
 
 def extract_fetch_params(response: str) -> dict | None:
-    """Check if an LLM response is a fetch action. Returns params dict or None."""
+    """Check if an LLM response is a fetch action. Returns params dict or None.
+
+    Reuses _extract_json_object to avoid duplicating extraction logic.
+    See DEVNOTES.md §9.2.
+    """
+    # Try ```json code block first
     code_block = re.search(r"```json\s*\n?([\s\S]*?)\n?\s*```", response)
     if code_block:
-        try:
-            data = json.loads(code_block.group(1).strip())
-            if data.get("action", "").lower() == "fetch":
-                return data.get("params", {})
-        except json.JSONDecodeError:
-            pass
+        data = _extract_json_object(code_block.group(1).strip())
+        if data and data.get("action", "").lower() == "fetch":
+            return data.get("params", {})
 
+    # Try bare JSON with "fetch" action
     bare = re.search(r'\{\s*"action"\s*:\s*"fetch"', response, re.IGNORECASE)
     if bare:
-        start = bare.start()
-        depth = 0
-        for i, ch in enumerate(response[start:]):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        data = json.loads(response[start:start + i + 1])
-                        if data.get("action", "").lower() == "fetch":
-                            return data.get("params", {})
-                    except json.JSONDecodeError:
-                        pass
-                    break
+        data = _extract_json_object(response[bare.start():])
+        if data and data.get("action", "").lower() == "fetch":
+            return data.get("params", {})
+
     return None
 
 
@@ -151,29 +146,35 @@ def extract_llm_action(output: str) -> str:
 
 
 def _extract_json_str(text: str) -> str | None:
-    """Extract the first complete JSON object string via brace counting."""
+    """Extract the most complete JSON object as a string.
+
+    Same last-valid-parse approach as _extract_json_object but returns
+    the raw JSON string instead of the parsed dict.
+    See DEVNOTES.md §9.2.
+    """
     start = text.find("{")
     if start == -1:
         return None
-    depth = 0
+    last_valid = None
     for i, ch in enumerate(text[start:]):
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = text[start:start + i + 1]
-                try:
-                    json.loads(candidate)
-                    return candidate
-                except json.JSONDecodeError:
-                    return None
-    return None
+        if ch == "}":
+            candidate = text[start:start + i + 1]
+            try:
+                json.loads(candidate)
+                last_valid = candidate
+            except json.JSONDecodeError:
+                continue
+    return last_valid
 
 
 def process_output(output: str) -> tuple[str, str]:
     """Classify agent output by prefix.
-    Returns (msg_type, message). msg_type: 'reply', 'ask', 'review', 'prompt', 'error'."""
+    Returns (msg_type, message). msg_type: 'reply', 'ask', 'review', 'prompt', 'error'.
+
+    Safety net: if output has no recognized prefix but looks like a JSON action
+    block, extracts the 'message' field so raw JSON is never shown to the user.
+    See DEVNOTES.md §9.2.
+    """
     if not output:
         return ("reply", "No response.")
 
@@ -186,5 +187,13 @@ def process_output(output: str) -> tuple[str, str]:
     ]:
         if output.startswith(prefix):
             return (mtype, output[len(prefix):].strip())
+
+    # Safety net: never send raw JSON to the user — extract the message field.
+    # This catches cases where the JSON extractor failed upstream but the
+    # output is still valid/parseable JSON (e.g. C++ braces in string values).
+    if '{' in output and '"action"' in output:
+        obj = _extract_json_object(output)
+        if obj and isinstance(obj, dict) and 'message' in obj:
+            return ("reply", obj['message'])
 
     return ("reply", output)

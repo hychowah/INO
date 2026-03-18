@@ -111,6 +111,31 @@ def authorized_only():
 # HELPERS
 # ============================================================================
 
+def _split_message(text: str, limit: int = config.MAX_MESSAGE_LENGTH) -> list[str]:
+    """Split text into chunks, preferring newline boundaries.
+
+    Tries to break at a newline within the last 200 chars of each chunk
+    so we don't cut mid-code-block or mid-sentence.
+    """
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        # Try to find a newline to split at within the last 200 chars
+        search_start = max(0, limit - 200)
+        newline_pos = text.rfind('\n', search_start, limit)
+        if newline_pos > 0:
+            chunks.append(text[:newline_pos])
+            text = text[newline_pos + 1:]  # skip the newline itself
+        else:
+            chunks.append(text[:limit])
+            text = text[limit:]
+    return chunks
+
+
 async def send_long(ctx, text: str, title: str = "Learn"):
     """Send text to Discord, handling length limits."""
     is_interaction = ctx.interaction is not None
@@ -118,22 +143,41 @@ async def send_long(ctx, text: str, title: str = "Learn"):
     if not text or not text.strip():
         text = "(empty response)"
 
-    if len(text) <= config.MAX_MESSAGE_LENGTH:
-        if is_interaction:
-            await ctx.interaction.followup.send(text)
-        else:
-            await ctx.send(text)
-        return
+    chunks = _split_message(text)
 
-    # Split into chunks
-    chunks = [text[i:i + config.MAX_MESSAGE_LENGTH]
-              for i in range(0, len(text), config.MAX_MESSAGE_LENGTH)]
-
-    for i, chunk in enumerate(chunks):
+    for chunk in chunks:
         if is_interaction:
             await ctx.interaction.followup.send(chunk)
         else:
             await ctx.send(chunk)
+
+
+async def send_long_with_view(send_fn, text: str,
+                              view=None) -> "discord.Message":
+    """Send a long message with a Discord view (buttons) on the last chunk.
+
+    Unlike send_long(), this takes a generic send_fn closure so it works
+    with ctx.send, ctx.interaction.followup.send, and message.reply.
+    Returns the Message object from the view-bearing (last) chunk.
+    See DEVNOTES.md §9.1 for context.
+
+    Args:
+        send_fn: async callable (content, **kwargs) -> discord.Message
+        text: the full response text
+        view: optional discord.ui.View to attach to the last chunk
+    """
+    if not text or not text.strip():
+        text = "(empty response)"
+
+    chunks = _split_message(text)
+
+    # Send all chunks except the last as plain text
+    for chunk in chunks[:-1]:
+        await send_fn(chunk)
+
+    # Last chunk gets the view (buttons)
+    sent = await send_fn(chunks[-1], view=view)
+    return sent
 
 
 # ============================================================================
@@ -163,10 +207,10 @@ async def learn_command(ctx, *, text: str = ""):
         if pending_action:
             view = AddConceptConfirmView(pending_action)
             if is_interaction:
-                sent = await ctx.interaction.followup.send(
-                    response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.interaction.followup.send
             else:
-                sent = await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.send
+            sent = await send_long_with_view(send_fn, response, view=view)
             _pending_concepts[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
         elif assess_meta:
@@ -176,10 +220,10 @@ async def learn_command(ctx, *, text: str = ""):
                 message_handler=_handle_user_message,
             )
             if is_interaction:
-                await ctx.interaction.followup.send(
-                    response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.interaction.followup.send
             else:
-                await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.send
+            await send_long_with_view(send_fn, response, view=view)
         else:
             await send_long(ctx, response)
     except Exception as e:
@@ -447,10 +491,10 @@ async def review_command(ctx):
                 message_handler=_handle_user_message,
             )
             if is_interaction:
-                await ctx.interaction.followup.send(
-                    response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.interaction.followup.send
             else:
-                await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
+                send_fn = ctx.send
+            await send_long_with_view(send_fn, response, view=view)
         else:
             await send_long(ctx, response)
     except Exception as e:
@@ -684,7 +728,7 @@ async def on_message(message):
         if pending_action:
             # Show educational answer + confirmation buttons
             view = AddConceptConfirmView(pending_action)
-            sent = await message.reply(response[:config.MAX_MESSAGE_LENGTH], view=view)
+            sent = await send_long_with_view(message.reply, response, view=view)
             _pending_concepts[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
         elif assess_meta:
@@ -694,13 +738,10 @@ async def on_message(message):
                 quality=assess_meta['quality'],
                 message_handler=_handle_user_message,
             )
-            await message.reply(response[:config.MAX_MESSAGE_LENGTH], view=view)
+            await send_long_with_view(message.reply, response, view=view)
         else:
             # Send, handling Discord's 2000-char limit
-            while response:
-                chunk = response[:config.MAX_MESSAGE_LENGTH]
-                response = response[config.MAX_MESSAGE_LENGTH:]
-                await message.reply(chunk)
+            await send_long_with_view(message.reply, response)
 
     except Exception as e:
         logger.error(f"Message handler error: {e}", exc_info=True)
