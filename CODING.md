@@ -185,11 +185,14 @@ with _connection() as conn:
 
 ## Testing
 
-Tests are manual scripts in `tests/`, not pytest:
+Tests use **pytest** (run from the venv):
 ```bash
-python tests/test_dedup.py
+python -m pytest tests/ -v            # all tests
+python -m pytest tests/test_llm.py -v # single file
 ```
-They use `print()` output, not assertions. Run manually and inspect.
+Some older test files (e.g. `test_dedup.py`) are still manual scripts
+(`python tests/test_dedup.py`), but newer tests use proper pytest
+classes, fixtures, and assertions.
 
 ---
 
