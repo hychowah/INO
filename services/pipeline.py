@@ -305,7 +305,6 @@ async def execute_llm_response(user_input: str, llm_response: str,
             # This prevents the LLM from seeing a fake "user" message while
             # still giving it context that a review quiz is pending.
             # Payload format: "... concept: <id>|<context_string>"
-            import re
             try:
                 m = re.search(r':\s*(\d+)\|', user_input)
                 cid = m.group(1) if m else '?'
