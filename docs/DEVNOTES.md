@@ -20,6 +20,9 @@
 6. [Concept/Topic ID Confusion After add_concept Confirmation](#6-concepttopic-id-confusion-after-add_concept-confirmation)
 7. [Pending Review Tracking & Phantom Answer Bug](#7-pending-review-tracking--phantom-answer-bug)
 8. [Web UI Graph Visualization](#8-web-ui-graph-visualization)
+9. [Message Truncation & Raw JSON Exposure](#9-message-truncation--raw-json-exposure)
+10. [suggest_topic Confirmation Buttons & Anti-Phantom-Add](#10-suggest_topic-confirmation-buttons--anti-phantom-add)
+11. [Modular Skill Loading & Session Isolation](#11-modular-skill-loading--session-isolation)
 
 ---
 
@@ -644,3 +647,85 @@ Additionally, the old code returned `None` on the **first** `json.loads` failure
 **Triggers beyond C++:** LaTeX braces, regex quantifiers `{3,5}`, JSON examples in descriptions, Python dict literals in code blocks, user code echoed in message fields.
 
 **Lesson:** Don't re-implement JSON parsing. The `json` module handles all string/escape edge cases — use it as the validator instead of building a brace-counting state machine.
+
+---
+
+## 10. suggest_topic Confirmation Buttons & Anti-Phantom-Add
+
+### 10.1 Bug: suggest_topic had no Discord buttons — phantom add
+**Date:** 2026-03-19
+
+**Symptom:** User asked "what is embedding models" (new area, no matching topic). The LLM output a `REPLY:` claiming "Added concept X under Databases" — plain text with no JSON action. Parser classified it as `("REPLY", ..., None)`, so no action was parsed, no buttons shown, nothing saved to DB. Even when the LLM correctly used `suggest_topic`, the handler only formatted plain text ("Want me to add this?") with no buttons — relied on fragile text follow-up.
+
+**Root cause (two layers):**
+
+1. **Primary — LLM output REPLY instead of JSON action.** The LLM saw "Databases" in the Knowledge Map, decided to auto-add the concept there, but emitted a `REPLY:` prefix instead of a structured `add_concept` or `suggest_topic` action. The parser found `REPLY:` first and returned `(REPLY, text, None)` — no action_data, no interception, no buttons.
+
+2. **Secondary — `suggest_topic` had no button UX.** `_handle_suggest_topic` in tools.py was purely cosmetic — formatted a suggestion message, did zero DB work. No `SuggestTopicConfirmView` existed. The AGENTS.md instructed a two-turn flow (Turn 1: suggest, Turn 2: LLM creates on "yes") which was fragile and could itself trigger phantom adds.
+
+**Fix (four layers):**
+
+1. **AGENTS.md — anti-phantom-add rule (rule 12):** "NEVER claim you added/created a concept or topic in a REPLY/text response. Creating things requires a JSON action."
+
+2. **AGENTS.md — button-based flow for suggest_topic:** Replaced two-turn flow with single-turn: LLM uses `suggest_topic`, system shows ✅/❌ buttons, button callback creates topic + concepts. LLM does NOT handle Turn 2. Added concrete JSON example with `<!-- DO NOT REMOVE -->` to prevent hallucinated structures (same class of fix as §1.1/§1.2). Sharpened "matches existing topic" definition to prevent shoehorning concepts into tangentially related topics.
+
+3. **`SuggestTopicConfirmView` (views.py) + shared accept logic (tools.py):** New view modeled after `AddConceptConfirmView`. Accept button calls `execute_suggest_topic_accept()` — a shared helper that creates topic via `add_topic`, retrieves topic_id from session stash, then creates each concept under it. Both the view callback and the text-reply handler in `bot.py` call this same function (DRY). Chat history records `[confirmed: add topic "X"]` / `[declined: add topic "X"]` with topic title for LLM context.
+
+4. **Unified `_pending_confirmations` dict (bot.py):** Merged `_pending_concepts` into `_pending_confirmations` — single dict handling both `add_concept` and `suggest_topic`. Dispatches by `action_data.get('action')` to create the right view type. Interception in `_handle_user_message` extended to catch both action types.
+
+5. **Silent phantom-add detection (pipeline.py):** Regex guard in `execute_llm_response` logs a warning when a REPLY contains "Added/Created concept/topic" without a JSON action. Log-only — no user-facing disclaimer to avoid false positives on educational content.
+
+**Session stash pattern:** `_handle_add_topic` now stashes `last_added_topic_id` via `db.set_session()` — consistent with `_handle_add_concept`'s `last_added_concept_id` (§6). The `execute_suggest_topic_accept` helper retrieves this instead of parsing result strings.
+
+**`_handle_suggest_topic` stays for non-Discord paths:** The function is only reached when not intercepted (API/CLI). Discord path intercepts before `execute_llm_response` runs.
+
+---
+
+## 11. Modular Skill Loading & Session Isolation
+
+### 11.1 AGENTS.md split into data/skills/ (conditional loading)
+**Date:** 2026-03-20
+
+**Problem:** The monolithic `AGENTS.md` (~690 lines, ~5500 tokens) was sent in full on every LLM call regardless of mode. Maintenance mode received quiz instructions it didn't need; review-check received CRUD actions it would never use. As the prompt grows, this wastes tokens and increases noise.
+
+**Design:** Inspired by OpenAI's "Harness Engineering" article (progressive disclosure, conditional skill loading). Split into 4 skill files in `data/skills/`:
+
+| File | Lines | Loaded for |
+|---|---|---|
+| `core.md` | ~155 | All modes (interactive, review, maintenance) |
+| `quiz.md` | ~200 | Interactive + review |
+| `knowledge.md` | ~170 | Interactive + maintenance |
+| `maintenance.md` | ~50 | Maintenance only |
+
+**Skill sets:**
+```
+interactive (COMMAND/REPLY) → core + quiz + knowledge
+review (REVIEW-CHECK)       → core + quiz
+maintenance (MAINTENANCE)   → core + maintenance + knowledge
+```
+
+**Implementation in pipeline.py:**
+- `SKILL_SETS` dict maps skill set name → list of skill file names
+- `_mode_to_skill_set(mode)` maps mode strings → skill set names
+- `_get_base_prompt(skill_set)` reads and concatenates skill files + preferences.md, cached per skill set with per-file mtime checks for hot-reload
+- `build_system_prompt(persona, mode)` now accepts `mode`, derives skill set, passes to `_get_base_prompt()`
+- Cache keyed on `(persona, skill_set)` instead of just `persona`
+- `_call_llm()` and `_call_llm_followup()` thread `mode` to `build_system_prompt()`
+
+**`AGENTS.md` is now a pointer file** (~25 lines) — references `data/skills/` and describes the loading structure. The LLM never reads this file at runtime; it reads the assembled skill files instead.
+
+**Backward compatibility:** `build_system_prompt()` defaults to `mode="command"` (interactive skill set), so callers that don't pass mode get the same behavior as before.
+
+### 11.2 Maintenance mode bug fix
+**Date:** 2026-03-20
+
+**Bug:** `call_maintenance_loop()` passed `mode="command"` in both its main loop and final summary call. This meant `build_lightweight_context()` mode checks never triggered for maintenance, and after the skill split, maintenance would receive interactive skills instead of maintenance skills.
+
+**Fix:** Changed both occurrences to `mode="maintenance"`.
+
+### 11.3 Session isolation for maintenance and review-check
+**Date:** 2026-03-20
+
+**Problem:** `call_with_fetch_loop()` used `_get_conv_session()` for all modes, meaning maintenance and review-check shared the interactive session. With `OpenAICompatibleProvider`, the system prompt is cached in the first message of a session — so if maintenance ran while an interactive session was warm, it would inherit the interactive system prompt (wrong skills).
+
+**Fix:** Maintenance and review-check modes now create dedicated sessions (`f"{mode}_{timestamp}"`) in `call_with_fetch_loop()` instead of sharing `_get_conv_session()`. Interactive modes (command/reply) continue using the shared conversation session with 5-minute idle timeout.

@@ -71,7 +71,11 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 
 | File | Lines | Role |
 |:-----|------:|:-----|
-| `AGENTS.md` | ~540 | System prompt — ALL learning intelligence (quiz strategy, difficulty tiers, SM-2 rubric, topic management rules) |
+| `AGENTS.md` | ~25 | Pointer file — references `data/skills/` for modular skill loading (see `docs/index.md`) |
+| `data/skills/core.md` | ~155 | Core skill — role, philosophy, response format, universal actions, rules (loaded for all modes) |
+| `data/skills/quiz.md` | ~200 | Quiz skill — quiz/assess actions, scoring rubric, adaptive quiz evolution (interactive + review) |
+| `data/skills/knowledge.md` | ~170 | Knowledge skill — topic/concept CRUD, casual Q&A, overlap detection (interactive + maintenance) |
+| `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
 | `preferences.md` | ~20 | User learning preferences (interests, style) |
 | `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
@@ -91,7 +95,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity |
 | `db/__init__.py` | ~120 | Re-exports all public functions (backward compat) |
 | **services/** | | |
-| `services/pipeline.py` | ~342 | Core orchestrator — context → kimi-cli → parse → execute, with fetch loop |
+| `services/pipeline.py` | ~660 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |

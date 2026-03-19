@@ -7,6 +7,7 @@ This file is now ~300 lines of pure orchestration.
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -32,10 +33,17 @@ from db.preferences import get_persona, get_persona_content
 
 logger = logging.getLogger("pipeline")
 
-AGENTS_MD_PATH = Path(__file__).parent.parent / "AGENTS.md"
+SKILLS_DIR = Path(__file__).parent.parent / "data" / "skills"
 PREFERENCES_MD_PATH = Path(__file__).parent.parent / "preferences.md"
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
+
+# Skill sets: which skill files to load per mode category.
+SKILL_SETS: dict[str, list[str]] = {
+    "interactive": ["core", "quiz", "knowledge"],
+    "review":      ["core", "quiz"],
+    "maintenance": ["core", "maintenance", "knowledge"],
+}
 
 # Actions that maintenance can execute without user confirmation.
 # Everything else is collected as a proposal for the user to approve.
@@ -47,68 +55,112 @@ SAFE_MAINTENANCE_ACTIONS = frozenset({
     'list_topics',     # read-only
 })
 
-# Cached system prompt content — keyed by persona name, with mtime for hot-reload.
-# Format: {persona_name: (prompt_str, persona_mtime)}
-_system_prompt_cache: dict[str, tuple[str, float]] = {}
 
-# Cached base content (AGENTS.md + preferences.md) — shared across all personas
-_base_prompt_cache: tuple[str, float, float] | None = None  # (content, agents_mtime, prefs_mtime)
+def _mode_to_skill_set(mode: str) -> str:
+    """Map a pipeline mode string to a skill set name."""
+    return {
+        "command":      "interactive",
+        "reply":        "interactive",
+        "review-check": "review",
+        "maintenance":  "maintenance",
+    }.get(mode, "interactive")
 
 
-def _get_base_prompt() -> str:
-    """Read AGENTS.md + preferences.md content, cached with mtime check."""
+# Cached system prompt — keyed by (persona, skill_set), with mtimes for hot-reload.
+# Format: {(persona, skill_set): (prompt_str, persona_mtime, {skill_file: mtime})}
+_system_prompt_cache: dict[tuple[str, str], tuple[str, float, dict[str, float]]] = {}
+
+# Cached base content per skill set — (content, prefs_mtime, {skill_file: mtime})
+_base_prompt_cache: dict[str, tuple[str, float, dict[str, float]]] = {}
+
+
+def _get_base_prompt(skill_set: str = "interactive") -> str:
+    """Read skill files for *skill_set* + preferences.md, cached with mtime check."""
     global _base_prompt_cache
-    agents_mtime = AGENTS_MD_PATH.stat().st_mtime if AGENTS_MD_PATH.exists() else 0
+
+    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
+    skill_paths = {name: SKILLS_DIR / f"{name}.md" for name in skill_names}
+
+    # Gather current mtimes
+    current_mtimes: dict[str, float] = {}
+    for name, path in skill_paths.items():
+        current_mtimes[name] = path.stat().st_mtime if path.exists() else 0
     prefs_mtime = PREFERENCES_MD_PATH.stat().st_mtime if PREFERENCES_MD_PATH.exists() else 0
 
-    if (_base_prompt_cache is not None
-            and _base_prompt_cache[1] == agents_mtime
-            and _base_prompt_cache[2] == prefs_mtime):
-        return _base_prompt_cache[0]
+    # Check cache
+    if skill_set in _base_prompt_cache:
+        cached_content, cached_prefs_mtime, cached_skill_mtimes = _base_prompt_cache[skill_set]
+        if cached_prefs_mtime == prefs_mtime and cached_skill_mtimes == current_mtimes:
+            return cached_content
 
-    agents = ctx._read_file(AGENTS_MD_PATH)
+    # Build fresh: concatenate skill files + preferences
+    parts: list[str] = []
+    for name in skill_names:
+        path = skill_paths[name]
+        if path.exists():
+            parts.append(ctx._read_file(path))
+        else:
+            logger.warning(f"Skill file missing: {path}")
+
     prefs = ctx._read_file(PREFERENCES_MD_PATH)
-    content = f"{agents}\n\n## User Preferences\n\n{prefs}"
-    _base_prompt_cache = (content, agents_mtime, prefs_mtime)
+    content = "\n\n".join(parts) + f"\n\n## User Preferences\n\n{prefs}"
+
+    _base_prompt_cache[skill_set] = (content, prefs_mtime, current_mtimes)
+    logger.info(f"Base prompt built for skill_set '{skill_set}' "
+                f"({len(content)} chars, skills: {skill_names})")
     return content
 
 
-def build_system_prompt(persona: str | None = None) -> str:
-    """Compose system prompt: AGENTS.md + persona + preferences.md.
-    Cached per persona with file mtime checks for hot-reload."""
+def build_system_prompt(persona: str | None = None,
+                        mode: str = "command") -> str:
+    """Compose system prompt: skill files + persona + preferences.md.
+    Cached per (persona, skill_set) with file mtime checks for hot-reload."""
     global _system_prompt_cache
     if persona is None:
         persona = get_persona()
+
+    skill_set = _mode_to_skill_set(mode)
 
     # Check persona file mtime for hot-reload
     persona_content = get_persona_content(persona)
     persona_path = db.PERSONAS_DIR / f"{persona}.md"
     persona_mtime = persona_path.stat().st_mtime if persona_path.exists() else 0
 
-    if persona in _system_prompt_cache:
-        cached_prompt, cached_mtime = _system_prompt_cache[persona]
-        if cached_mtime == persona_mtime:
-            # Also verify base hasn't changed
-            base = _get_base_prompt()
+    cache_key = (persona, skill_set)
+
+    if cache_key in _system_prompt_cache:
+        cached_prompt, cached_persona_mtime, cached_skill_mtimes = _system_prompt_cache[cache_key]
+        if cached_persona_mtime == persona_mtime:
+            # Verify base hasn't changed by rebuilding (uses its own cache)
+            base = _get_base_prompt(skill_set)
             expected = _compose_prompt(base, persona_content)
             if cached_prompt == expected:
                 return cached_prompt
 
-    base = _get_base_prompt()
+    base = _get_base_prompt(skill_set)
     full_prompt = _compose_prompt(base, persona_content)
-    _system_prompt_cache[persona] = (full_prompt, persona_mtime)
-    logger.info(f"System prompt built for persona '{persona}' ({len(full_prompt)} chars)")
+
+    # Gather current skill mtimes for cache
+    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
+    skill_mtimes = {}
+    for name in skill_names:
+        p = SKILLS_DIR / f"{name}.md"
+        skill_mtimes[name] = p.stat().st_mtime if p.exists() else 0
+
+    _system_prompt_cache[cache_key] = (full_prompt, persona_mtime, skill_mtimes)
+    logger.info(f"System prompt built for persona '{persona}', "
+                f"skill_set '{skill_set}' ({len(full_prompt)} chars)")
     return full_prompt
 
 
 def _compose_prompt(base: str, persona_content: str) -> str:
-    """Insert persona content into the base prompt (AGENTS + prefs).
-    Persona goes between AGENTS.md and User Preferences."""
+    """Insert persona content into the base prompt (skills + prefs).
+    Persona goes between skill content and User Preferences."""
     marker = "\n\n## User Preferences\n\n"
     if marker in base:
-        agents_part, prefs_part = base.split(marker, 1)
+        skills_part, prefs_part = base.split(marker, 1)
         return (
-            f"{agents_part}\n\n"
+            f"{skills_part}\n\n"
             f"## Active Persona\n\n{persona_content}\n\n"
             f"## User Preferences\n\n{prefs_part}"
         )
@@ -120,7 +172,7 @@ def invalidate_prompt_cache():
     """Clear all cached prompts. Call after persona switch or file edits."""
     global _system_prompt_cache, _base_prompt_cache
     _system_prompt_cache.clear()
-    _base_prompt_cache = None
+    _base_prompt_cache.clear()
     logger.info("System prompt cache invalidated")
 
 
@@ -227,6 +279,12 @@ async def execute_llm_response(user_input: str, llm_response: str,
     """Parse and execute an LLM response, save chat history."""
     prefix, message, action_data = parse_llm_response(llm_response)
 
+    # Phantom-add detection: LLM claims it created something in plain text
+    # without a JSON action. Log-only — the AGENTS.md rule is the primary fix.
+    if not action_data and prefix in ("REPLY", "ASK"):
+        if re.search(r"(?i)\b(Added|Created)\s+(a\s+)?(new\s+)?(concept|topic)\b", message or ""):
+            logger.warning(f"Phantom-add detected in {prefix}: {(message or '')[:120]!r}")
+
     if action_data:
         result = await execute_action(action_data)
         history_msg = result
@@ -291,7 +349,7 @@ async def _call_llm(mode: str, text: str, author: str,
         f"(prompt: {len(prompt)} chars{', session=' + session if session else ''})"
     )
 
-    system_prompt = build_system_prompt()
+    system_prompt = build_system_prompt(mode=mode)
 
     raw = await provider.send(
         prompt,
@@ -309,7 +367,8 @@ async def _call_llm(mode: str, text: str, author: str,
 
 
 async def _call_llm_followup(session: str, fetch_data: str,
-                             text: str, author: str) -> str:
+                             text: str, author: str,
+                             mode: str = "command") -> str:
     """Lightweight follow-up call within a fetch loop session.
     See DEVNOTES.md §2.3."""
     provider = get_provider()
@@ -327,7 +386,7 @@ async def _call_llm_followup(session: str, fetch_data: str,
     )
 
     # system_prompt passed for stateless providers; session-based ones ignore it
-    system_prompt = build_system_prompt()
+    system_prompt = build_system_prompt(mode=mode)
 
     raw = await provider.send(
         prompt,
@@ -361,7 +420,16 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
                  (all data is global). Will be threaded to DB queries in Phase 3.
     """
     extra_context = ""
-    session, is_new = _get_conv_session()
+
+    # Session isolation: maintenance and review-check use dedicated sessions
+    # to prevent cross-contamination with the interactive session's cached
+    # system prompt. See DEVNOTES.md §11.
+    if mode in ("maintenance", "review-check"):
+        now = datetime.now()
+        session = f"{mode}_{now.strftime('%H%M%S')}"
+        logger.info(f"Isolated session for {mode}: {session}")
+    else:
+        session, is_new = _get_conv_session()
 
     for iteration in range(MAX_FETCH_ITERATIONS + 1):
         try:
@@ -376,6 +444,7 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
                     fetch_data=extra_context,
                     text=text,
                     author=author,
+                    mode=mode,
                 )
         except LLMError as exc:
             logger.error(f"LLM call failed: {exc} (retryable={exc.retryable})")
@@ -510,7 +579,7 @@ async def call_maintenance_loop(
 
     for action_num in range(MAX_MAINTENANCE_ACTIONS):
         llm_response = await call_with_fetch_loop(
-            mode="command",
+            mode="maintenance",
             text=text,
             author="maintenance_agent",
             # TODO: Phase 3 — forward user_id for multi-user scoping
@@ -584,7 +653,7 @@ async def call_maintenance_loop(
     )
     # TODO: Phase 3 — forward user_id for multi-user scoping
     llm_response = await call_with_fetch_loop(
-        mode="command", text=text, author="maintenance_agent"
+        mode="maintenance", text=text, author="maintenance_agent"
     )
     _prefix, message, _action_data = parse_llm_response(llm_response)
 

@@ -143,6 +143,8 @@ def _handle_add_topic(params: Dict) -> Tuple[str, Any]:
         description=params.get('description'),
         parent_ids=parent_ids or None,
     )
+    # Stash for SuggestTopicConfirmView to retrieve after creation
+    db.set_session('last_added_topic_id', str(topic_id))
     return ('reply', f"Created topic **{params['title']}** (#{topic_id})")
 
 
@@ -653,6 +655,72 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
 # ============================================================================
 # Suggest Topic (from casual Q&A)
 # ============================================================================
+
+def execute_suggest_topic_accept(action_data: dict) -> tuple[bool, str, int | None]:
+    """Execute a confirmed suggest_topic: create topic + initial concepts.
+
+    Called by both SuggestTopicConfirmView.accept() and the text-reply handler
+    in bot.py — single source of truth for the multi-step create flow.
+
+    Returns (success, summary_message, topic_id).
+    Handles partial failures gracefully.
+    """
+    import re as _re
+
+    params = action_data.get('params', {})
+    title = params.get('title', 'Untitled')
+    description = params.get('description', '')
+    concepts = params.get('concepts', [])
+
+    # 1. Create the topic
+    msg_type, result = execute_action('add_topic', {
+        'title': title,
+        'description': description,
+    })
+    if msg_type == 'error':
+        return False, f"Could not create topic: {result}", None
+
+    # 2. Retrieve topic_id from session stash (set by _handle_add_topic)
+    topic_id_str = db.get_session('last_added_topic_id')
+    if topic_id_str:
+        topic_id = int(topic_id_str)
+    else:
+        # Fallback: parse from result string
+        m = _re.search(r'#(\d+)', str(result))
+        topic_id = int(m.group(1)) if m else None
+
+    if not topic_id:
+        return False, f"Topic created but could not determine ID: {result}", None
+
+    # 3. Create each proposed concept under the new topic
+    created = []
+    failed = []
+    for c in concepts:
+        if not isinstance(c, dict):
+            continue
+        c_title = c.get('title', '')
+        if not c_title:
+            continue
+        c_type, c_result = execute_action('add_concept', {
+            'title': c_title,
+            'description': c.get('description', ''),
+            'topic_ids': [topic_id],
+        })
+        if c_type == 'error':
+            failed.append(c_title)
+        else:
+            created.append(c_result)
+
+    # 4. Build summary
+    parts = [f"Created topic **{title}** (#{topic_id})"]
+    if created:
+        parts.append(f"with {len(created)} concept(s)")
+    if failed:
+        parts.append(f"({len(failed)} failed: {', '.join(failed)})")
+
+    summary = "✅ " + " ".join(parts)
+    return True, summary, topic_id
+
 
 def _handle_suggest_topic(params: Dict) -> Tuple[str, Any]:
     """LLM suggests creating a topic + concepts from a casual conversation.

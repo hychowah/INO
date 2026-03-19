@@ -96,10 +96,9 @@ def test_build_system_prompt():
 
     prompts = {}
     for name in ["mentor", "coach", "buddy"]:
-        prompt = build_system_prompt(name)
+        prompt = build_system_prompt(name, mode="command")
         assert "## Active Persona" in prompt, f"Persona section missing for '{name}'"
         assert "## User Preferences" in prompt, f"Preferences section missing for '{name}'"
-        assert "AGENTS.md" not in prompt or "Learning Agent System Prompt" in prompt
         prompts[name] = prompt
 
     # Verify different
@@ -107,7 +106,7 @@ def test_build_system_prompt():
     assert prompts["coach"] != prompts["buddy"], "coach prompt == buddy prompt"
     print("  ✅ build_system_prompt returns unique prompts per persona")
 
-    # Check ordering: Active Persona should come after AGENTS.md content
+    # Check ordering: Active Persona should come after skill content
     # and before User Preferences
     for name, prompt in prompts.items():
         persona_pos = prompt.index("## Active Persona")
@@ -116,7 +115,7 @@ def test_build_system_prompt():
             f"In {name}: Persona section ({persona_pos}) should come before "
             f"Preferences ({prefs_pos})"
         )
-    print("  ✅ Prompt section ordering correct (AGENTS → Persona → Preferences)")
+    print("  ✅ Prompt section ordering correct (Skills → Persona → Preferences)")
 
 
 def main():

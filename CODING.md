@@ -25,15 +25,23 @@ The runtime LLM (DeepSeek/Grok/kimi) is the brain — it decides what to teach, 
 
 ```
 ROOT
-├── AGENTS.md              # Runtime LLM system prompt (DO NOT mix dev instructions here)
+├── AGENTS.md              # Pointer file — references data/skills/ (DO NOT put instructions here)
 ├── preferences.md         # Runtime LLM user preferences
 ├── config.py              # All settings, loads .env via python-dotenv
 ├── bot.py                 # Entry point: Discord bot
 ├── api.py                 # Entry point: FastAPI REST API
 ├── requirements.txt
 │
+├── data/
+│   ├── skills/            # Modular LLM skill files (loaded conditionally per mode)
+│   │   ├── core.md        # Role, philosophy, response format, universal actions, rules
+│   │   ├── quiz.md        # Quiz/assess actions, scoring rubric, adaptive quiz evolution
+│   │   ├── knowledge.md   # Topic/concept CRUD, casual Q&A, overlap detection
+│   │   └── maintenance.md # Maintenance mode behavioral rules
+│   └── personas/          # Persona preset .md files (mentor, coach, buddy)
+│
 ├── services/              # All business logic
-│   ├── pipeline.py        # Orchestration: LLM calls, fetch loop, action execution
+│   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
 │   ├── tools.py           # Action executor: maps LLM verbs → DB calls
 │   ├── context.py         # Prompt builder: dynamic context for LLM calls
 │   ├── parser.py          # LLM response parsing and output classification
@@ -64,7 +72,7 @@ ROOT
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, all routes + page renderers
 │   └── static/            # CSS, JS (graph.js for D3 graph, concepts.js, tree.js)
-├── docs/                  # ARCHITECTURE.md, DEVNOTES.md, PLAN.md, CONCEPT_RELATIONS_PLAN.md
+├── docs/                  # Architecture, dev notes, plans, knowledge base map (index.md)
 ├── scripts/               # start.bat, start_api.bat, agent.py (legacy CLI)
 └── .env                   # Secrets (git-ignored)
 ```
@@ -128,7 +136,7 @@ from db.core import _conn, _now_iso, KNOWLEDGE_DB
    }
    ```
 
-3. **`AGENTS.md`** — Add documentation with a **concrete JSON example** (critical — the LLM will hallucinate the structure without one). Mark examples with `<!-- DO NOT REMOVE -->`.
+3. **`data/skills/*.md`** — Add documentation with a **concrete JSON example** (critical — the LLM will hallucinate the structure without one). Mark examples with `<!-- DO NOT REMOVE -->`. Put it in the appropriate skill file: quiz/assess actions go in `quiz.md`, CRUD actions in `knowledge.md`, etc.
 
 4. **No changes needed** in `pipeline.py` — it dispatches via `tools.execute_action()` which reads `ACTION_HANDLERS`.
 
@@ -189,7 +197,8 @@ They use `print()` output, not assertions. Run manually and inspect.
 
 | File | Risk | Why |
 |------|------|-----|
-| `AGENTS.md` | **High** | Runtime LLM prompt. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. **No tone/style directives here** — those go in persona files. |
+| `data/skills/*.md` | **High** | Runtime LLM prompt skill files. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. **No tone/style directives here** — those go in persona files. Preserve `<!-- DO NOT REMOVE -->` comments. |
+| `AGENTS.md` | **Low** | Pointer file only — references data/skills/. No instructions here. |
 | `preferences.md` | **Medium** | User preferences injected into every LLM call. |
 | `data/personas/*.md` | **Medium** | Persona presets. Changes reflected without restart (mtime cache). Token budget: ~600 tokens max per file. |
 | `db/core.py` migrations | **High** | Schema migrations are append-only. Never modify existing migration blocks. |

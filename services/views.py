@@ -422,6 +422,84 @@ class AddConceptConfirmView(discord.ui.View):
 
 
 # ============================================================================
+# Suggest-topic confirmation view
+# ============================================================================
+
+class SuggestTopicConfirmView(discord.ui.View):
+    """Accept / Decline buttons shown when the LLM uses suggest_topic for a
+    new learning area.  On Accept the topic + initial concepts are created via
+    tools.execute_suggest_topic_accept(); on Decline nothing happens.
+
+    The *message* the user sees is the LLM's educational answer — the
+    buttons are appended to that same message.
+    """
+
+    def __init__(self, action_data: dict, on_resolved: Callable | None = None):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.action_data = action_data
+        self.decided = False
+        self.on_resolved = on_resolved
+
+    @discord.ui.button(label="Add topic", style=discord.ButtonStyle.success, emoji="✅")
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+
+        from services.tools import execute_suggest_topic_accept
+        success, summary, topic_id = execute_suggest_topic_accept(self.action_data)
+
+        title = self.action_data.get('params', {}).get('title', 'topic')
+        if success:
+            db.add_chat_message('user', f'[confirmed: add topic "{title}"]')
+            db.add_chat_message('assistant', summary)
+            note = f"\n\n{summary}"
+        else:
+            note = f"\n\n⚠️ {summary}"
+
+        try:
+            original = interaction.message.content or ""
+            await interaction.response.edit_message(
+                content=truncate_with_suffix(original, note), view=self)
+        except discord.errors.NotFound:
+            pass
+        if self.on_resolved:
+            self.on_resolved()
+        self.stop()
+
+    @discord.ui.button(label="No thanks", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+
+        title = self.action_data.get('params', {}).get('title', 'topic')
+        db.add_chat_message('user', f'[declined: add topic "{title}"]')
+
+        try:
+            original = interaction.message.content or ""
+            await interaction.response.edit_message(
+                content=truncate_for_discord(original), view=self)
+        except discord.errors.NotFound:
+            pass
+        if self.on_resolved:
+            self.on_resolved()
+        self.stop()
+
+    def _disable_all(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    async def on_timeout(self):
+        self._disable_all()
+        if self.on_resolved:
+            self.on_resolved()
+
+
+# ============================================================================
 # Quiz navigation view (post-assessment buttons)
 # ============================================================================
 

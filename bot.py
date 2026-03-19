@@ -44,15 +44,15 @@ import config
 import db
 from services import pipeline, scheduler, state
 from services.parser import parse_llm_response
-from services.views import AddConceptConfirmView, QuizNavigationView
+from services.views import AddConceptConfirmView, QuizNavigationView, SuggestTopicConfirmView
 from services.formatting import truncate_with_suffix
 
 # ============================================================================
-# PENDING ADD-CONCEPT TRACKING
+# PENDING CONFIRMATION TRACKING
 # ============================================================================
 
-# Maps message_id → (action_data, AddConceptConfirmView) for reply-to detection
-_pending_concepts: dict[int, tuple[dict, AddConceptConfirmView]] = {}
+# Maps message_id → (action_data, View) for add_concept and suggest_topic
+_pending_confirmations: dict[int, tuple[dict, discord.ui.View]] = {}
 
 _AFFIRMATIVES = {'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'y', 'add',
                  'add it', 'go ahead', 'do it', 'please', 'yea'}
@@ -205,14 +205,18 @@ async def learn_command(ctx, *, text: str = ""):
                 text or "hello", str(ctx.author))
 
         if pending_action:
-            view = AddConceptConfirmView(pending_action)
+            action_name = pending_action.get('action', '')
+            if action_name == 'suggest_topic':
+                view = SuggestTopicConfirmView(pending_action)
+            else:
+                view = AddConceptConfirmView(pending_action)
             if is_interaction:
                 send_fn = ctx.interaction.followup.send
             else:
                 send_fn = ctx.send
             sent = await send_long_with_view(send_fn, response, view=view)
-            _pending_concepts[sent.id] = (pending_action, view)
-            view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+            _pending_confirmations[sent.id] = (pending_action, view)
+            view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
         elif assess_meta:
             view = QuizNavigationView(
                 concept_id=assess_meta['concept_id'],
@@ -540,18 +544,19 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
         "command", text, author
     )
 
-    # --- intercept add_concept before execution (skip for button callbacks) ---
+    # --- intercept add_concept / suggest_topic before execution (skip for button callbacks) ---
     prefix, message, action_data = parse_llm_response(llm_response)
     if (action_data
-            and action_data.get('action', '').lower().strip() == 'add_concept'
+            and action_data.get('action', '').lower().strip() in ('add_concept', 'suggest_topic')
             and not text.startswith('[BUTTON]')):
-        # Save chat history (message only, concept not created yet)
+        # Save chat history (message only, nothing created yet)
         if text:
             db.add_chat_message('user', text)
         display_msg = action_data.get('message', message or '')
         if display_msg:
             db.add_chat_message('assistant', display_msg)
-        logger.info(f"Intercepted add_concept — pending user confirmation")
+        action_name = action_data.get('action', '').lower().strip()
+        logger.info(f"Intercepted {action_name} — pending user confirmation")
         return display_msg, action_data, None
 
     # All other actions: execute normally
@@ -671,26 +676,36 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    # Check for reply to a pending add-concept message
-    if message.reference and message.reference.message_id in _pending_concepts:
-        action_data, view = _pending_concepts[message.reference.message_id]
+    # Check for reply to a pending confirmation message (add_concept or suggest_topic)
+    if message.reference and message.reference.message_id in _pending_confirmations:
+        action_data, view = _pending_confirmations[message.reference.message_id]
         if not view.decided:
             reply_text = text.lower().strip()
+            action_name = action_data.get('action', '').lower().strip()
             if _is_affirmative(reply_text):
                 view.decided = True
                 view._disable_all()
-                from services.tools import execute_action
-                msg_type, result = execute_action(
-                    action_data.get('action', 'add_concept'),
-                    action_data.get('params', {}),
-                )
-                note = f"\n\n⚠️ Could not add concept: {result}" if msg_type == 'error' \
-                    else f"\n\n✅ {result}"
-                if msg_type != 'error':
-                    # Persist confirmation to chat history so the LLM sees the
-                    # concept_id on subsequent turns
-                    db.add_chat_message('user', '[confirmed: add concept]')
-                    db.add_chat_message('assistant', f"✅ {result}")
+                if action_name == 'suggest_topic':
+                    from services.tools import execute_suggest_topic_accept
+                    success, summary, topic_id = execute_suggest_topic_accept(action_data)
+                    title = action_data.get('params', {}).get('title', 'topic')
+                    if success:
+                        db.add_chat_message('user', f'[confirmed: add topic "{title}"]')
+                        db.add_chat_message('assistant', summary)
+                        note = f"\n\n{summary}"
+                    else:
+                        note = f"\n\n⚠️ {summary}"
+                else:
+                    from services.tools import execute_action
+                    msg_type, result = execute_action(
+                        action_data.get('action', 'add_concept'),
+                        action_data.get('params', {}),
+                    )
+                    note = f"\n\n⚠️ Could not add concept: {result}" if msg_type == 'error' \
+                        else f"\n\n✅ {result}"
+                    if msg_type != 'error':
+                        db.add_chat_message('user', '[confirmed: add concept]')
+                        db.add_chat_message('assistant', f"✅ {result}")
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(
@@ -698,20 +713,23 @@ async def on_message(message):
                         view=view)
                 except discord.errors.NotFound:
                     pass
-                _pending_concepts.pop(message.reference.message_id, None)
+                _pending_confirmations.pop(message.reference.message_id, None)
                 await message.add_reaction('✅')
                 return
             elif _is_negative(reply_text):
                 view.decided = True
                 view._disable_all()
-                # Record decline so the LLM doesn't re-suggest the same concept
-                db.add_chat_message('user', '[declined: add concept]')
+                if action_name == 'suggest_topic':
+                    title = action_data.get('params', {}).get('title', 'topic')
+                    db.add_chat_message('user', f'[declined: add topic "{title}"]')
+                else:
+                    db.add_chat_message('user', '[declined: add concept]')
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(view=view)
                 except discord.errors.NotFound:
                     pass
-                _pending_concepts.pop(message.reference.message_id, None)
+                _pending_confirmations.pop(message.reference.message_id, None)
                 await message.add_reaction('👍')
                 return
             # Ambiguous reply — fall through to normal pipeline
@@ -727,10 +745,14 @@ async def on_message(message):
 
         if pending_action:
             # Show educational answer + confirmation buttons
-            view = AddConceptConfirmView(pending_action)
+            action_name = pending_action.get('action', '')
+            if action_name == 'suggest_topic':
+                view = SuggestTopicConfirmView(pending_action)
+            else:
+                view = AddConceptConfirmView(pending_action)
             sent = await send_long_with_view(message.reply, response, view=view)
-            _pending_concepts[sent.id] = (pending_action, view)
-            view.on_resolved = lambda mid=sent.id: _pending_concepts.pop(mid, None)
+            _pending_confirmations[sent.id] = (pending_action, view)
+            view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
         elif assess_meta:
             # Show assessment feedback + quiz navigation buttons
             view = QuizNavigationView(
