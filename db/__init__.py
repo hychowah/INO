@@ -135,6 +135,11 @@ if __name__ == '__main__':
     remark = get_latest_remark(c1)
     print(f"\nLatest remark for concept #{c1}: {remark}")
 
+    # Verify remark_summary cache was populated
+    detail = get_concept_detail(c1)
+    assert detail.get('remark_summary') is not None, "remark_summary cache not populated!"
+    print(f"  remark_summary cache: {detail['remark_summary'][:60]}...")
+
     add_review(c1, "What protects stainless steel from rusting?",
                "The chromium oxide layer", 4, "Good answer — mentioned Cr2O3 correctly")
     reviews = get_recent_reviews(c1)
@@ -143,7 +148,8 @@ if __name__ == '__main__':
     detail = get_concept_detail(c1)
     print(f"\nConcept detail #{c1}: {detail['title']}")
     print(f"  Topics: {[t['title'] for t in detail['topics']]}")
-    print(f"  Remarks: {len(detail['remarks'])}")
+    print(f"  Remarks (history): {len(detail['remarks'])}")
+    print(f"  Remark summary: {detail.get('remark_summary', 'N/A')[:60]}")
     print(f"  Reviews: {len(detail['recent_reviews'])}")
 
     results = search_concepts("corrosion")

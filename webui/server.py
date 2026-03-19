@@ -617,7 +617,18 @@ def page_concept_detail(concept_id: int) -> str:
       </table>
     </div>"""
 
-    # Remarks
+    # Remark summary (cached)
+    remark_summary = detail.get('remark_summary', '')
+    remark_updated = detail.get('remark_updated_at', '')
+    if remark_summary:
+        summary_html = f"""<div class="remark" style="border-left:3px solid var(--accent);padding-left:12px;margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Current summary (updated {remark_updated or 'N/A'})</div>
+              {remark_summary}
+            </div>"""
+    else:
+        summary_html = ''
+
+    # Remarks (full history)
     remarks = detail.get('remarks', [])
     if remarks:
         remark_html = ""
@@ -656,6 +667,7 @@ def page_concept_detail(concept_id: int) -> str:
     {info_html}
     <div class="section">
       <h4>Remarks ({len(remarks)})</h4>
+      {summary_html}
       {remark_html}
     </div>
     <div class="section">

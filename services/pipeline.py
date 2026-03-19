@@ -499,7 +499,7 @@ def handle_review_check() -> list[str]:
 
     topic_names = [t['title'] for t in detail.get('topics', [])]
     recent_reviews = detail.get('recent_reviews', [])
-    remarks = detail.get('remarks', [])
+    remark_summary = detail.get('remark_summary', '')
 
     context_parts = [
         f"Concept: {detail['title']} (#{detail['id']})",
@@ -509,9 +509,8 @@ def handle_review_check() -> list[str]:
         f"Reviews: {detail['review_count']}",
     ]
 
-    if remarks:
-        latest = remarks[0]['content'][:100]
-        context_parts.append(f"Latest remark: {latest}")
+    if remark_summary:
+        context_parts.append(f"Latest remark: {remark_summary[:100]}")
 
     if recent_reviews:
         last = recent_reviews[0]

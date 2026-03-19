@@ -12,14 +12,31 @@ from db.core import _conn, _now_iso
 # Concept Remarks
 # ============================================================================
 
+# Maximum length for the remark_summary cache column
+REMARK_SUMMARY_MAX = 4000
+
+
 def add_remark(concept_id: int, content: str) -> int:
-    """Add a remark to a concept. Returns the remark ID."""
+    """Add a remark to a concept. Also updates the remark_summary cache.
+    The content is the full replacement summary (LLM-produced).
+    Returns the remark ID."""
+    now = _now_iso()
     conn = _conn()
+    # Append-only row in concept_remarks (source of truth)
     cursor = conn.execute(
         "INSERT INTO concept_remarks (concept_id, content, created_at) VALUES (?, ?, ?)",
-        (concept_id, content, _now_iso())
+        (concept_id, content, now)
     )
     remark_id = cursor.lastrowid
+
+    # Update summary cache on concepts table
+    summary = content
+    if len(summary) > REMARK_SUMMARY_MAX:
+        summary = summary[:REMARK_SUMMARY_MAX - 15] + "\n…[truncated]"
+    conn.execute(
+        "UPDATE concepts SET remark_summary = ?, remark_updated_at = ? WHERE id = ?",
+        (summary, now, concept_id)
+    )
     conn.commit()
     conn.close()
     return remark_id
@@ -37,14 +54,14 @@ def get_remarks(concept_id: int, limit: int = 10) -> List[Dict]:
 
 
 def get_latest_remark(concept_id: int) -> Optional[str]:
-    """Get the most recent remark content for a concept."""
+    """Get the remark summary for a concept (cached on concepts table)."""
     conn = _conn()
-    row = conn.execute("""
-        SELECT content FROM concept_remarks
-        WHERE concept_id = ? ORDER BY id DESC LIMIT 1
-    """, (concept_id,)).fetchone()
+    row = conn.execute(
+        "SELECT remark_summary FROM concepts WHERE id = ?",
+        (concept_id,)
+    ).fetchone()
     conn.close()
-    return row['content'] if row else None
+    return row['remark_summary'] if row else None
 
 
 # ============================================================================

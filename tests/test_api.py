@@ -344,6 +344,7 @@ class TestConceptCRUD:
         data = resp.json()
         assert data['concept_id'] == cid
         assert data['content'] == "Remember this pattern"
+        assert data['remark_summary'] == "Remember this pattern"
 
     @pytest.mark.anyio
     async def test_add_remark_404(self, client):

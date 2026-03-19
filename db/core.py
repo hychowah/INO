@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 # ============================================================================
@@ -316,7 +316,11 @@ def _run_migrations():
         # knowledge.db tables
         conn = sqlite3.connect(KNOWLEDGE_DB)
         for table in ('topics', 'concepts', 'review_log', 'concept_remarks'):
-            if not _has_column(table, 'user_id'):
+            # Guard: table may have been renamed/dropped by a later migration
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if exists and not _has_column(table, 'user_id'):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT DEFAULT 'default'")
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON {table}(user_id)")
         conn.commit()
@@ -411,6 +415,37 @@ def _run_migrations():
         conn.commit()
         conn.close()
         print("[LEARN DB] Migration 9: concept_relations table")
+
+    # --- Migration 10: remark_summary cache column on concepts ---
+    if current < 10:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        if not _has_column('concepts', 'remark_summary'):
+            conn.execute("ALTER TABLE concepts ADD COLUMN remark_summary TEXT")
+        if not _has_column('concepts', 'remark_updated_at'):
+            conn.execute("ALTER TABLE concepts ADD COLUMN remark_updated_at DATETIME")
+
+        # Populate cache from existing concept_remarks (newest-first, limit 5 per concept)
+        concept_ids = conn.execute("SELECT DISTINCT concept_id FROM concept_remarks").fetchall()
+        for (cid,) in concept_ids:
+            rows = conn.execute(
+                "SELECT content FROM concept_remarks WHERE concept_id = ? ORDER BY id DESC LIMIT 5",
+                (cid,)
+            ).fetchall()
+            if rows:
+                summary = "\n---\n".join(r[0] for r in rows)
+                # Enforce 4000-char limit
+                if len(summary) > 4000:
+                    summary = summary[:3985] + "\n…[truncated]"
+                max_ts = conn.execute(
+                    "SELECT MAX(created_at) FROM concept_remarks WHERE concept_id = ?", (cid,)
+                ).fetchone()[0]
+                conn.execute(
+                    "UPDATE concepts SET remark_summary = ?, remark_updated_at = ? WHERE id = ?",
+                    (summary, max_ts, cid)
+                )
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 10: remark_summary cache column on concepts")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

@@ -184,8 +184,7 @@ def get_concepts_for_topic(topic_id: int) -> List[Dict]:
     conn = _conn()
     rows = conn.execute("""
         SELECT c.*,
-               (SELECT content FROM concept_remarks
-                WHERE concept_id = c.id ORDER BY id DESC LIMIT 1) as latest_remark
+               c.remark_summary AS latest_remark
         FROM concepts c
         JOIN concept_topics ct ON c.id = ct.concept_id
         WHERE ct.topic_id = ?
@@ -201,8 +200,7 @@ def get_due_concepts(limit: int = 10, offset: int = 0) -> List[Dict]:
     now = _now_iso()
     rows = conn.execute("""
         SELECT c.*,
-               (SELECT content FROM concept_remarks
-                WHERE concept_id = c.id ORDER BY id DESC LIMIT 1) as latest_remark,
+               c.remark_summary AS latest_remark,
                GROUP_CONCAT(ct.topic_id) as topic_id_list
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
@@ -229,8 +227,7 @@ def get_next_review_concept() -> Optional[Dict]:
     conn = _conn()
     row = conn.execute("""
         SELECT c.*,
-               (SELECT content FROM concept_remarks
-                WHERE concept_id = c.id ORDER BY id DESC LIMIT 1) as latest_remark,
+               c.remark_summary AS latest_remark,
                GROUP_CONCAT(ct.topic_id) as topic_id_list
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
@@ -311,8 +308,7 @@ def get_all_concepts_with_topics() -> List[Dict]:
     # Main concept query
     rows = conn.execute("""
         SELECT c.*,
-               (SELECT content FROM concept_remarks
-                WHERE concept_id = c.id ORDER BY id DESC LIMIT 1) as latest_remark
+               c.remark_summary AS latest_remark
         FROM concepts c
         ORDER BY c.next_review_at ASC NULLS LAST
     """).fetchall()
@@ -395,11 +391,21 @@ def get_concept_detail(concept_id: int) -> Optional[Dict]:
 
     conn = _conn()
 
+    # Full remark history (source of truth from concept_remarks table)
     remarks = conn.execute("""
         SELECT id, content, created_at FROM concept_remarks
         WHERE concept_id = ? ORDER BY id DESC LIMIT 10
     """, (concept_id,)).fetchall()
     concept['remarks'] = [dict(r) for r in remarks]
+
+    # Cached summary (used by pipeline/context for LLM)
+    summary_row = conn.execute(
+        "SELECT remark_summary, remark_updated_at FROM concepts WHERE id = ?",
+        (concept_id,)
+    ).fetchone()
+    if summary_row:
+        concept['remark_summary'] = summary_row['remark_summary']
+        concept['remark_updated_at'] = summary_row['remark_updated_at']
 
     reviews = conn.execute("""
         SELECT id, question_asked, user_response, quality, llm_assessment, reviewed_at

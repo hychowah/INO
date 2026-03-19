@@ -397,7 +397,12 @@ async def add_remark(concept_id: int, req: RemarkRequest):
         raise HTTPException(status_code=404, detail="Concept not found")
 
     remark_id = db.add_remark(concept_id, req.content)
-    return {"id": remark_id, "concept_id": concept_id, "content": req.content}
+    return {
+        "id": remark_id,
+        "concept_id": concept_id,
+        "content": req.content,
+        "remark_summary": db.get_latest_remark(concept_id),
+    }
 
 
 # ============================================================================

@@ -239,7 +239,11 @@ def format_fetch_result(data: Any) -> str:
             parts.append(f"Next review: {c.get('next_review_at', 'N/A')}")
             parts.append(f"Topics: {[t['title'] for t in c.get('topics', [])]}")
 
-            if c.get('remarks'):
+            if c.get('remark_summary'):
+                parts.append(f"\nRemark summary (updated {c.get('remark_updated_at', 'N/A')}):")
+                parts.append(f"  {c['remark_summary']}")
+            elif c.get('remarks'):
+                # Fallback to raw remarks if summary not yet populated
                 parts.append("\nRemarks (latest 3):")
                 for r in c['remarks'][:3]:  # cap at 3 most recent
                     parts.append(f"  - [{r['created_at']}] {r['content']}")

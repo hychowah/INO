@@ -9,9 +9,26 @@ import re
 
 import config
 import db
+from db.reviews import REMARK_SUMMARY_MAX
 from services.parser import _extract_json_object
 
 logger = logging.getLogger("dedup")
+
+
+def _regenerate_remark_summary(concept_id: int):
+    """Rebuild remark_summary cache from the latest concept_remarks rows."""
+    remarks = db.get_remarks(concept_id, limit=5)
+    if remarks:
+        summary = "\n---\n".join(r['content'] for r in remarks)
+        if len(summary) > REMARK_SUMMARY_MAX:
+            summary = summary[:REMARK_SUMMARY_MAX - 15] + "\n…[truncated]"
+        conn = db._conn()
+        conn.execute(
+            "UPDATE concepts SET remark_summary = ?, remark_updated_at = ? WHERE id = ?",
+            (summary, db._now_iso(), concept_id)
+        )
+        conn.commit()
+        conn.close()
 
 
 async def handle_dedup_check() -> list[dict] | None:
@@ -161,6 +178,10 @@ async def execute_dedup_merges(groups: list[dict]) -> list[str]:
             db.delete_concept(mid)
             merged_titles.append(f"#{mid} \"{merge_concept['title']}\"")
             logger.info(f"[DEDUP] Merged #{mid} into #{keep_id}")
+
+        # Regenerate remark_summary for the keep target after all merges
+        if merged_titles:
+            _regenerate_remark_summary(keep_id)
 
         if merged_titles:
             summary = (f"Merged {', '.join(merged_titles)} → "

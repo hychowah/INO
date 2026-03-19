@@ -114,10 +114,13 @@ class TestMaintenanceBlocked:
         })
         concept = db.get_concept(concept_id)
         assert concept['mastery_level'] == 0  # blocked
-        # Remark should still be added
+        # Remark should still be added (both history and summary)
         detail = db.get_concept_detail(concept_id)
         remarks = detail.get('remarks', [])
         assert any('chemistry' in r['content'] for r in remarks)
+        # Summary cache should also be populated
+        assert detail.get('remark_summary') is not None
+        assert 'chemistry' in detail['remark_summary']
 
 
 # ============================================================================
