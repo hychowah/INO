@@ -96,7 +96,7 @@ ROOT
 │   ├── DEVNOTES.md
 │   ├── index.md
 │   └── plans/             # Feature plans (mobile-conversion.md, concept-relations.md)
-├── scripts/               # start.bat, start_api.bat, agent.py (legacy CLI)
+├── scripts/               # agent.py (maintenance CLI), utility scripts
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
 │   └── test_similarity.py # Configurable similarity test harness (tune thresholds)
 └── .env                   # Secrets (git-ignored)

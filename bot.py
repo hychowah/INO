@@ -795,7 +795,7 @@ def main():
         logger.critical(f"Fatal: {e}", exc_info=True)
 
     if getattr(bot, "_restart_requested", False):
-        logger.info("Clean exit with code 42 — start.bat will restart.")
+        logger.info("Clean exit with code 42 — process manager should restart.")
         sys.exit(42)
 
 
