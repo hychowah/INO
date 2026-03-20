@@ -87,6 +87,24 @@ from db.preferences import (
     PERSONAS_DIR, DEFAULT_PERSONA,
 )
 
+# Vector store (semantic search)
+try:
+    from db.vectors import (
+        upsert_concept as vector_upsert_concept,
+        delete_concept as vector_delete_concept,
+        search_similar_concepts,
+        find_nearest_concepts,
+        concept_similarity,
+        upsert_topic as vector_upsert_topic,
+        delete_topic as vector_delete_topic,
+        search_similar_topics,
+        reindex_all as vector_reindex_all,
+        get_collection_count as vector_collection_count,
+    )
+    VECTORS_AVAILABLE = True
+except ImportError:
+    VECTORS_AVAILABLE = False
+
 
 # ============================================================================
 # Self-test

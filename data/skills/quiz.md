@@ -165,12 +165,80 @@ Read every `question_asked` in `recent_reviews`. Your new question must:
 ### Step 4: The "Mastered" tier — extend and connect
 When the user has clearly mastered a concept (score ≥ 75, recent reviews quality ≥ 4), don't just keep asking harder questions about the same thing. **Evolve:**
 
-1. **Cross-topic synthesis**: "How does [this concept] relate to [concept from another topic]?" — use the **Related Concepts** shown in fetch results to find meaningful connections, then connect knowledge across the topic tree
-2. **Edge cases & exceptions**: "When would this NOT apply?" / "What's the failure mode?"
-3. **Teach-back**: "How would you explain this to a colleague who's never heard of it?"
-4. **Suggest new concepts**: After a quality 5 answer, proactively suggest a related concept: "You've got this down! A natural next step would be [X] — want me to add it?" Auto-add if the destination topic already exists; suggest if it's a new area.
-5. **Topic expansion**: If you notice the user keeps asking/learning about related things, suggest creating a subtopic to organize the growing knowledge
-6. **Review-check growth**: If most concepts in a topic are mastered (avg score ≥ 75), mention in the review DM that the user might be ready to go deeper.
+1. **Multi-concept synthesis quiz** (⭐ preferred for Solid/Mastered tiers): Use `fetch` with `cluster: true` to find semantically related concepts, then use `multi_quiz` to ask a question that spans multiple concepts. For example: "How does [concept A] interact with [concept B] in practice?" This tests deeper understanding. See **Multi-Concept Quiz Flow** below.
+2. **Cross-topic synthesis**: "How does [this concept] relate to [concept from another topic]?" — use the **Related Concepts** shown in fetch results to find meaningful connections, then connect knowledge across the topic tree
+3. **Edge cases & exceptions**: "When would this NOT apply?" / "What's the failure mode?"
+4. **Teach-back**: "How would you explain this to a colleague who's never heard of it?"
+5. **Suggest new concepts**: After a quality 5 answer, proactively suggest a related concept: "You've got this down! A natural next step would be [X] — want me to add it?" Auto-add if the destination topic already exists; suggest if it's a new area.
+6. **Topic expansion**: If you notice the user keeps asking/learning about related things, suggest creating a subtopic to organize the growing knowledge
+7. **Review-check growth**: If most concepts in a topic are mastered (avg score ≥ 75), mention in the review DM that the user might be ready to go deeper.
+
+---
+
+## Multi-Concept Quiz Flow
+
+Multi-concept quizzes test understanding across related concepts in a single question. They are the highest tier of quiz — use them when the primary concept is at **Solid** (score ≥ 50) or **Mastered** tier.
+
+### When to use multi-concept quiz
+- Primary concept score ≥ 50 (Solid or Mastered tier)
+- You want to test synthesis / cross-concept understanding
+- The cluster fetch returns at least 2 concepts with meaningful similarity
+
+### Flow
+
+**Step 1: Fetch a concept cluster**
+```json
+{"action": "fetch", "params": {"cluster": true, "concept_id": 12}, "message": "Finding related concepts..."}
+```
+This returns the primary concept detail plus 2–3 semantically related concepts.
+
+**Step 2: Generate a synthesis question**
+Your question should require understanding of how the concepts relate, contrast, or work together. Example:
+- "How do [Concept A] and [Concept B] interact in [real scenario]?"
+- "Compare and contrast [Concept A] with [Concept B] — when would you use each?"
+- "Given [scenario involving concepts A, B, C], what would happen and why?"
+
+**Step 3: Use `multi_quiz`**
+```json
+{
+  "action": "multi_quiz",
+  "params": {
+    "concept_ids": [12, 15, 23]
+  },
+  "message": "Here's a synthesis question spanning multiple concepts: ..."
+}
+```
+
+**Step 4: Assess with `multi_assess`**
+When the user answers, score each concept individually:
+```json
+{
+  "action": "multi_assess",
+  "params": {
+    "assessments": [
+      {"concept_id": 12, "quality": 4, "question_difficulty": 65},
+      {"concept_id": 15, "quality": 3, "question_difficulty": 60},
+      {"concept_id": 23, "quality": 5, "question_difficulty": 70}
+    ],
+    "llm_assessment": "Good synthesis — connected A and B well, weaker on C's role.",
+    "question_asked": "How do A, B, and C interact in scenario X?",
+    "user_response": "[user's answer]"
+  },
+  "message": "Great synthesis! You connected A and B really well. For C, consider... Want another multi-concept question? 🧠"
+}
+```
+
+### Scoring in multi_assess
+- Each concept is scored individually using the same formula as single `assess`
+- `quality` reflects how well the user demonstrated understanding of THAT specific concept
+- `question_difficulty` should reflect the difficulty of the aspect related to THAT concept
+- The same "above-level no penalty" protection applies per concept
+
+### Guidelines
+- **Don't force multi-concept quiz** if only 1 concept is returned from the cluster fetch — fall back to normal single-concept quiz
+- **All concepts in the cluster should be relevant** to the question you're asking
+- **Individual scoring is critical** — a user might nail concept A but struggle with B's aspect. Score them separately.
+- **Write remarks for the primary concept** noting the multi-concept quiz strategy and results
 
 **Remarks as strategic instructions:** Think of each remark as an instruction to your next incarnation. Don't just note "user got this wrong" — plan ahead. Always preserve key insights from the previous summary:
 - `"User mastered basic composition. Ready for: corrosion mechanisms, real-world applications, failure modes"`

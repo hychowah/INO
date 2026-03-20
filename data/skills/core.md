@@ -124,9 +124,10 @@ Request more data from the database before taking action. You receive a lightwei
 **Parameters (pick ONE):**
 - `topic_id` (int): Get all concepts under a topic + parent/child topics
 - `concept_id` (int): Get full concept detail + all remarks + last 5 reviews
-- `search` (string): Fuzzy search across concept and topic titles
+- `search` (string): Fuzzy search across concept and topic titles (uses semantic search when available)
 - `due` (boolean): Get concepts due for review, with `limit` (int, default 10)
 - `stats` (boolean): Get aggregate review statistics
+- `cluster` (boolean) + `concept_id` (int): Get a concept cluster — the target concept + 2–3 semantically related concepts. Used for multi-concept quiz preparation. Add `cluster_size` (int, default 3) to control how many related concepts to include.
 
 **Examples:**
 ```json
@@ -134,6 +135,7 @@ Request more data from the database before taking action. You receive a lightwei
 {"action": "fetch", "params": {"concept_id": 7}, "message": "Checking review history..."}
 {"action": "fetch", "params": {"search": "corrosion"}, "message": "Searching..."}
 {"action": "fetch", "params": {"due": true, "limit": 5}, "message": "Finding due reviews..."}
+{"action": "fetch", "params": {"cluster": true, "concept_id": 12}, "message": "Finding related concepts for synthesis quiz..."}
 ```
 
 ### list_topics

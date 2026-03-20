@@ -2,6 +2,8 @@
 Shared test fixtures for the learning agent test suite.
 
 Provides an isolated temporary database so tests don't touch the real DB.
+Vector store init is skipped by default to avoid requiring the embedding
+model in normal tests.
 """
 
 import pytest
@@ -18,6 +20,7 @@ def test_db(tmp_path):
 
     Patches KNOWLEDGE_DB and CHAT_DB to point to files in tmp_path,
     then initializes schemas + migrations. Yields the tmp_path.
+    Vector store init is skipped (no embedding model needed).
     """
     knowledge = tmp_path / "knowledge.db"
     chat = tmp_path / "chat_history.db"
@@ -25,7 +28,8 @@ def test_db(tmp_path):
     with patch.object(core, 'KNOWLEDGE_DB', knowledge), \
          patch.object(core, 'CHAT_DB', chat), \
          patch('db.core.KNOWLEDGE_DB', knowledge), \
-         patch('db.core.CHAT_DB', chat):
+         patch('db.core.CHAT_DB', chat), \
+         patch('db.core._init_vector_store'):
         # Also patch the module-level reference that _conn() uses
         import db.topics
         import db.concepts

@@ -35,6 +35,20 @@ def init_databases():
     _init_knowledge_db()
     _init_chat_db()
     _run_migrations()
+    _init_vector_store()
+
+
+def _init_vector_store():
+    """Initialize the Qdrant vector store (best-effort — non-fatal on failure)."""
+    try:
+        from db.vectors import init_vector_store
+        init_vector_store()
+    except Exception as e:
+        import logging
+        logging.getLogger("learn.db").warning(
+            f"Vector store init skipped: {e}. "
+            "Semantic search will fall back to FTS5."
+        )
 
 
 def _init_knowledge_db():

@@ -80,6 +80,10 @@ def execute_action(action: str, params: Dict[str, Any]) -> Tuple[str, Any]:
 
 def _handle_fetch(params: Dict) -> Tuple[str, Any]:
     """Fetch data from DB for the LLM's context enrichment loop."""
+    # Cluster fetch must be checked before plain concept_id fetch
+    if params.get('cluster') and 'concept_id' in params:
+        return _handle_fetch_cluster(params)
+
     if 'concept_id' in params:
         detail = db.get_concept_detail(int(params['concept_id']))
         if not detail:
@@ -125,7 +129,7 @@ def _handle_fetch(params: Dict) -> Tuple[str, Any]:
         stats = db.get_review_stats()
         return ('fetch', {"stats": stats})
 
-    return ('error', "fetch requires one of: concept_id, topic_id, search, due, stats")
+    return ('error', "fetch requires one of: concept_id, topic_id, search, due, stats, cluster")
 
 
 # ============================================================================
@@ -513,6 +517,143 @@ def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     return ('reply', message)
 
 
+def _handle_multi_quiz(params: Dict) -> Tuple[str, Any]:
+    """Multi-concept quiz: the LLM asks a question spanning multiple concepts.
+    Records all concept IDs in session state for multi_assess to pick up."""
+    concept_ids = params.get('concept_ids', [])
+    message = params.get('message', 'Multi-concept quiz question sent.')
+
+    if not concept_ids or len(concept_ids) < 2:
+        return ('error', "multi_quiz requires concept_ids with at least 2 IDs")
+
+    # Validate all concepts exist
+    valid_ids = []
+    for cid in concept_ids:
+        concept = db.get_concept(int(cid))
+        if concept:
+            valid_ids.append(int(cid))
+        else:
+            logger.warning(f"[multi_quiz] Concept #{cid} not found, skipping")
+
+    if len(valid_ids) < 2:
+        return ('error', "multi_quiz: need at least 2 valid concept_ids")
+
+    # Store in session state for multi_assess
+    import json
+    db.set_session('active_concept_ids', json.dumps(valid_ids))
+    db.set_session('active_concept_id', str(valid_ids[0]))  # primary
+
+    # Embed concept IDs in message for chat history
+    ids_str = ', '.join(f'#{cid}' for cid in valid_ids)
+    message += f"\n_(multi-concept quiz on concepts {ids_str})_"
+
+    return ('reply', message)
+
+
+def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
+    """Assess a multi-concept quiz answer. Scores each concept individually.
+
+    Expects params:
+      assessments: [{concept_id, quality, question_difficulty}, ...]
+      llm_assessment: str — unified feedback text
+      question_asked: str
+      user_response: str
+      message: str (optional — display text)
+    """
+    assessments = params.get('assessments', [])
+    llm_assessment = params.get('llm_assessment', params.get('assessment', ''))
+    question = params.get('question_asked', '')
+    user_response = params.get('user_response', '')
+
+    if not assessments:
+        return ('error', "multi_assess requires 'assessments' list")
+
+    results = []
+    all_concept_names = []
+
+    for entry in assessments:
+        cid = entry.get('concept_id')
+        quality = entry.get('quality')
+        question_difficulty = entry.get('question_difficulty')
+
+        if cid is None or quality is None:
+            results.append(f"Skipped entry (missing concept_id or quality)")
+            continue
+
+        cid = int(cid)
+        quality = max(0, min(5, int(quality)))
+
+        concept = db.get_concept(cid)
+        if not concept:
+            results.append(f"Concept #{cid} not found")
+            continue
+
+        current_score = concept.get('mastery_level', 0)
+
+        if question_difficulty is not None:
+            question_difficulty = max(0, min(100, int(question_difficulty)))
+        else:
+            if quality >= 4:
+                question_difficulty = min(100, current_score + 10)
+            elif quality == 3:
+                question_difficulty = current_score
+            else:
+                question_difficulty = min(100, current_score + 15)
+
+        # Score delta calculation (same formula as single assess)
+        gap = question_difficulty - current_score
+
+        if quality >= 3:
+            base_gain = {3: 2, 4: 4, 5: 7}[quality]
+            if gap > 0:
+                delta = base_gain + gap * 0.15
+            else:
+                delta = max(1, base_gain * 0.5)
+            new_score = min(100, round(current_score + delta))
+        else:
+            base_loss = {0: 5, 1: 3, 2: 1}[quality]
+            if gap > 0:
+                delta = 0
+            else:
+                delta = base_loss + abs(gap) * 0.2
+            new_score = max(0, round(current_score - delta))
+
+        new_interval = max(1, round(math.exp(new_score * 0.05)))
+
+        now = datetime.now()
+        next_review = (now + timedelta(days=new_interval)).strftime('%Y-%m-%d %H:%M:%S')
+
+        db.update_concept(cid,
+            mastery_level=new_score,
+            interval_days=new_interval,
+            next_review_at=next_review,
+            last_reviewed_at=now.strftime('%Y-%m-%d %H:%M:%S'),
+            review_count=concept.get('review_count', 0) + 1,
+        )
+
+        db.add_review(cid, question, user_response, quality, llm_assessment)
+
+        if entry.get('remark'):
+            db.add_remark(cid, entry['remark'])
+
+        score_change = new_score - current_score
+        sign = '+' if score_change >= 0 else ''
+        results.append(
+            f"#{cid} {concept['title']}: q{quality}/5, "
+            f"{current_score}→{new_score} ({sign}{score_change}), "
+            f"next in {new_interval}d"
+        )
+        all_concept_names.append(concept['title'])
+
+    # Clear multi-concept session state
+    db.set_session('active_concept_ids', None)
+    db.set_session('active_concept_id', None)
+    db.set_session('pending_review', None)
+
+    default_msg = f"Multi-assess ({len(results)} concepts):\n" + "\n".join(results)
+    return ('reply', params.get('message', default_msg))
+
+
 def _handle_assess(params: Dict) -> Tuple[str, Any]:
     """Record the LLM's assessment of a user's answer.
     Updates concept score (0-100), logs the review, and schedules next review.
@@ -745,6 +886,75 @@ def _handle_suggest_topic(params: Dict) -> Tuple[str, Any]:
 
 
 # ============================================================================
+# Fetch Cluster (multi-concept quiz context)
+# ============================================================================
+
+def _handle_fetch_cluster(params: Dict) -> Tuple[str, Any]:
+    """Fetch a primary concept + semantically related concepts for multi-concept quiz.
+
+    Uses vector store nearest-neighbor search to find related concepts.
+    Biases toward concepts that are also due for review when possible.
+    Returns the primary concept detail plus 2–3 related concept details.
+    """
+    primary_id = int(params['concept_id'])
+    limit = int(params.get('cluster_size', 3))
+
+    primary = db.get_concept_detail(primary_id)
+    if not primary:
+        return ('fetch', {"error": f"Concept #{primary_id} not found"})
+
+    cluster_concepts = [primary]
+
+    # Try vector-based clustering
+    try:
+        if db.VECTORS_AVAILABLE:
+            neighbors = db.find_nearest_concepts(
+                primary_id, limit=limit * 2,
+                score_threshold=0.4,
+            )
+
+            if neighbors:
+                # Bias toward due concepts
+                due_concepts = db.get_due_concepts(limit=50)
+                due_ids = {c['id'] for c in due_concepts}
+
+                # Sort: due concepts first, then by similarity
+                neighbors.sort(key=lambda n: (
+                    0 if n['id'] in due_ids else 1,
+                    -n['score'],
+                ))
+
+                # Take top N
+                for neighbor in neighbors[:limit]:
+                    detail = db.get_concept_detail(neighbor['id'])
+                    if detail:
+                        detail['cluster_similarity'] = neighbor['score']
+                        cluster_concepts.append(detail)
+    except Exception as e:
+        logger.warning(f"[fetch_cluster] Vector search failed: {e}")
+
+    # Fallback: if no vector results, use explicit relations
+    if len(cluster_concepts) < 2:
+        relations = db.get_relations(primary_id)
+        for rel in relations[:limit]:
+            related_id = (rel['concept_id_b']
+                          if rel.get('concept_id_a') == primary_id
+                          else rel.get('concept_id_a', rel.get('concept_id_low')))
+            if related_id and related_id != primary_id:
+                detail = db.get_concept_detail(related_id)
+                if detail:
+                    cluster_concepts.append(detail)
+                if len(cluster_concepts) > limit:
+                    break
+
+    return ('fetch', {
+        "concept_cluster": cluster_concepts,
+        "primary_concept_id": primary_id,
+        "cluster_size": len(cluster_concepts),
+    })
+
+
+# ============================================================================
 # Action Handler Map
 # ============================================================================
 
@@ -772,6 +982,8 @@ ACTION_HANDLERS = {
     'remark': _handle_remark,
     'remove_relation': _handle_remove_relation,
     'quiz': _handle_quiz,
+    'multi_quiz': _handle_multi_quiz,
     'assess': _handle_assess,
+    'multi_assess': _handle_multi_assess,
     'suggest_topic': _handle_suggest_topic,
 }

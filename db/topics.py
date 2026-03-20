@@ -2,11 +2,36 @@
 Topic CRUD operations, topic maps, and hierarchy queries.
 """
 
+import logging
 import sqlite3
 from datetime import datetime
 from typing import Optional, List, Dict
 
 from db.core import _conn, _now_iso, KNOWLEDGE_DB
+
+logger = logging.getLogger("learn.db.topics")
+
+
+# ============================================================================
+# Vector store sync helpers (best-effort, non-fatal)
+# ============================================================================
+
+def _vector_upsert(topic_id: int, title: str, description: Optional[str] = None):
+    """Sync a topic to the vector store. Silently skips on failure."""
+    try:
+        from db.vectors import upsert_topic
+        upsert_topic(topic_id, title, description)
+    except Exception as e:
+        logger.debug(f"Vector upsert skipped for topic #{topic_id}: {e}")
+
+
+def _vector_delete(topic_id: int):
+    """Remove a topic from the vector store. Silently skips on failure."""
+    try:
+        from db.vectors import delete_topic
+        delete_topic(topic_id)
+    except Exception as e:
+        logger.debug(f"Vector delete skipped for topic #{topic_id}: {e}")
 
 
 # ============================================================================
@@ -37,6 +62,10 @@ def add_topic(title: str, description: Optional[str] = None,
 
     conn.commit()
     conn.close()
+
+    # Sync to vector store (best-effort)
+    _vector_upsert(topic_id, title, description)
+
     return topic_id
 
 
@@ -74,6 +103,13 @@ def update_topic(topic_id: int, **kwargs) -> bool:
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
+
+    # Sync title/description changes to vector store
+    if updated and ('title' in fields or 'description' in fields):
+        topic = get_topic(topic_id)
+        if topic:
+            _vector_upsert(topic_id, topic['title'], topic.get('description'))
+
     return updated
 
 
@@ -88,6 +124,11 @@ def delete_topic(topic_id: int) -> bool:
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()
+
+    # Sync to vector store (best-effort)
+    if deleted:
+        _vector_delete(topic_id)
+
     return deleted
 
 
@@ -184,7 +225,34 @@ def get_topic_parents(topic_id: int) -> List[Dict]:
 
 
 def search_topics(query: str, limit: int = 20) -> List[Dict]:
-    """Search topics by title or description. Uses FTS5 when available, LIKE fallback."""
+    """Search topics by title or description.
+
+    Uses vector similarity search when available (semantic matching),
+    falls back to FTS5 keyword search, then LIKE as last resort.
+    """
+    # Try vector search first
+    try:
+        from db.vectors import search_similar_topics
+        hits = search_similar_topics(query, limit=limit)
+        if hits:
+            ids = [h["id"] for h in hits]
+            conn = _conn()
+            placeholders = ",".join("?" for _ in ids)
+            rows = conn.execute(f"""
+                SELECT t.* FROM topics t
+                WHERE t.id IN ({placeholders})
+            """, ids).fetchall()
+            conn.close()
+
+            # Preserve vector similarity ordering
+            id_order = {tid: i for i, tid in enumerate(ids)}
+            results = [dict(r) for r in rows]
+            results.sort(key=lambda d: id_order.get(d['id'], 999))
+            return results
+    except Exception:
+        pass  # Fall through to FTS5
+
+    # FTS5 fallback
     conn = _conn()
     try:
         fts_query = '"' + query.replace('"', '""') + '"'

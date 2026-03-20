@@ -129,8 +129,33 @@ def build_lightweight_context(mode: str = "command") -> str:
 
 
 def _append_active_quiz_context(parts: list) -> None:
-    """If there's an active quiz concept, inject it so the LLM knows which
-    concept_id to use for assess — survives chat history truncation."""
+    """If there's an active quiz concept (single or multi), inject it so the LLM
+    knows which concept_id(s) to use for assess."""
+    import json as _json
+
+    # Check for multi-concept quiz first
+    multi_ids_str = db.get_session('active_concept_ids')
+    if multi_ids_str:
+        try:
+            concept_ids = _json.loads(multi_ids_str)
+            if concept_ids and isinstance(concept_ids, list):
+                concepts = []
+                for cid in concept_ids:
+                    c = db.get_concept(int(cid))
+                    if c:
+                        concepts.append(f"#{cid} — {c['title']} (score {c['mastery_level']}/100)")
+                if concepts:
+                    parts.append(
+                        f"## Active Multi-Concept Quiz\n"
+                        f"Concepts being quizzed together:\n"
+                        + "\n".join(f"- {c}" for c in concepts)
+                        + "\n\nUse `multi_assess` with individual scores per concept.\n"
+                    )
+                    return
+        except (ValueError, TypeError):
+            pass
+
+    # Single-concept quiz fallback
     active_cid = db.get_session('active_concept_id')
     if active_cid:
         concept = db.get_concept(int(active_cid))
@@ -300,6 +325,43 @@ def format_fetch_result(data: Any) -> str:
             parts.append("### Review Stats")
             parts.append(json.dumps(s, indent=2))
             parts.append("")
+
+        # Concept cluster (multi-concept quiz context)
+        elif 'concept_cluster' in data:
+            cluster = data['concept_cluster']
+            primary_id = data.get('primary_concept_id')
+            parts.append(f"### Concept Cluster ({len(cluster)} concepts)")
+            parts.append(f"Primary concept: #{primary_id}\n")
+
+            for c in cluster:
+                is_primary = c['id'] == primary_id
+                label = " [PRIMARY]" if is_primary else ""
+                sim = c.get('cluster_similarity')
+                sim_str = f" (similarity: {sim:.2f})" if sim else ""
+                parts.append(f"#### {'➤ ' if is_primary else '  '}{c['title']} (#{c['id']}){label}{sim_str}")
+                parts.append(f"Description: {c.get('description', 'N/A')}")
+                parts.append(f"Score: {c['mastery_level']}/100, "
+                             f"Interval: {c['interval_days']}d, Reviews: {c['review_count']}")
+                parts.append(f"Topics: {[t['title'] for t in c.get('topics', [])]}")
+
+                if c.get('remark_summary'):
+                    parts.append(f"Remark summary: {c['remark_summary'][:300]}")
+                elif c.get('remarks'):
+                    latest = c['remarks'][0] if c['remarks'] else None
+                    if latest:
+                        parts.append(f"Latest remark: {latest['content'][:200]}")
+
+                if c.get('recent_reviews'):
+                    parts.append("Recent reviews:")
+                    for r in c['recent_reviews'][:2]:
+                        q = r.get('question_asked', '') or ''
+                        parts.append(f"  - Q: {q[:150]} | Quality: {r['quality']}/5")
+                parts.append("")
+
+            parts.append(
+                "Use `multi_quiz` with all concept_ids above to ask a synthesis question "
+                "that tests understanding across these related concepts.\n"
+            )
 
         else:
             parts.append(json.dumps(data, indent=2, default=str))

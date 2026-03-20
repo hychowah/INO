@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-03-18
+> Last updated: 2026-03-20
 
 ## Overview
 
@@ -55,13 +55,13 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 │   │  reviews.py · chat.py · diagnostics.py             │             │
 │   └──────────┬────────────────────────┬────────────────┘             │
 │              ▼                        ▼                              │
-│   ┌──────────────────┐     ┌──────────────────┐                     │
-│   │  knowledge.db    │     │  chat_history.db  │                    │
-│   │  (topics,        │     │  (conversations)  │                    │
-│   │   concepts,      │     │                   │                    │
-│   │   reviews,       │     │                   │                    │
-│   │   remarks)       │     │                   │                    │
-│   └──────────────────┘     └──────────────────┘                     │
+│   ┌──────────────────┐   ┌───────────────────┐  ┌────────────────┐  │
+│   │  knowledge.db    │   │  chat_history.db   │  │  Qdrant        │  │
+│   │  (topics,        │   │  (conversations,   │  │  (embedded)    │  │
+│   │   concepts,      │   │   session state)   │  │  data/vectors/ │  │
+│   │   reviews,       │   │                    │  │  768-dim       │  │
+│   │   remarks)       │   │                    │  │  embeddings    │  │
+│   └──────────────────┘   └───────────────────┘  └────────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,8 +92,9 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/concepts.py` | ~260 | Concept CRUD, search, detail view |
 | `db/reviews.py` | ~100 | Review log, remarks |
 | `db/chat.py` | ~105 | Chat history, session state |
-| `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity |
-| `db/__init__.py` | ~120 | Re-exports all public functions (backward compat) |
+| `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity; vector nearest-neighbor for relation candidates |
+| `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all` |
+| `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
 | `services/pipeline.py` | ~660 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
@@ -102,6 +103,9 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/kimi.py` | ~83 | Thin subprocess wrapper around kimi-cli (the only subprocess in the system) |
 | `services/scheduler.py` | ~200 | Background task — review checks every 15 min, maintenance every 24 h |
 | `services/state.py` | ~10 | Shared mutable state (e.g. `last_activity_at`) between bot and scheduler |
+| `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
+| `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
+| `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
 | **tests/** | | |
 | `tests/test_maintenance.py` | ~160 | Test maintenance diagnostics and dedup sub-agent |
 | `tests/test_dedup.py` | ~35 | Quick test for title similarity and duplicate detection |
@@ -475,6 +479,110 @@ Initial values for new concepts: score=0, interval=1 day. `ease_factor` column f
 
 ---
 
+## Semantic Search & Vector Store
+
+### What it is
+
+A **hybrid search layer** sitting alongside SQLite. It is *not* RAG in the classical sense — no document chunks are retrieved and injected into the LLM prompt. Instead, vector similarity is used to:
+
+1. **Improve search** — `search_concepts(q)` and `search_topics(q)` use semantic matching instead of keyword matching
+2. **Find relation candidates** — `_get_relationship_candidates()` uses nearest-neighbor instead of string similarity
+3. **Group related concepts for multi-quiz** — `fetch cluster` fetches semantically similar concepts to form a synthesis quiz
+
+### Architecture
+
+```
+User adds/updates concept
+        │
+        ▼
+  SQLite (source of truth)          ← always written first
+        │
+        ▼ (best-effort, non-fatal)
+  services/embeddings.py
+  embed_text(title + " — " + description)
+        │
+        ▼
+  768-dim float vector
+        │
+        ▼
+  db/vectors.py  →  Qdrant (embedded, data/vectors/)
+                    collections: "concepts", "topics"
+```
+
+### Sync hooks
+
+Each CRUD function in `db/concepts.py` and `db/topics.py` calls a `_vector_upsert()` or `_vector_delete()` helper **after** the SQL write. All vector calls are wrapped in `try/except` — if Qdrant or the embedding model fails, the SQL operation still succeeds.
+
+### Search flow
+
+```
+search_concepts(query)
+    │
+    ├─ try: vector similarity search (Qdrant)
+    │       → get top-N concept IDs by cosine similarity
+    │       → fetch full rows from SQLite preserving similarity order
+    │       → return
+    │
+    ├─ except: FTS5 keyword search (SQLite)
+    │
+    └─ except: LIKE fallback
+```
+
+### Multi-concept quiz flow
+
+```
+LLM issues: {"action": "fetch", "params": {"cluster": true, "concept_id": 12}}
+        │
+        ▼
+  _handle_fetch_cluster()
+  → get primary concept from SQLite
+  → find_nearest_concepts(12, limit=6, score_threshold=0.4)
+  → bias toward due concepts
+  → return concept_cluster list
+        │
+        ▼
+  LLM reads cluster, generates synthesis question spanning all concepts
+        │
+        ▼
+  {"action": "multi_quiz", "params": {"concept_ids": [12, 7, 3], ...}}
+  → stores active_concept_ids in session
+        │
+        ▼
+  {"action": "multi_assess", "params": {"assessments": [{concept_id, quality}, ...]}}
+  → scores each concept independently
+  → updates mastery/schedule/reviews per concept
+  → clears session state
+```
+
+### Similarity thresholds
+
+| Threshold | Default | Config key | Purpose |
+|:----------|:--------|:-----------|:--------|
+| `SIMILARITY_THRESHOLD_DEDUP` | 0.92 | `LEARN_SIM_DEDUP` | Blocks near-duplicate concept adds |
+| `SIMILARITY_THRESHOLD_RELATION` | 0.50 | `LEARN_SIM_RELATION` | Minimum score for relation candidate suggestions |
+| Cluster search | 0.40 | hardcoded in `_handle_fetch_cluster` | Minimum score to include in a multi-quiz cluster |
+
+Use `python scripts/test_similarity.py` to measure real scores for your concept pairs before tuning these.
+
+### Graceful degradation
+
+`db.VECTORS_AVAILABLE` is `True` only when `qdrant-client` is importable. If not installed:
+- All search falls back to FTS5/LIKE
+- `_get_relationship_candidates()` falls back to title string similarity
+- Multi-quiz cluster falls back to explicit `concept_relations` edges
+- All existing functionality is unaffected
+
+### Migration
+
+When first deploying with an existing SQLite database, run:
+```bash
+python scripts/migrate_vectors.py          # full reindex
+python scripts/migrate_vectors.py --check  # count only
+```
+New concepts/topics are auto-synced on write; the migration script is only needed once for existing data.
+
+---
+
 ## Remarks: The LLM's Persistent Memory
 
 Remarks (`concept_remarks` table) are the key mechanism that makes the system adaptive without hardcoded logic. The LLM:
@@ -503,3 +611,8 @@ This creates a self-improving loop entirely through prompt instructions — no c
 | Web UI port | 8050 | webui/server.py |
 | Static assets | `webui/static/` | webui/server.py |
 | Data directory | `learning_agent/data/` | db.py |
+| Vector store path | `data/vectors/` | `LEARN_VECTOR_STORE_PATH` / config.py |
+| Embedding model | `all-mpnet-base-v2` | `LEARN_EMBEDDING_MODEL` / config.py |
+| Vector search limit | 10 | `LEARN_VECTOR_SEARCH_LIMIT` / config.py |
+| Dedup similarity threshold | 0.92 | `LEARN_SIM_DEDUP` / config.py |
+| Relation similarity threshold | 0.50 | `LEARN_SIM_RELATION` / config.py |

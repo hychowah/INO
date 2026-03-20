@@ -2,11 +2,36 @@
 Concept CRUD operations, search, and detail queries.
 """
 
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
 from db.core import _conn, _now_iso, _normalize_dt_str
+
+logger = logging.getLogger("learn.db.concepts")
+
+
+# ============================================================================
+# Vector store sync helpers (best-effort, non-fatal)
+# ============================================================================
+
+def _vector_upsert(concept_id: int, title: str, description: Optional[str] = None):
+    """Sync a concept to the vector store. Silently skips on failure."""
+    try:
+        from db.vectors import upsert_concept
+        upsert_concept(concept_id, title, description)
+    except Exception as e:
+        logger.debug(f"Vector upsert skipped for concept #{concept_id}: {e}")
+
+
+def _vector_delete(concept_id: int):
+    """Remove a concept from the vector store. Silently skips on failure."""
+    try:
+        from db.vectors import delete_concept
+        delete_concept(concept_id)
+    except Exception as e:
+        logger.debug(f"Vector delete skipped for concept #{concept_id}: {e}")
 
 
 # ============================================================================
@@ -63,6 +88,10 @@ def add_concept(title: str, description: Optional[str] = None,
 
     conn.commit()
     conn.close()
+
+    # Sync to vector store (best-effort)
+    _vector_upsert(concept_id, title, description)
+
     return concept_id
 
 
@@ -127,6 +156,13 @@ def update_concept(concept_id: int, **kwargs) -> bool:
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
+
+    # Sync title/description changes to vector store
+    if updated and ('title' in fields or 'description' in fields):
+        concept = get_concept(concept_id)
+        if concept:
+            _vector_upsert(concept_id, concept['title'], concept.get('description'))
+
     return updated
 
 
@@ -144,6 +180,11 @@ def delete_concept(concept_id: int) -> bool:
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()
+
+    # Sync to vector store (best-effort)
+    if deleted:
+        _vector_delete(concept_id)
+
     return deleted
 
 
@@ -340,7 +381,43 @@ def get_all_concepts_with_topics() -> List[Dict]:
 
 
 def search_concepts(query: str, limit: int = 20) -> List[Dict]:
-    """Search concepts by title or description. Uses FTS5 when available, LIKE fallback."""
+    """Search concepts by title or description.
+
+    Uses vector similarity search when available (semantic matching),
+    falls back to FTS5 keyword search, then LIKE as last resort.
+    """
+    # Try vector search first
+    try:
+        from db.vectors import search_similar_concepts
+        hits = search_similar_concepts(query, limit=limit)
+        if hits:
+            ids = [h["id"] for h in hits]
+            conn = _conn()
+            placeholders = ",".join("?" for _ in ids)
+            rows = conn.execute(f"""
+                SELECT c.*,
+                       GROUP_CONCAT(ct.topic_id) as topic_id_list
+                FROM concepts c
+                LEFT JOIN concept_topics ct ON c.id = ct.concept_id
+                WHERE c.id IN ({placeholders})
+                GROUP BY c.id
+            """, ids).fetchall()
+            conn.close()
+
+            # Preserve vector similarity ordering
+            id_order = {cid: i for i, cid in enumerate(ids)}
+            results = []
+            for r in rows:
+                d = dict(r)
+                tid_str = d.pop('topic_id_list', None)
+                d['topic_ids'] = [int(x) for x in tid_str.split(',')] if tid_str else []
+                results.append(d)
+            results.sort(key=lambda d: id_order.get(d['id'], 999))
+            return results
+    except Exception:
+        pass  # Fall through to FTS5
+
+    # FTS5 fallback
     conn = _conn()
     try:
         fts_query = '"' + query.replace('"', '""') + '"'

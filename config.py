@@ -71,6 +71,23 @@ REVIEW_REMINDER_MAX = int(os.environ.get("LEARN_REVIEW_REMINDER_MAX", "3"))
 MAX_GRAPH_NODES = int(os.environ.get("LEARN_MAX_GRAPH_NODES", "500"))
 
 # ============================================================================
+# VECTOR STORE SETTINGS (hybrid search)
+# ============================================================================
+
+# Path to Qdrant embedded storage (alongside SQLite databases)
+VECTOR_STORE_PATH = BASE_DIR / "data" / "vectors"
+
+# Sentence-transformers model for embeddings
+EMBEDDING_MODEL = os.environ.get("LEARN_EMBEDDING_MODEL", "all-mpnet-base-v2")
+
+# Default search limit for vector queries
+VECTOR_SEARCH_LIMIT = int(os.environ.get("LEARN_VECTOR_SEARCH_LIMIT", "10"))
+
+# Similarity thresholds (cosine similarity, 0.0–1.0)
+SIMILARITY_THRESHOLD_DEDUP = float(os.environ.get("LEARN_SIM_DEDUP", "0.92"))
+SIMILARITY_THRESHOLD_RELATION = float(os.environ.get("LEARN_SIM_RELATION", "0.5"))
+
+# ============================================================================
 # LLM PROVIDER SETTINGS
 # ============================================================================
 

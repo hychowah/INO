@@ -45,12 +45,61 @@ def _title_similarity(a: str, b: str) -> float:
 
 
 def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
-    """Find concept pairs that share FTS5 keywords but don't have a relation yet.
+    """Find semantically related concept pairs that don't have a relation yet.
 
-    Uses FTS5-based candidate generation (O(n log n) via index) instead of
-    pairwise comparison (O(n²)). Returns up to `limit` candidate pairs.
+    Uses vector store nearest-neighbor search when available (semantic matching).
+    Falls back to FTS5-based keyword matching + title similarity.
+    Returns up to `limit` candidate pairs.
     """
-    # Get concepts with meaningful titles (>1 word after stop-word removal)
+    # Try vector-based discovery first
+    try:
+        from db.vectors import find_nearest_concepts
+        from config import SIMILARITY_THRESHOLD_RELATION
+
+        all_concepts = conn.execute(
+            "SELECT id, title FROM concepts ORDER BY id"
+        ).fetchall()
+        if len(all_concepts) < 2:
+            return []
+
+        # Get existing relations to exclude
+        try:
+            existing = conn.execute(
+                "SELECT concept_id_low, concept_id_high FROM concept_relations"
+            ).fetchall()
+            existing_pairs = {(r['concept_id_low'], r['concept_id_high']) for r in existing}
+        except sqlite3.OperationalError:
+            existing_pairs = set()
+
+        candidates = []
+        seen_pairs = set()
+
+        for concept in all_concepts:
+            neighbors = find_nearest_concepts(
+                concept['id'], limit=5,
+                score_threshold=SIMILARITY_THRESHOLD_RELATION,
+            )
+            for neighbor in neighbors:
+                low = min(concept['id'], neighbor['id'])
+                high = max(concept['id'], neighbor['id'])
+                if (low, high) in existing_pairs or (low, high) in seen_pairs:
+                    continue
+                candidates.append({
+                    'concept_a': {'id': concept['id'], 'title': concept['title']},
+                    'concept_b': {'id': neighbor['id'], 'title': neighbor['title']},
+                    'similarity': neighbor['score'],
+                })
+                seen_pairs.add((low, high))
+                if len(candidates) >= limit:
+                    break
+            if len(candidates) >= limit:
+                break
+
+        return candidates
+    except Exception:
+        pass  # Fall through to FTS5-based approach
+
+    # FTS5 fallback (original implementation)
     all_concepts = conn.execute(
         "SELECT id, title FROM concepts ORDER BY id"
     ).fetchall()
@@ -58,11 +107,9 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
     if len(all_concepts) < 2:
         return []
 
-    # Build keyword map for FTS queries
     candidates = []
     seen_pairs = set()
 
-    # Get existing relations to exclude
     try:
         existing = conn.execute(
             "SELECT concept_id_low, concept_id_high FROM concept_relations"
@@ -72,14 +119,12 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
         existing_pairs = set()
 
     for concept in all_concepts:
-        # Extract meaningful keywords from title
         words = {_stem(w) for w in re.findall(r'[a-z0-9]+', concept['title'].lower())} - _STOP_WORDS
         keywords = [w for w in words if len(w) >= 3]
         if not keywords:
             continue
 
-        # FTS5 query: OR-join keywords to find related concepts
-        fts_query = ' OR '.join(f'"{kw}"' for kw in keywords[:5])  # cap at 5 keywords
+        fts_query = ' OR '.join(f'"{kw}"' for kw in keywords[:5])
         try:
             matches = conn.execute("""
                 SELECT c.id, c.title
@@ -97,7 +142,6 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
             if (low, high) in existing_pairs or (low, high) in seen_pairs:
                 continue
 
-            # Verify title similarity is meaningful
             sim = _title_similarity(concept['title'], match['title'])
             if sim >= 0.3:
                 candidates.append({

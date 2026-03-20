@@ -3,3 +3,8 @@ openai>=1.0
 fastapi>=0.100
 uvicorn>=0.20
 python-dotenv>=1.0
+
+# Vector store (hybrid search)
+qdrant-client>=1.9
+sentence-transformers>=2.6
+numpy>=1.24
