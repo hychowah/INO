@@ -49,6 +49,7 @@ SKILL_SETS: dict[str, list[str]] = {
 # Everything else is collected as a proposal for the user to approve.
 SAFE_MAINTENANCE_ACTIONS = frozenset({
     'link_concept',    # fix untagged concepts
+    'link_topics',     # fix orphan subtopics / reparent
     'delete_topic',    # remove empty topics
     'remark',          # add notes
     'fetch',           # data retrieval

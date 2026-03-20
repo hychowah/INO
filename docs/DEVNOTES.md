@@ -212,6 +212,28 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 ---
 
+## 13. Topic Hierarchy Auto-Parenting
+
+**Problem:** New topics from `suggest_topic` and auto-created topics from `add_concept` with `topic_titles` appeared as standalone root topics even when an obvious parent existed (e.g. "Python AST" should be under "Python").
+
+**Fix (three layers):**
+1. **Prompt rules** (knowledge.md): "Always check the Knowledge Map first" — LLM must set `parent_ids` on `add_topic` and `suggest_topic` when a parent exists. Both action specs include examples showing `parent_ids` usage.
+2. **`execute_suggest_topic_accept()`** (tools.py): Passes `parent_ids` from `action_data['params']` through to `execute_action('add_topic', ...)`. The data survives the confirm round-trip via `action_data` dict in `_pending_confirmations` / `SuggestTopicConfirmView` — no session stash needed.
+3. **`_find_candidate_parents()`** (tools.py): When `_resolve_topic_ids` auto-creates a topic from `topic_titles`, uses `db.search_similar_topics()` to find parents before creation.
+
+**Auto-parent heuristics** (`_find_candidate_parents`):
+- Pre-filters candidates at similarity ≥ 0.50 (broad net via `search_similar_topics`)
+- Accepts as parent if: candidate title is a substring of the new title (e.g. "Python" in "Python AST")
+- For non-substring matches: requires similarity ≥ 0.65 AND candidate title must be shorter (broader scope) — avoids suggesting a more-specific topic as parent
+- Skips exact title matches (self-hit)
+- Wrapped in try/except — vector store unavailable → no auto-parenting, non-fatal
+
+**Self-link guard** (db/topics.py `add_topic`): `if pid == topic_id: continue` prevents a topic from being its own parent when `parent_ids` inadvertently contains the new ID.
+
+**Maintenance support:** `link_topics` added to `SAFE_MAINTENANCE_ACTIONS` so the maintenance agent can auto-fix orphan subtopics and reparent topics without requiring user approval (non-destructive, reversible via `unlink_topics`).
+
+---
+
 ## Historical (completed — reference only)
 
 **§H1 — Codebase Restructuring (2026-03-13):** Split `db.py` (1396 lines) → `db/` package (6 submodules). Split `pipeline.py` (750 lines) → `pipeline.py` + `parser.py` + `repair.py` + `dedup.py`. Fixed scheduler↔bot circular dependency via `services/state.py`. Backward compat maintained via re-exports.

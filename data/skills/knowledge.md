@@ -12,12 +12,23 @@ Create a new learning topic.
 - `description` (string, optional): Brief description
 - `parent_ids` (int[], optional): Parent topic IDs in the DAG
 
-**Example:**
+> **RULE — Always check the Knowledge Map first.** Before creating a topic, scan the Knowledge Map for an existing parent topic. If the new topic is clearly a subtopic of an existing one (e.g. "Python AST" belongs under "Python"), you **must** include that topic's ID in `parent_ids`. Never create a subtopic as a root-level topic.
+
+**Example — standalone topic:**
 ```json
 {
   "action": "add_topic",
   "params": {"title": "Material Science", "description": "Study of materials and their properties"},
   "message": "Created topic 'Material Science'."
+}
+```
+
+**Example — subtopic under an existing parent:**
+```json
+{
+  "action": "add_topic",
+  "params": {"title": "Python AST", "description": "Abstract syntax tree module for parsing Python code", "parent_ids": [4]},
+  "message": "Created topic 'Python AST' under Python."
 }
 ```
 
@@ -126,11 +137,14 @@ Suggest creating a topic from casual conversation. The system shows ✅/❌ butt
 **Parameters:**
 - `title` (string, required): Suggested topic name
 - `description` (string, optional): Brief description
+- `parent_ids` (int[], optional): Parent topic IDs — set this when the suggested topic belongs under an existing topic in the Knowledge Map
 - `concepts` (list, optional): Proposed initial concepts, each `{"title": "...", "description": "..."}`
 - `message` (string, required): **Must contain your full educational answer to the user's question**, followed by the topic suggestion. The user only sees this field — if you skip the answer they get nothing useful. End with a line like "💡 Want me to track this as a learning topic?"
 
+> **RULE — Check the Knowledge Map for a parent.** Same rule as `add_topic`: if the suggested topic belongs under an existing topic, include `parent_ids`. For example, if the user asks about "Python AST" and "Python" (topic #4) exists, set `"parent_ids": [4]`.
+
 <!-- DO NOT REMOVE: This example is critical — without it the LLM omits the educational answer from the message field or puts params at top level. -->
-**Example:**
+**Example — new root topic:**
 ```json
 {
   "action": "suggest_topic",
@@ -143,6 +157,23 @@ Suggest creating a topic from casual conversation. The system shows ✅/❌ butt
     ]
   },
   "message": "**Embedding models** are neural networks trained to convert text into dense numerical vectors that capture semantic meaning. Similar meanings → similar vectors.\n\nPopular ones include sentence-transformers/all-MiniLM-L6-v2 (fast, 384 dims) and OpenAI text-embedding-3-small.\n\n💡 Want me to track **Embedding Models** as a learning topic?"
+}
+```
+
+**Example — subtopic under existing parent:**
+```json
+{
+  "action": "suggest_topic",
+  "params": {
+    "title": "Python AST",
+    "description": "Abstract syntax tree module for parsing and analyzing Python code",
+    "parent_ids": [4],
+    "concepts": [
+      {"title": "ast.parse()", "description": "Parse Python source code into an AST node"},
+      {"title": "AST Node Types", "description": "Module, FunctionDef, Expr, Call — the building blocks of the syntax tree"}
+    ]
+  },
+  "message": "Python's **AST** (Abstract Syntax Tree) is a tree representation of source code structure...\n\nYou've got Python in your topics already — 💡 want me to track **Python AST** as a subtopic?"
 }
 ```
 
@@ -194,6 +225,7 @@ Before calling `add_concept`, the concept needs a topic:
 
 As the user's knowledge base grows, proactively manage the topic hierarchy:
 
+- **Parent new topics correctly:** When creating a topic that belongs under an existing one, always set `parent_ids` (for `add_topic` / `suggest_topic`) or call `link_topics` afterward. Never leave an obvious subtopic as a root.
 - **Promote to parent:** When 3+ topics share a common theme, create a parent topic and `link_topics` to group them.
 - **Split broad topics:** When a topic exceeds ~15-20 concepts, suggest splitting into subtopics.
 - **Merge duplicates:** If two topics cover the same area, suggest merging — move concepts from one to the other via `link_concept` + `unlink_concept`, then `delete_topic` the empty one.

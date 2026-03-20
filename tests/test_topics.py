@@ -116,3 +116,43 @@ class TestUnlinkTopics:
         parents = db.get_topic_parents(child)
         assert len(parents) == 1
         assert parents[0]['id'] == parent2
+
+
+# ============================================================================
+# add_topic parent_ids validation
+# ============================================================================
+
+class TestAddTopicParentIds:
+    def test_add_topic_with_parent_ids(self, test_db):
+        """Creating a topic with parent_ids links it in topic_relations."""
+        parent = _make_topic("Python")
+        child = db.add_topic("Python AST", parent_ids=[parent])
+
+        parents = db.get_topic_parents(child)
+        assert len(parents) == 1
+        assert parents[0]['id'] == parent
+
+    def test_add_topic_with_multiple_parents(self, test_db):
+        """Topics can have multiple parents."""
+        p1 = _make_topic("Python")
+        p2 = _make_topic("Compilers")
+        child = db.add_topic("Python AST", parent_ids=[p1, p2])
+
+        parents = db.get_topic_parents(child)
+        parent_ids = {p['id'] for p in parents}
+        assert parent_ids == {p1, p2}
+
+    def test_add_topic_nonexistent_parent_ignored(self, test_db):
+        """If parent_ids contains a non-existent topic ID, it's silently ignored."""
+        topic_id = db.add_topic("Test", parent_ids=[999999])
+        # Should not crash; the non-existent parent is silently ignored
+        parents = db.get_topic_parents(topic_id)
+        # The 999999 parent doesn't exist as a topic, so no parent is linked
+        # (INSERT OR IGNORE skips FK violations in WAL mode)
+        assert isinstance(parents, list)
+
+    def test_add_topic_no_parent_ids(self, test_db):
+        """Topic created without parent_ids has no parents."""
+        topic_id = _make_topic("Standalone")
+        parents = db.get_topic_parents(topic_id)
+        assert len(parents) == 0

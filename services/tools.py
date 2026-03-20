@@ -265,6 +265,9 @@ def _mastery_bar(avg: float) -> str:
 def _resolve_topic_ids(params: Dict) -> Tuple[List[int], List[Tuple[int, str]]]:
     """Resolve topic_ids and topic_titles into a flat list of topic IDs.
     Returns (topic_ids, created_topics) where created_topics is [(id, title), ...].
+
+    When auto-creating a topic from topic_titles, uses semantic search to
+    find a likely parent topic and sets parent_ids automatically.
     """
     topic_ids = params.get('topic_ids', [])
     if isinstance(topic_ids, int):
@@ -284,11 +287,55 @@ def _resolve_topic_ids(params: Dict) -> Tuple[List[int], List[Tuple[int, str]]]:
         if matches and matches[0]['title'].lower() == title.lower():
             topic_ids.append(matches[0]['id'])
         else:
-            new_id = db.add_topic(title=title)
+            # Auto-detect parent via semantic similarity before creation
+            parent_ids = _find_candidate_parents(title)
+            new_id = db.add_topic(title=title, parent_ids=parent_ids or None)
             topic_ids.append(new_id)
             created_topics.append((new_id, title))
+            if parent_ids:
+                parent_names = []
+                for pid in parent_ids:
+                    pt = db.get_topic(pid)
+                    if pt:
+                        parent_names.append(pt['title'])
+                logger.info(f"[resolve_topic_ids] Auto-parented '{title}' under {parent_names}")
 
     return topic_ids, created_topics
+
+
+def _find_candidate_parents(title: str, score_threshold: float = 0.50,
+                            limit: int = 3) -> List[int]:
+    """Use semantic search to find existing topics that could be parents
+    of a new topic with the given title.
+
+    Returns a list of parent topic IDs (usually 0 or 1). Only returns topics
+    whose title is a broader/shorter term than the new title — avoids
+    suggesting peers or children as parents.
+    """
+    try:
+        candidates = db.search_similar_topics(title, limit=limit,
+                                              score_threshold=score_threshold)
+    except Exception:
+        # Vector store unavailable — no auto-parenting, not fatal
+        return []
+
+    parent_ids = []
+    title_lower = title.lower()
+    for c in candidates:
+        c_title_lower = c['title'].lower()
+        # Skip exact match (same topic being re-found)
+        if c_title_lower == title_lower:
+            continue
+        # Heuristic: the candidate is a plausible parent if its title appears
+        # as a substring of the new title (e.g. "Python" in "Python AST").
+        # For high-similarity non-substring matches, require the candidate to
+        # be shorter (broader scope) — avoids suggesting a more-specific topic
+        # as a parent (e.g. "Python AST Visitor" should not parent "Python AST").
+        if c_title_lower in title_lower:
+            parent_ids.append(c['id'])
+        elif c['score'] >= 0.65 and len(c_title_lower) < len(title_lower):
+            parent_ids.append(c['id'])
+    return parent_ids
 
 
 def _check_concept_duplicate(title: str, topic_ids: List[int]) -> Optional[Tuple[str, str]]:
@@ -811,12 +858,15 @@ def execute_suggest_topic_accept(action_data: dict) -> tuple[bool, str, int | No
     title = params.get('title', 'Untitled')
     description = params.get('description', '')
     concepts = params.get('concepts', [])
+    parent_ids = params.get('parent_ids', [])
+    if isinstance(parent_ids, int):
+        parent_ids = [parent_ids]
 
-    # 1. Create the topic
-    msg_type, result = execute_action('add_topic', {
-        'title': title,
-        'description': description,
-    })
+    # 1. Create the topic (with parent linkage if specified)
+    add_params = {'title': title, 'description': description}
+    if parent_ids:
+        add_params['parent_ids'] = parent_ids
+    msg_type, result = execute_action('add_topic', add_params)
     if msg_type == 'error':
         return False, f"Could not create topic: {result}", None
 
@@ -869,8 +919,19 @@ def _handle_suggest_topic(params: Dict) -> Tuple[str, Any]:
     title = params.get('title', '')
     description = params.get('description', '')
     concepts = params.get('concepts', [])
+    parent_ids = params.get('parent_ids', [])
+    if isinstance(parent_ids, int):
+        parent_ids = [parent_ids]
 
     lines = [f"💡 I could track **{title}** as a learning topic."]
+    if parent_ids:
+        parent_names = []
+        for pid in parent_ids:
+            pt = db.get_topic(int(pid))
+            if pt:
+                parent_names.append(pt['title'])
+        if parent_names:
+            lines.append(f"(under {', '.join(parent_names)})")
     if description:
         lines.append(f"_{description}_")
     if concepts:

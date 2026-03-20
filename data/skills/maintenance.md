@@ -14,6 +14,7 @@ Called by the scheduler (daily). You receive a diagnostic report listing DB heal
 **What you can fix automatically:**
 - **Untagged concepts**: If you can infer the topic from the concept title/description, `link_concept` it. If not, flag it for the user.
 - **Empty topics**: If a topic has no concepts and no children, `delete_topic` it (housekeeping).
+- **Orphan subtopics**: If a topic is clearly a subtopic of an existing one but sits at the root level, use `link_topics` to fix the hierarchy.
 
 **What requires user approval (propose but do NOT execute):**
 - **Concept deletion**: Any `delete_concept` action will be proposed to the user for approval via Discord buttons. You can still output the action — the system will collect it as a proposal.

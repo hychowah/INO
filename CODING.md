@@ -7,6 +7,24 @@
 
 ---
 
+## ⚠️ Always Use the venv
+
+All commands (pytest, scripts, bot) **must** run inside the project's virtual environment. The system `python` does not have the required packages.
+
+```powershell
+# Activate once per terminal session (PowerShell)
+& .\venv\Scripts\Activate.ps1
+
+# Then run commands normally
+python -m pytest tests/ -v
+python scripts/test_similarity.py
+python bot.py
+```
+
+If you see `No module named pytest` or any missing-import error, you forgot to activate the venv.
+
+---
+
 ## Project Overview
 
 A personal learning coach with spaced repetition. Two entry points talk to the same pipeline:
@@ -129,7 +147,8 @@ from db.core import _conn, _now_iso, KNOWLEDGE_DB
 ## How to Test Vector Similarity
 
 Before deploying and before tuning thresholds, run the interactive harness:
-```bash
+```powershell
+& .\venv\Scripts\Activate.ps1                   # if not already active
 python scripts/test_similarity.py              # all groups
 python scripts/test_similarity.py --group steel  # one group
 python scripts/test_similarity.py --list         # list groups
@@ -207,8 +226,9 @@ with _connection() as conn:
 
 ## Testing
 
-Tests use **pytest** (run from the venv):
-```bash
+Tests use **pytest**. **Activate the venv first** (see top of this file):
+```powershell
+& .\venv\Scripts\Activate.ps1              # if not already active
 python -m pytest tests/ -v            # all tests
 python -m pytest tests/test_llm.py -v # single file
 ```

@@ -52,6 +52,8 @@ def add_topic(title: str, description: Optional[str] = None,
 
     if parent_ids:
         for pid in parent_ids:
+            if pid == topic_id:
+                continue  # skip self-link
             try:
                 conn.execute(
                     "INSERT OR IGNORE INTO topic_relations (parent_id, child_id, created_at) VALUES (?, ?, ?)",
