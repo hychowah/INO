@@ -11,6 +11,8 @@
 
 All commands (pytest, scripts, bot) **must** run inside the project's virtual environment. The system `python` does not have the required packages.
 
+**AI agents: activate the venv BEFORE running any terminal command.** Do not use bare `python` or `python3` — always activate first.
+
 ```powershell
 # Activate once per terminal session (PowerShell)
 & .\venv\Scripts\Activate.ps1

@@ -283,6 +283,11 @@ def _resolve_topic_ids(params: Dict) -> Tuple[List[int], List[Tuple[int, str]]]:
 
     created_topics = []
     for title in topic_titles:
+        # Deterministic exact-match first — avoids vector search edge cases
+        exact = db.find_topic_by_title(title)
+        if exact:
+            topic_ids.append(exact['id'])
+            continue
         matches = db.search_topics(title, limit=1)
         if matches and matches[0]['title'].lower() == title.lower():
             topic_ids.append(matches[0]['id'])

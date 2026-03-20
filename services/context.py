@@ -83,8 +83,8 @@ def build_lightweight_context(mode: str = "command") -> str:
             sub = ""
             if t['subtopic_count'] > 0:
                 children = db.get_topic_children(t['id'])
-                child_names = ', '.join(c['title'] for c in children[:5])
-                extra = f", +{len(children)-5} more" if len(children) > 5 else ""
+                child_names = ', '.join(c['title'] for c in children[:8])
+                extra = f", +{len(children)-8} more" if len(children) > 8 else ""
                 sub = f", {t['subtopic_count']} subtopics ({child_names}{extra})"
             parts.append(
                 f"- [topic:{t['id']}] {t['title']}: "

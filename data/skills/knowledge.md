@@ -198,6 +198,8 @@ The user already chose to track this area. You may:
 
 **"Matches an existing topic" means the concept falls squarely within that topic's defined scope.** If the question is about embedding models and you only have a "Databases" topic, that's a NEW area — use `suggest_topic`. Don't shoehorn concepts into tangentially related topics.
 
+**Prefer specific subtopics over broad parents.** If a concept belongs to a distinct sub-area of an existing topic (e.g. "AST Node Types" relates to "Python AST", not "Python" broadly), use `topic_titles` to create or reuse a specific subtopic rather than adding it to the broad parent. Check the Knowledge Map for existing subtopics first — use the exact subtopic name in `topic_titles` to reuse it. Only create a new subtopic when you expect at least 2–3 concepts in that sub-area; a single concept doesn't justify a new subtopic. A good test: if the concept wouldn't make sense as a quiz question under the parent topic's title alone, it belongs in a subtopic.
+
 ### 3b. Question is in a NEW area (no matching topic)
 **Answer first, then suggest tracking** via `suggest_topic`.
 - Use `suggest_topic` action — the system shows ✅/❌ buttons to the user automatically
