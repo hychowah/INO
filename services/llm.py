@@ -257,6 +257,8 @@ class OpenAICompatibleProvider:
             )
             if self._temperature is not None:
                 kwargs["temperature"] = self._temperature
+            if config.LLM_MAX_TOKENS:
+                kwargs["max_tokens"] = config.LLM_MAX_TOKENS
 
             response = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:
@@ -379,8 +381,8 @@ def get_provider() -> LLMProvider:
 
     if provider_name == "kimi":
         agents_path = str((config.BASE_DIR / "AGENTS.md").resolve())
-        prefs_path = str((config.BASE_DIR / "preferences.md").resolve())
-        personas_dir = str((config.BASE_DIR / "data" / "personas").resolve())
+        prefs_path = str(config.PREFERENCES_MD.resolve())
+        personas_dir = str(config.PERSONAS_DIR.resolve())
         _provider_instance = KimiCliProvider(
             cli_path=config.KIMI_CLI_PATH,
             agents_md_path=agents_path,

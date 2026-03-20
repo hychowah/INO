@@ -11,10 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import config
 import db
-
-AGENTS_MD_PATH = Path(__file__).parent.parent / "AGENTS.md"
-PREFERENCES_MD_PATH = Path(__file__).parent.parent / "preferences.md"
 
 
 def _read_file(path: Path) -> str:
@@ -184,33 +182,6 @@ def build_prompt_context(user_message: str, mode: str = "command") -> str:
     return f"""{lightweight}
 ## Mode
 You are in {mode.upper()} mode.
-
-## Your Response
-
-Analyze the user's intent and respond in the required format."""
-
-
-def build_full_prompt(user_message: str, mode: str = "command") -> str:
-    """Build a complete prompt including AGENTS.md + preferences + context.
-    Used for standalone execution (not via Discord bot)."""
-    agents_md = _read_file(AGENTS_MD_PATH)
-    preferences_md = _read_file(PREFERENCES_MD_PATH)
-    lightweight = build_lightweight_context(mode)
-
-    return f"""{agents_md}
-
-## User Preferences
-
-{preferences_md}
-
-{lightweight}
-
-## Mode
-You are in {mode.upper()} mode.
-
-## User Message
-
-{user_message}
 
 ## Your Response
 

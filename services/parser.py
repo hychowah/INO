@@ -188,7 +188,7 @@ def process_output(output: str) -> tuple[str, str]:
         if output.startswith(prefix):
             return (mtype, output[len(prefix):].strip())
 
-    # Safety net: never send raw JSON to the user — extract the message field.
+    # Safety net: never send raw JSON to the user �?extract the message field.
     # This catches cases where the JSON extractor failed upstream but the
     # output is still valid/parseable JSON (e.g. C++ braces in string values).
     if '{' in output and '"action"' in output:

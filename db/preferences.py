@@ -7,10 +7,11 @@ No new migration needed — session_state already exists.
 
 from pathlib import Path
 
+import config
 from db.chat import get_session, set_session
 
 # Where persona preset .md files live
-PERSONAS_DIR = Path(__file__).parent.parent / "data" / "personas"
+PERSONAS_DIR = config.PERSONAS_DIR
 DEFAULT_PERSONA = "mentor"
 
 

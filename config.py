@@ -41,6 +41,11 @@ BASE_DIR = Path(__file__).parent.resolve()
 # Data directory
 DATA_DIR = BASE_DIR / "data"
 
+# Instruction file paths (centralized — do not redefine in service modules)
+SKILLS_DIR = DATA_DIR / "skills"
+PERSONAS_DIR = DATA_DIR / "personas"
+PREFERENCES_MD = DATA_DIR / "preferences.md"
+
 # Max Discord message length
 MAX_MESSAGE_LENGTH = 1900
 
@@ -84,6 +89,7 @@ LLM_API_BASE_URL = os.environ.get("LEARN_LLM_BASE_URL")
 LLM_API_KEY = os.environ.get("LEARN_LLM_API_KEY")
 LLM_MODEL = os.environ.get("LEARN_LLM_MODEL")                  # e.g. "grok-3", "deepseek-chat"
 LLM_TEMPERATURE = float(os.environ["LEARN_LLM_TEMPERATURE"]) if os.environ.get("LEARN_LLM_TEMPERATURE") else None
+LLM_MAX_TOKENS = int(os.environ["LEARN_LLM_MAX_TOKENS"]) if os.environ.get("LEARN_LLM_MAX_TOKENS") else 4096
 LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "40000"))
 
 

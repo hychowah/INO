@@ -26,7 +26,6 @@ The runtime LLM (DeepSeek/Grok/kimi) is the brain — it decides what to teach, 
 ```
 ROOT
 ├── AGENTS.md              # Pointer file — references data/skills/ (DO NOT put instructions here)
-├── preferences.md         # Runtime LLM user preferences
 ├── config.py              # All settings, loads .env via python-dotenv
 ├── bot.py                 # Entry point: Discord bot
 ├── api.py                 # Entry point: FastAPI REST API
@@ -38,7 +37,8 @@ ROOT
 │   │   ├── quiz.md        # Quiz/assess actions, scoring rubric, adaptive quiz evolution
 │   │   ├── knowledge.md   # Topic/concept CRUD, casual Q&A, overlap detection
 │   │   └── maintenance.md # Maintenance mode behavioral rules
-│   └── personas/          # Persona preset .md files (mentor, coach, buddy)
+│   ├── personas/          # Persona preset .md files (mentor, coach, buddy)
+│   └── preferences.md     # Runtime LLM user preferences
 │
 ├── services/              # All business logic
 │   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
@@ -65,14 +65,15 @@ ROOT
 │   ├── action_log.py      # Action audit log
 │   └── __init__.py        # Re-exports all public functions
 │
-├── data/
-│   └── personas/          # Persona preset .md files (mentor, coach, buddy)
-│
 ├── tests/                 # pytest test suite
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, all routes + page renderers
 │   └── static/            # CSS, JS (graph.js for D3 graph, concepts.js, tree.js)
-├── docs/                  # Architecture, dev notes, plans, knowledge base map (index.md)
+├── docs/                  # Architecture, dev notes, plans (index.md for map)
+│   ├── architecture.md
+│   ├── DEVNOTES.md
+│   ├── index.md
+│   └── plans/             # Feature plans (mobile-conversion.md, concept-relations.md)
 ├── scripts/               # start.bat, start_api.bat, agent.py (legacy CLI)
 └── .env                   # Secrets (git-ignored)
 ```
@@ -202,7 +203,7 @@ classes, fixtures, and assertions.
 |------|------|-----|
 | `data/skills/*.md` | **High** | Runtime LLM prompt skill files. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. **No tone/style directives here** — those go in persona files. Preserve `<!-- DO NOT REMOVE -->` comments. |
 | `AGENTS.md` | **Low** | Pointer file only — references data/skills/. No instructions here. |
-| `preferences.md` | **Medium** | User preferences injected into every LLM call. |
+| `data/preferences.md` | **Medium** | User preferences injected into every LLM call. |
 | `data/personas/*.md` | **Medium** | Persona presets. Changes reflected without restart (mtime cache). Token budget: ~600 tokens max per file. |
 | `db/core.py` migrations | **High** | Schema migrations are append-only. Never modify existing migration blocks. |
 | `services/pipeline.py` | **Medium** | Central orchestrator. Changes here affect both Discord and API. |

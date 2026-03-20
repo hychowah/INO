@@ -33,8 +33,8 @@ from db.preferences import get_persona, get_persona_content
 
 logger = logging.getLogger("pipeline")
 
-SKILLS_DIR = Path(__file__).parent.parent / "data" / "skills"
-PREFERENCES_MD_PATH = Path(__file__).parent.parent / "preferences.md"
+SKILLS_DIR = config.SKILLS_DIR
+PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
 

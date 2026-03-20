@@ -12,7 +12,7 @@
 | `data/skills/quiz.md` | Quiz/assess actions, scoring rubric, adaptive quiz evolution | Interactive + review modes |
 | `data/skills/knowledge.md` | Topic/concept CRUD, casual Q&A, overlap detection | Interactive + maintenance modes |
 | `data/skills/maintenance.md` | Maintenance mode behavioral rules, triage priorities | Maintenance mode only |
-| `preferences.md` | User learning preferences | Every LLM call |
+| `data/preferences.md` | User learning preferences | Every LLM call |
 | `data/personas/*.md` | Persona presets (mentor, coach, buddy) | Every LLM call (one active) |
 
 ## Developer Documentation
@@ -20,10 +20,10 @@
 | Path | Purpose |
 |---|---|
 | `CODING.md` | Development instructions for AI coding assistants |
-| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, diagrams |
+| `docs/architecture.md` | System architecture, file map, data flow, diagrams |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory |
-| `docs/PLAN.md` | Feature planning and roadmap |
-| `docs/CONCEPT_RELATIONS_PLAN.md` | Concept relations feature design |
+| `docs/plans/mobile-conversion.md` | Mobile app conversion roadmap |
+| `docs/plans/concept-relations.md` | Concept relations feature design |
 
 ## Skill Sets by Mode
 

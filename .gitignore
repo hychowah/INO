@@ -9,12 +9,13 @@ build/
 # Virtual environment
 venv/
 
-# Data (local SQLite databases, but track persona presets and skill files)
+# Data (local SQLite databases, but track persona presets, skill files, and preferences)
 data/
 !data/personas/
 !data/personas/*.md
 !data/skills/
 !data/skills/*.md
+!data/preferences.md
 
 # IDE
 .vscode/

@@ -8,14 +8,13 @@ import json
 import logging
 import math
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
 import db
 
 logger = logging.getLogger("tools")
 
-PREFERENCES_PATH = Path(__file__).parent.parent / "preferences.md"
+# preferences path: use config.PREFERENCES_MD if needed
 
 # ============================================================================
 # Action source tracking via contextvars (task-scoped, no signature threading)

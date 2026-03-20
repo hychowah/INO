@@ -11,7 +11,7 @@ Convention:
 - DISCORD_CHAR_LIMIT (2000) — hard limit used for *edits* and *append* flows
   where every character counts (e.g. appending "✅ Added" to an existing msg).
 
-See DEVNOTES.md §7 for full context.
+See DEVNOTES.md §8 for full context.
 """
 
 # Discord's absolute hard limit for message content

@@ -159,7 +159,7 @@ async def send_long_with_view(send_fn, text: str,
     Unlike send_long(), this takes a generic send_fn closure so it works
     with ctx.send, ctx.interaction.followup.send, and message.reply.
     Returns the Message object from the view-bearing (last) chunk.
-    See DEVNOTES.md §9.1 for context.
+    See DEVNOTES.md §9 for context.
 
     Args:
         send_fn: async callable (content, **kwargs) -> discord.Message

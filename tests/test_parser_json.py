@@ -1,7 +1,7 @@
 """Tests for parser.py JSON extraction and safety net fixes.
 
 Covers:
-- _extract_json_object: try-each-} with last-valid-parse (DEVNOTES §9.2)
+- _extract_json_object: try-each-} with last-valid-parse (DEVNOTES §9)
 - _extract_json_str: same approach, returns raw string
 - extract_fetch_params: refactored to reuse _extract_json_object
 - process_output: safety net for raw JSON

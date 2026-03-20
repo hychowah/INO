@@ -2,7 +2,7 @@
 Discord UI views for confirmation flows (dedup, maintenance, concept addition).
 Uses discord.py's Button/View components for safe, mobile-friendly interactions.
 
-See DEVNOTES.md §6 for design rationale.
+See DEVNOTES.md §4 for design rationale.
 """
 
 import logging

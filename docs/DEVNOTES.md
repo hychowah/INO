@@ -1,10 +1,9 @@
 # DEVNOTES.md — learning_agent
 
-> **Purpose:** Project-specific institutional memory. Past bugs, architecture decisions,
-> and non-obvious patterns for this codebase.
+> **Purpose:** Key findings and non-obvious patterns. Keep ≤400 lines — prune stale entries.
 >
 > **Audience:** Developers / Copilot during code-editing sessions only.
-> The runtime LLM does NOT read this file — its instructions are in `AGENTS.md`.
+> The runtime LLM does NOT read this file — its instructions are in `data/skills/*.md`.
 >
 > **When to update:** After fixing a non-trivial bug or making an architectural decision
 > that isn't obvious from the code — add a short entry here.
@@ -12,720 +11,186 @@
 ---
 
 ## Table of Contents
-1. [LLM Output Formatting Bugs](#1-llm-output-formatting-bugs)
+1. [LLM Output Formatting](#1-llm-output-formatting)
 2. [Architecture Decisions](#2-architecture-decisions)
 3. [Score-Based Review System](#3-score-based-review-system)
-4. [Codebase Restructuring for LLM Dev Scalability](#4-codebase-restructuring-for-llm-dev-scalability)
-5. [FastAPI Backend & Project Restructuring](#5-fastapi-backend--project-restructuring)
-6. [Concept/Topic ID Confusion After add_concept Confirmation](#6-concepttopic-id-confusion-after-add_concept-confirmation)
-7. [Pending Review Tracking & Phantom Answer Bug](#7-pending-review-tracking--phantom-answer-bug)
-8. [Web UI Graph Visualization](#8-web-ui-graph-visualization)
-9. [Message Truncation & Raw JSON Exposure](#9-message-truncation--raw-json-exposure)
-10. [suggest_topic Confirmation Buttons & Anti-Phantom-Add](#10-suggest_topic-confirmation-buttons--anti-phantom-add)
-11. [Modular Skill Loading & Session Isolation](#11-modular-skill-loading--session-isolation)
+4. [Confirmation Flows & Proposals](#4-confirmation-flows--proposals)
+5. [ID Confusion & Session Stash Pattern](#5-id-confusion--session-stash-pattern)
+6. [Maintenance Score Guard](#6-maintenance-score-guard)
+7. [Pending Review Tracking](#7-pending-review-tracking)
+8. [Discord Formatting](#8-discord-formatting)
+9. [JSON Parser](#9-json-parser)
+10. [Phantom-Add Prevention](#10-phantom-add-prevention)
+11. [Modular Skill Loading](#11-modular-skill-loading)
 
 ---
 
-## 1. LLM Output Formatting Bugs
+## 1. LLM Output Formatting
 
-### 1.1 `assess` action: LLM puts fields at top level instead of inside `params`
-**Date:** 2026-03-10
+**Key lesson:** Every action the LLM can emit MUST have a concrete JSON example in the skill files. Parameter lists alone are not enough — the LLM hallucinated wrong structures (flat params, wrong field names) until given `<!-- DO NOT REMOVE -->` annotated JSON templates.
 
-**Symptom:** After a quiz answer, the bot replied `⚠️ assess requires concept_id and quality (0-5)` even though the user answered correctly.
+**Escalation hierarchy for LLM output errors:**
+1. Flat-params recovery (`pipeline.py execute_action`) — code, instant, structural fix only
+2. Repair sub-agent (`services/repair.py`) — ephemeral LLM session, ~5-10s, fixes action names
+3. Error to user — if repair also fails
 
-**Root cause:** The LLM returned:
-```json
-{"action": "assess", "concept_id": 19, "understood": true, "remark": "..."}
-```
-instead of:
-```json
-{"action": "assess", "params": {"concept_id": 19, "quality": 4, ...}, "message": "..."}
-```
-
-Three failures:
-- Fields at top level instead of inside `"params"` wrapper
-- Used `"understood": true` (boolean) instead of `"quality": 0-5` (integer)
-- Omitted `"message"` entirely
-
-**Why:** `AGENTS.md` had a parameter list for `assess` but **no concrete JSON example**. Every other action (`add_concept`, `fetch`, `quiz`) had a `json` example block. The LLM hallucinated a wrong structure without a template to follow.
-
-**Fix:** Added a full JSON example for `assess` in `AGENTS.md` (with a `<!-- DO NOT REMOVE -->` comment to prevent accidental deletion during context trimming).
-
-**Lesson:** Every action that the LLM can emit MUST have a concrete JSON example in `AGENTS.md`. Parameter lists alone are not enough — the LLM needs an unambiguous template to copy.
-
-### 1.2 `quiz` action: same flat-format bug as assess
-**Date:** 2026-03-10
-
-**Symptom:** LLM returned `{"action": "quiz", "concept_id": 8, "question": "..."}` — fields at top level, no `params` wrapper, and used `question` instead of `message`. The quiz appeared to work (user saw the question) but `concept_id` was silently lost — `_handle_quiz` never appended the `_(quiz on concept #X)_` tracking tag to chat history, breaking the subsequent `assess` context.
-
-**Fix:** Added JSON example for `quiz` in `AGENTS.md` (same approach as assess fix).
-
-### 1.3 Defensive flat-params recovery added to `execute_action`
-**Date:** 2026-03-10
-
-**Context:** After adding JSON examples for both `assess` and `quiz` in AGENTS.md, the LLM still returned flat-format `assess` on the very next call. The prompt fix alone is not enough for this particular model/behavior.
-
-**Fix:** Added a code-level fallback in `pipeline.py → execute_action()` that detects when `params` is empty but extra keys exist at the top level, and recovers them into `params`. Logs a warning when triggered so we can track frequency.
-
-**Note:** This does NOT fix missing/wrong fields (e.g. `understood: true` instead of `quality: 4`) — it only recovers the structural mismatch. The prompt examples remain the primary fix for teaching the LLM the correct field names.
+**Flat-params recovery:** When `params` is empty but extra keys exist at top level, `execute_action()` recovers them into `params`. Logs a warning. Doesn't fix missing/wrong field names.
 
 ---
 
 ## 2. Architecture Decisions
 
 ### 2.1 Prompt-first fixes over defensive code
-**Date:** 2026-03-10
+When the LLM emits malformed actions, prefer fixing the prompt over adding defensive parsing code. Defensive code masks prompt bugs. Only add code fallbacks if the same bug recurs after two prompt fix attempts.
 
-When the LLM emits malformed actions, prefer fixing the prompt (`AGENTS.md`) over adding defensive parsing code. Rationale:
-- Defensive code masks prompt bugs — the LLM keeps emitting bad JSON, it just happens to work
-- Fixing the prompt fixes the root cause and improves all actions, not just the patched one
-- Aligns with workspace-wide LLM-first design principle (see root `AGENTS.md`)
-
-Only add code-level fallbacks if the same prompt bug recurs after two prompt fix attempts.
-
-### 2.2 Repair sub-agent with ephemeral kimi session
-**Date:** 2026-03-12
-
-**Problem:** LLM hallucinated `GENERATE_QUIZ` as an action name (not in `ACTION_HANDLERS`). The existing flat-params recovery (§1.3) couldn't help because the *action name itself* was wrong, not just the structure. The prompt already had a `quiz` JSON example (§1.2 fix) and an explicit constraint ("use ONLY exact action names" added to AGENTS.md), yet the LLM still invented a new name — likely seeded by the scheduler prompt which said "Generate a review quiz".
-
-**Fix (three layers):**
-1. **Prompt:** Added bolded constraint in AGENTS.md: "Use ONLY the exact action names listed below." Reworded scheduler prompt from "Generate a review quiz" → "Start a review quiz" to remove the hallucination seed.
-2. **Repair sub-agent:** Added `_repair_action()` in `pipeline.py`. When `execute_action()` gets an "Unknown action" error, it calls a lightweight kimi session to fix the malformed JSON. Uses `--session learn_repair_HHMM` to reuse context across calls.
-3. **Ephemeral session rotation:** Session name rotates every 15 minutes (aligned with `REVIEW_CHECK_INTERVAL_MINUTES`) to cap context window growth. On first use of a new session, the seeding prompt teaches kimi the valid action list (~300 chars). Subsequent calls within the same session only send the malformed JSON (~100 chars).
-
-**Latency impact:** Zero cost on happy path (valid actions). ~5-10s on repair path (warm session, small prompt) vs ~15-25s if it were a cold subprocess. Kimi session files in `~/.kimi/sessions/` are small and not cleaned up — add cleanup later if disk use becomes an issue.
-
-**Escalation hierarchy for LLM output errors:**
-1. Flat-params recovery (§1.3) — code, instant, structural fix only
-2. Repair sub-agent (§2.2) — kimi session, ~5-10s, fixes action names
-3. Error to user — if repair also fails
-
-**Async change:** `execute_action()` and `execute_llm_response()` in `pipeline.py` are now `async` to support the repair sub-agent `await`. All callers in `bot.py` and `scheduler.py` updated to `await`.
+### 2.2 Repair sub-agent
+When `execute_action()` gets an "Unknown action" error, it calls `repair_action()` (a lightweight LLM session) to fix the malformed JSON. Session rotates every 15 minutes to cap context growth. The seeding prompt teaches valid action names (~300 chars); subsequent calls only send the malformed JSON (~100 chars).
 
 ### 2.3 Session reuse across conversation
-**Date:** 2026-03-12
-
-**Problem:** Every kimi-cli call was a fresh subprocess with no session — even across related messages (quiz question → user answer → assess). Each call re-sends the full ~4500 char prompt including AGENTS.md file refs, topic map, and chat history. Within a single request, the fetch loop was also redundantly sending full context on every iteration.
-
-**Fix:** `_get_conv_session()` manages a conversation-level session (`learn_HHMMSS`) that persists across `call_with_fetch_loop()` invocations:
-- **New session** created when idle for `SESSION_TIMEOUT_MINUTES` (5 min, same as Discord session timeout)
-- **Within a fetch loop:** iteration 0 sends full prompt; iterations 1+ use lightweight `_call_kimi_followup()` (~500 chars) since kimi already has context in the session
-- **Across user messages:** quiz question and user's answer reuse the same session, so kimi retains the question context for better assess accuracy
-
-**Latency impact:**
-- Fetch follow-ups: ~500 chars prompt vs ~4500 chars (90% smaller)
-- Cross-message continuity: kimi doesn't need to re-parse AGENTS.md from file refs on every call within the session
-
-**Session lifecycle:** One session per active conversation (5-min idle timeout). Sessions accumulate in `~/.kimi/sessions/` as small files. Cleanup deferred.
+`_get_conv_session()` manages a conversation-level session that persists across `call_with_fetch_loop()` invocations. New session on idle timeout (config `SESSION_TIMEOUT_MINUTES`). Within a fetch loop, iteration 0 sends full prompt; iterations 1+ use lightweight followup (~500 chars vs ~4500 chars).
 
 ---
 
 ## 3. Score-Based Review System
 
-### 3.1 Replaced SM-2 with asymmetric score system
-**Date:** 2026-03-12
-
-**Problem:** The old SM-2 system had three compounding issues:
-1. `mastery_level = quality` — one bad answer dropped mastery from 5 → 0 (volatile)
-2. Hard interval reset on wrong answers — back to 1 day after 4 good reviews
-3. No distinction between "user regressed" and "LLM probed beyond user's level"
-
-The root cause: the LLM dynamically adjusts question difficulty (a good thing), but the scoring system treated all wrong answers equally. A user at mastery 3 who fails a synthesis-level question gets the same penalty as someone who fails a basic recall question.
-
-**Solution:** Replaced with a **score-based system (0–100)** with asymmetric deltas:
-- **question_difficulty** (0–100): LLM reports how hard its question was
-- **gap = question_difficulty − current_score**: positive means question was above user's level
+**Replaced SM-2 with asymmetric score system (0–100):**
+- `question_difficulty` (0–100): LLM reports how hard its question was
+- `gap = question_difficulty − current_score`
 - **Correct:** score increases (bigger gain for harder questions)
-- **Wrong + gap > 0:** NO decrease — recognized as a probe above user's level
-- **Wrong + gap ≤ 0:** proportional decrease — actual regression on material they should know
+- **Wrong + gap > 0:** NO decrease (probe above user's level)
+- **Wrong + gap ≤ 0:** proportional decrease (actual regression)
 
-### 3.2 Score → interval via exponential curve
-**Formula:** `interval_days = max(1, round(e^(score × 0.05)))`
+**Score → interval:** `interval_days = max(1, round(e^(score × 0.05)))`
 
-| Score | Interval | Phase |
-|-------|----------|-------|
-| 0 | 1 day | Just learned |
-| 25 | 3 days | Building |
-| 50 | 12 days | Solid |
-| 75 | 43 days | Approaching mastery |
-| 100 | 148 days | Mastered |
+| Score | Interval | Score | Interval |
+|-------|----------|-------|----------|
+| 0 | 1 day | 50 | 12 days |
+| 25 | 3 days | 75 | 43 days |
 
-This replaces both `ease_factor` and the old SM-2 interval multiplication. The exponential coefficient (0.05) is tunable — increase for faster spacing, decrease for more frequent reviews.
-
-**Key property for scalability:** As the knowledge base grows, high-score concepts automatically space themselves far apart. 100 concepts at score 50 ≈ 8 reviews/day. At score 70 ≈ 3/day.
-
-### 3.3 ease_factor frozen
-`ease_factor` is no longer updated by `_handle_assess`. The column remains in the DB for backward compatibility but is not used in any calculations. Cleanup (dropping the column) is deferred.
-
-### 3.4 Migration (schema v4)
-Migration 4 in `db.py` converts existing data:
-- `mastery_level *= 15` (maps 0–5 → 0–75 range)
-- Guard: skips if any `mastery_level > 5` (already migrated)
-- Recalculates `interval_days` and `next_review_at` from new scores
-- Imprecise but self-corrects within 1–2 reviews
-
-### 3.5 Score delta constants
+**Score delta constants:**
 ```
-CORRECT — base gain: q3=2, q4=4, q5=7
-  above level: gain = base + gap × 0.15
-  at/below:    gain = max(1, base × 0.5)
-
-WRONG — base loss: q0=5, q1=3, q2=1
-  above level: loss = 0  (no penalty)
-  at/below:    loss = base + |gap| × 0.2
+CORRECT — base: q3=2, q4=4, q5=7.  above: base + gap×0.15.  at/below: max(1, base×0.5)
+WRONG   — base: q0=5, q1=3, q2=1.  above: 0 (no penalty).   at/below: base + |gap|×0.2
 ```
-These are tunable. If scores climb too fast, reduce the gain multiplier (0.15). If wrong-answer penalties feel too harsh, reduce the loss multiplier (0.2).
 
-### 3.6 question_difficulty estimation
-LLM provides `question_difficulty` in the `assess` action. If omitted, the code estimates:
-- quality ≥ 4: `min(100, score + 10)` (question was near their level)
-- quality = 3: `score` (marginal)
-- quality ≤ 2: `min(100, score + 15)` (benefit of the doubt — likely probed above level)
+**`ease_factor` is frozen** — column remains in DB but is not used. Cleanup deferred.
 
-The LLM is instructed to use a **hybrid tier + fine-tuning** approach: pick the tier matching the user's score (0–25 / 25–50 / 50–75 / 75–100), then estimate a precise number within that band.
+**`question_difficulty` fallback** when LLM omits it: q≥4 → `score+10`, q=3 → `score`, q≤2 → `score+15`.
 
 ---
 
-## 4. Codebase Restructuring for LLM Dev Scalability
-**Date:** 2026-03-13
+## 4. Confirmation Flows & Proposals
 
-**Problem:** Adding a new feature required reading ~3900 lines of context (db.py 1396 + pipeline.py 750 + tools.py 540 + agent.py 387 + context.py 426 + bot.py 439). An LLM developer (Copilot, etc.) needed most of the codebase in its context window for any non-trivial change.
+Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`/`update_concept`) are now **proposals** stored in `pending_proposals` DB table. Users approve/reject via Discord buttons (`DedupConfirmView`, `MaintenanceConfirmView` in `services/views.py`).
 
-**Goal:** Reduce typical per-feature context to ~1000 lines by splitting monolithic files into focused modules.
-
-### 4.1 db.py → db/ package
-Replaced the 1396-line `db.py` monolith with a `db/` package (6 submodules):
-
-| Module | Responsibility | ~Lines |
-|--------|---------------|--------|
-| `db/core.py` | Connection helpers, `init_databases()`, migrations, datetime utils, constants | 310 |
-| `db/topics.py` | Topic CRUD, topic maps, hierarchical maps | 240 |
-| `db/concepts.py` | Concept CRUD, search, detail view | 260 |
-| `db/reviews.py` | Review log, remarks | 100 |
-| `db/chat.py` | Chat history, session state | 105 |
-| `db/diagnostics.py` | Maintenance diagnostics, title similarity | 140 |
-| `db/__init__.py` | Re-exports all public functions | 120 |
-
-**Backward compatibility:** `db/__init__.py` re-exports every public function. All existing `import db; db.add_concept(...)` calls work unchanged. No callers were modified.
-
-### 4.2 pipeline.py → focused service modules
-Split the 750-line `services/pipeline.py` into:
-
-| Module | Responsibility | ~Lines |
-|--------|---------------|--------|
-| `services/parser.py` | `parse_llm_response`, `extract_llm_action`, `process_output`, `extract_fetch_params` | 180 |
-| `services/repair.py` | `repair_action` (action-name repair sub-agent) | 90 |
-| `services/dedup.py` | `handle_dedup_check`, `execute_dedup_merges`, `_parse_dedup_response` | 140 |
-| `services/pipeline.py` | Pure orchestration: `execute_action`, `call_with_fetch_loop`, `handle_review_check`, `handle_maintenance` | 342 |
-
-**Backward compatibility:** `pipeline.py` re-imports `process_output`, `handle_dedup_check`, and `execute_dedup_merges` so existing `pipeline.xxx()` calls in bot.py, scheduler.py, and tests continue to work.
-
-### 4.3 Deduplicated parse_llm_response
-`agent.py` had a ~50-line copy of `parse_llm_response` + `_extract_json_object` that diverged from the pipeline copy. Removed the duplicate; `agent.py` now imports from `services.parser`.
-
-### 4.4 Fixed circular dependency (scheduler ↔ bot)
-`scheduler.py` imported `bot` at runtime to read `bot.last_activity_at`. Created `services/state.py` (~10 lines) with `last_activity_at: datetime | None`. Both `bot.py` (writes) and `scheduler.py` (reads) now use the shared state module. No runtime `import bot` needed.
-
-### 4.5 Old files kept for reference
-`_db_old.py` and `services/_pipeline_old.py` are the renamed originals. Safe to delete once confidence is high. They are prefixed with `_` so they won't be imported accidentally.
-
-### 4.6 How to work with the new structure
-- **Adding a new db function:** Put it in the appropriate `db/*.py` submodule, add to `db/__init__.py` re-exports.
-- **Adding a new action:** Only touch `services/pipeline.py` (the orchestrator) and `tools.py`.
-- **Changing LLM output parsing:** Only touch `services/parser.py`.
-- **Changing dedup logic:** Only touch `services/dedup.py`.
-- **Changing review scheduling:** Only touch `services/scheduler.py` + `db/reviews.py`.
+**Key decisions:**
+- Discord buttons over text replies — text goes to LLM pipeline, buttons are unambiguous
+- DB-backed proposals survive bot restarts (exit code 42 mechanism)
+- 24h auto-expiry on both View timeout and DB rows
+- Safe maintenance actions (`link_concept`, `delete_topic` for empty topics, `remark`, `fetch`, `list_topics`) execute immediately; destructive ones become proposals
+- Dedup prompt tightened: only merge concepts that are the **same thing with different wording**
 
 ---
 
-## 5. FastAPI Backend & Project Restructuring
-**Date:** 2026-03-15
+## 5. ID Confusion & Session Stash Pattern
 
-### 5.1 FastAPI backend (`api.py`) — parallel entry point
-**Goal:** Enable a mobile app (React Native) to use the same learning pipeline via HTTP, while keeping the Discord bot running.
+**Bug:** After `add_concept` confirmation, LLM used topic ID instead of concept ID (both were bare `[N]` format).
 
-**Implementation:** Created `api.py` (~150 lines) as a thin FastAPI wrapper that calls the exact same pipeline functions as `bot.py`:
-```
-bot.py (Discord)  ─┐
-                    ├──→  pipeline.call_with_fetch_loop()  →  execute_llm_response()  →  process_output()
-api.py (FastAPI)  ─┘
-```
+**Fix:** Three layers:
+1. **Session stash** in `_handle_add_concept`: `db.set_session('last_added_concept_id', str(id))` — same pattern as `last_assess_concept_id`
+2. **Chat history persistence** after button confirm: save `[confirmed: add concept]` + result to chat history so LLM sees the ID
+3. **Type-prefixed IDs** everywhere: `[topic:N]` / `[concept:N]` — makes confusion structurally impossible
 
-**Endpoints:**
-| Method | Route | Maps to |
-|--------|-------|---------|
-| `POST` | `/api/chat` | `pipeline.call_with_fetch_loop()` → `execute_llm_response()` → `process_output()` |
-| `GET` | `/api/topics` | `db.get_hierarchical_topic_map()` |
-| `GET` | `/api/topics/{id}` | `db.get_topic()` + `db.get_concepts_for_topic()` |
-| `GET` | `/api/concepts/{id}` | `db.get_concept_detail()` |
-| `GET` | `/api/due` | `db.get_due_concepts()` |
-| `GET` | `/api/stats` | `db.get_review_stats()` |
-| `GET` | `/api/health` | Health check (no auth) |
+**Lesson:** When an action creates an entity whose ID is needed by a future turn, stash the ID in session state at creation time. Don't parse formatted result strings. Follow the existing stash pattern.
 
-**Auth:** Optional bearer token via `API_SECRET_KEY` config. Skipped if not set (solo mode). Same header pattern upgrades to Firebase tokens later.
-
-**Concurrency with bot.py:** Both run as separate processes. SQLite WAL mode + short-lived connections handle concurrent access. The `webui/server.py` already proved this pattern works.
-
-**No scheduler in API:** The Discord bot owns the scheduler (review DMs, maintenance). The mobile app uses `GET /api/due` on launch instead.
-
-### 5.2 Project structure reorganization
-**Problem:** 17 items at root, with internal modules (`context.py`, `tools.py`) mixed with entry points and docs.
-
-**Changes:**
-| Move | Reason |
-|------|--------|
-| `context.py` → `services/context.py` | Only imported by `services/pipeline.py` — belongs with the rest of the service layer |
-| `tools.py` → `services/tools.py` | Only imported by `services/pipeline.py` and `services/repair.py` |
-| `agent.py` → `scripts/agent.py` | Dead code (not imported anywhere), kept for manual CLI debugging |
-| `ARCHITECTURE.md`, `DEVNOTES.md`, `PLAN.md` → `docs/` | Dev docs, not runtime files |
-| `start.bat`, `start_api.bat` → `scripts/` | Launcher scripts |
-
-**Path fixes required after moves:**
-- `context.py`: `Path(__file__).parent` → `Path(__file__).parent.parent` for `AGENTS.md` and `preferences.md`
-- `tools.py`: same fix for `preferences.md`
-- `pipeline.py`: `import context as ctx` → `from services import context as ctx`; `import tools` → `from services import tools`
-- `repair.py`: `import tools` → `from services import tools`
-- `bot.py`: `from tools import _handle_list_topics` → `from services.tools import _handle_list_topics`
-- Tests: updated accordingly
-- Bat scripts: added `cd /d "%~dp0\..\"` and fixed venv activation paths
-
-**Result:** Root went from 17 items → 9 items. Entry points (`bot.py`, `api.py`) and runtime config (`config.py`, `AGENTS.md`, `preferences.md`) stay at root. Everything else is organized.
-
-### 5.3 Standalone git repo
-**Problem:** Project was a subfolder inside the `PA/` git repo. Needed its own repo for GitHub.
-
-**Security audit before commit:**
-- Removed hardcoded Discord bot token from `config.py` (was a fallback default)
-- Removed hardcoded `AUTHORIZED_USER_ID` — now reads from `LEARN_AUTHORIZED_USER_ID` env var
-- Sanitized `ARCHITECTURE.md` — removed personal Discord user ID
-- All secrets now live in `.env` (git-ignored) or environment variables
-
-**Files added:**
-- `.gitignore` — excludes `venv/`, `data/`, `__pycache__/`, `.env`
-- `.env.example` — documents all env vars
-- `python-dotenv` added to requirements — `config.py` auto-loads `.env` on import
-
-### 5.4 Config changes
-- `API_HOST`, `API_PORT`, `API_SECRET_KEY` added (env vars: `LEARN_API_HOST`, `LEARN_API_PORT`, `LEARN_API_SECRET_KEY`)
-- `BOT_TOKEN` no longer has a hardcoded fallback — empty string default, must be set via env var for Discord mode
-- `AUTHORIZED_USER_ID` now reads from `LEARN_AUTHORIZED_USER_ID` env var (default `0`)
-- `validate_config()` relaxed — `BOT_TOKEN` no longer validated (not needed for API-only mode)
-- `python-dotenv` loads `.env` at import time with graceful fallback if not installed
-
-### 5.5 Virtual environment
-Added `venv/` (Python 3.12) with all dependencies. Both `scripts/start.bat` and `scripts/start_api.bat` auto-activate the venv before launching. The venv is git-ignored.
+**Why NOT `active_concept_id`?** That key powers "Active Quiz Context" — setting it after creation (not quiz) would mislead the LLM into phantom assessments.
 
 ---
 
-## 6. Confirmation Flows for Dedup & Maintenance
-**Date:** 2026-03-15
+## 6. Maintenance Score Guard
 
-### 6.1 Problem: Dedup auto-merged concepts without confirmation
-The dedup sub-agent ran on a 24h schedule, identified potential duplicates via LLM, and **immediately deleted** merge targets. No user approval. This caused:
-- Related-but-distinct concepts merged (e.g. "Ring Buffer" → "ISR Bottom Half")
-- Concepts became too broad for effective spaced repetition
-- User lost granularity in their knowledge graph
+**Bug:** Maintenance LLM raised concept scores from 18→55 via `update_concept`, ignoring prompt instructions.
 
-### 6.2 Problem: Maintenance auto-executed destructive actions
-The maintenance LLM could `delete_concept`, `unlink_concept`, etc. without asking. While AGENTS.md said to "suggest" some actions, there was no code-level enforcement.
+**Fix (defense-in-depth):**
+1. **Code guard** in `_handle_update_concept` (tools.py): when `action_source='maintenance'`, strip `mastery_level`, `ease_factor`, `interval_days`, `next_review_at`, `last_reviewed_at`, `review_count`
+2. **Action source** set in `execute_maintenance_actions` (pipeline.py) so approved proposals also get the guard
+3. **Reduced temptation**: struggling concepts diagnostic hides raw scores, shows `(7 reviews, still building)` instead
+4. **Prompt prohibition** in `maintenance.md`: "NEVER modify score/scheduling fields"
 
-### 6.3 Fix: Proposal-based confirmation with Discord buttons
-
-**Architecture:** Destructive actions are now **proposals** stored in a `pending_proposals` DB table. Users approve/reject via discord.py `View`/`Button` components (not text replies — those would be consumed by the LLM pipeline).
-
-**Flow:**
-```
-Scheduler/Command
-    │
-    ├── Dedup: LLM identifies duplicates → save_proposal('dedup', groups)
-    │   → DM user with DedupConfirmView (per-group ✅/❌ + bulk buttons)
-    │   → User clicks buttons → execute_dedup_merges(approved_groups)
-    │
-    └── Maintenance: LLM proposes actions → safe ones execute immediately
-        → destructive ones → save_proposal('maintenance', actions)
-        → DM user with MaintenanceConfirmView (same button pattern)
-        → User clicks → execute_maintenance_actions(approved_actions)
-```
-
-**Key design decisions:**
-- **Discord buttons over text replies** — `on_message` routes all text to the LLM pipeline; intercepting "1, 2" or "all" is fragile and ambiguous. Buttons are mobile-friendly, have built-in timeout, and the callback lives in the View class (not `on_message`).
-- **DB-backed proposals over in-memory state** — the bot restarts (exit code 42 mechanism). In-memory state would be lost between DM and user response (hours later). DB proposals survive restarts.
-- **24h auto-expiry** — `View(timeout=86400)` disables buttons after 24h. DB rows also have `expires_at` column, cleaned up by scheduler.
-- **Skip dedup if pending** — if a proposal from the last cycle isn't resolved yet, the next cycle skips dedup. Prevents overwriting proposals.
-- **Separate proposal from execution in maintenance** — `call_maintenance_loop` returns `(report_text, proposed_actions)`. Safe actions (`link_concept`, `delete_topic` for empty topics, `remark`) execute immediately. Destructive actions (`delete_concept`, `unlink_concept`, `update_concept`) are collected and shown with buttons.
-
-### 6.4 Dedup prompt tightened
-The dedup LLM prompt was too permissive — "find duplicate or highly overlapping concepts" merged related concepts. New prompt:
-- Only merge concepts that are the **same thing with different wording**
-- Explicit examples of what IS vs IS NOT a duplicate
-- "When in doubt, do NOT merge" instruction
-- Removed "highly overlapping" language
-
-### 6.5 Schema change (migration 6)
-Added `pending_proposals` table to `knowledge.db`:
-```sql
-CREATE TABLE pending_proposals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    proposal_type TEXT NOT NULL,       -- 'dedup' or 'maintenance'
-    payload TEXT NOT NULL,             -- JSON blob of action dicts
-    discord_message_id INTEGER,        -- for reference
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL
-);
-```
-
-### 6.6 New files
-- `db/proposals.py` — CRUD for pending proposals (save, get, delete, cleanup)
-- `services/views.py` — Discord UI views (`DedupConfirmView`, `MaintenanceConfirmView`)
-
-### 6.7 AGENTS.md maintenance rules updated
-Removed "Potential duplicates" from auto-fix list. Added explicit boundary:
-- Maintenance handles structural issues (empty topics, untagged concepts)
-- Dedup handles duplicate detection (separate sub-agent)
-- Destructive actions are proposals, not auto-executed
+**Lesson:** When the LLM has both data and tool to modify it, prompt instructions alone are insufficient — add a code-level guard.
 
 ---
 
-## 7. Discord 2000-Character Limit Overflow
-**Date:** 2026-03-15
+## 7. Pending Review Tracking
 
-### 7.1 Symptom
-Clicking "Add concept" on a confirmation button crashed with:
-```
-discord.errors.HTTPException: 400 Bad Request (error code: 50035): Invalid Form Body
-In data.content: Must be 2000 or fewer in length.
-```
+**Bug:** Scheduler sent multiple unanswered review DMs in sequence. LLM hallucinated phantom answers from chat history pollution (`[SCHEDULED_REVIEW]` saved as `role='user'`).
 
-### 7.2 Root cause
-`AddConceptConfirmView.accept` in `services/views.py` appended a status note to the original message without checking combined length:
-```python
-original = interaction.message.content or ""  # up to 1900 chars
-await interaction.response.edit_message(content=original + note, view=self)  # note ~60-130 chars
-```
-Total: 1900 + 130 = 2030 > 2000. Same pattern existed in the text-reply confirmation path in `bot.py` and `_QuizDoneButton`.
-
-### 7.3 All affected locations (fixed)
-
-| File | Location | Pattern | Risk |
-|------|----------|---------|------|
-| `services/views.py` | `AddConceptConfirmView.accept` | `original + note` | **Crash (reported)** |
-| `bot.py` | Text-reply "yes" handler | `orig.content + note` | **Crash (same pattern)** |
-| `services/views.py` | `_QuizDoneButton.callback` | `original + "✋ Quiz session ended."` | Moderate |
-| `bot.py` | `/learn` with `pending_action` | `send(response, view=view)` — no truncation | Moderate |
-| `services/scheduler.py` | Review DM send | `f"📚 **Learning Review**\n{message}"` | Moderate |
-| `services/scheduler.py` | Fallback review DM | `f"📚 **Learning Review** — Time to review:\n{payload}"` | Low |
-| `services/views.py` | `DedupConfirmView._finalize` | `edit(content=result_text)` | Defensive |
-| `services/views.py` | `MaintenanceConfirmView._finalize` | Same | Defensive |
-| `services/views.py` | `ApproveGroupButton` / `RejectGroupButton` | Status text edit | Defensive |
-| `services/views.py` | `_QuizExplainButton` / `_send_quiz_response` | Hardcoded `[:2000]` | Normalized |
-
-### 7.4 Fix: `services/formatting.py`
-Created a shared utility module with:
-- `DISCORD_CHAR_LIMIT = 2000` — replaces magic `[:2000]` slices
-- `truncate_for_discord(text, max_len)` — truncate with `…` ellipsis
-- `truncate_with_suffix(original, suffix, max_len)` — truncates `original` to preserve `suffix`; handles suffix-only overflow
-
-Used by `views.py`, `bot.py`, and `scheduler.py`. Not imported by `api.py` or any pipeline/db module — this is a Discord transport concern.
-
-### 7.5 Convention: 1900 vs 2000
-
-| Constant | Value | Used for |
-|----------|-------|----------|
-| `config.MAX_MESSAGE_LENGTH` | 1900 | Initial sends — conservative buffer for Discord overhead |
-| `formatting.DISCORD_CHAR_LIMIT` | 2000 | Edits / appends — hard limit, every char counts |
-
-### 7.6 Architecture note
-`api.py` (FastAPI) is unaffected — it returns raw JSON with no character limit. The React Native app (PLAN.md Phase 3) will handle its own display constraints client-side. The truncation helpers live in `services/formatting.py` (pure string ops, no discord.py dependency) so they can be reused for future mobile push notification truncation (FCM has its own limits).
+**Fix:**
+- **DB-backed pending state** (`pending_review` session key): JSON blob with `{concept_id, concept_title, question, sent_at, reminder_count}`
+- **Chat history sanitized**: `[SCHEDULED_REVIEW]` → `[system: review quiz sent for concept #N — awaiting response]`
+- **Pending cleared on assess only** (tools.py `_handle_assess`) — casual messages don't clear it
+- **Static reminders** (no LLM call) with `REVIEW_REMINDER_MAX` (default 3) before moving on
+- Set pending AFTER `user.send()` succeeds — avoids race condition
 
 ---
 
-## 6. Concept/Topic ID Confusion After add_concept Confirmation
+## 8. Discord Formatting
 
-### 6.1 Concept_id lost after button confirmation → "Concept #35 not found"
-**Date:** 2026-03-16
+**Discord 2000-char overflow:** `formatting.py` provides `truncate_for_discord()` and `truncate_with_suffix()`. Convention: `config.MAX_MESSAGE_LENGTH=1900` for initial sends, `formatting.DISCORD_CHAR_LIMIT=2000` for edits/appends.
 
-**Symptom:** User asked about Python GIL → LLM created concept #70 under auto-created topic "Python" (#35). User confirmed via button. On follow-up question, bot replied "⚠️ Concept #35 not found" — it used the topic ID (35) instead of the concept ID (70).
+**View truncation:** `send_long_with_view()` splits text at newline boundaries, sends all chunks except last as plain messages, attaches view to final chunk. Replaced 5 silent `[:1900]` truncation sites in `bot.py`.
 
-**Root cause (two layers):**
+**Signal handler crash:** `webui/server.py` signal handler must guard with `threading.current_thread() is threading.main_thread()` since bot.py spawns webui in a background thread.
 
-1. **Primary — concept_id never persisted after confirmation.** When the user clicks "Add concept" (button in `views.py`) or replies "yes" (text handler in `bot.py`), `execute_action` creates the concept and returns a result string containing `#70`. But neither handler saved the concept_id to session state or chat history. The `"✅ Added concept #70..."` note was only appended to the Discord message via `edit_message()` — the LLM never saw it.
-
-2. **Secondary — ambiguous ID format in Knowledge Map.** Topics and concepts both used bare `[N]` bracket format: `[35] Python` (topic) and `[70] GIL` (concept). With no type prefix, the LLM confused the only visible ID `[35]` (the topic) for a concept_id.
-
-**Fix (three layers):**
-
-1. **Session stash in `_handle_add_concept` (tools.py):** After `db.add_concept()`, stash `db.set_session('last_added_concept_id', str(concept_id))`. Follows the same pattern as `_handle_assess` which stashes `last_assess_concept_id`. Uses a separate key (`last_added_concept_id`) instead of reusing `active_concept_id` — the latter powers the "Active Quiz Context" section and would mislead the LLM into thinking there's an active quiz.
-
-2. **Chat history persistence (views.py + bot.py):** After successful `execute_action`, save `[confirmed: add concept]` (user) and `✅ {result}` (assistant) to chat history. Also save `[declined: add concept]` on decline. This ensures the LLM sees the concept_id in its chat history on subsequent turns.
-
-3. **Type-prefixed IDs in context (context.py):** Changed all bracket IDs from `[N]` to `[topic:N]` or `[concept:N]` across 15+ locations (Knowledge Map, Due list, fetch results, maintenance diagnostics). Added matching note in AGENTS.md explaining the format. This makes ID confusion structurally impossible.
-
-**Why NOT reuse `active_concept_id`?** This key powers the "Active Quiz Context" section in `context.py` which tells the LLM: "Use this concept_id for `assess` actions." Setting it after *creation* (not quiz) would mislead the LLM into attempting phantom assessments. It also wouldn't be cleared until the next `assess`, persisting across many turns.
-
-**Why NOT regex-parse the result string?** The result from `_handle_add_concept` contains multiple `#N` patterns (concept and topic IDs): `"Added concept **GIL** (#70) under Python (auto-created topic: 'Python' (#35))"`. Regex `r'#(\d+)'` happens to grab `#70` first, but this is fragile — if the format changes, it silently grabs the wrong ID. The session stash approach is coupling-free.
-
-**Lesson:** When an action creates an entity whose ID is needed by a future turn, stash the ID in session state at creation time — don't rely on parsing it from formatted strings or hoping it appears in the LLM's context. Follow the existing stash pattern (`last_assess_concept_id`, `last_assess_quality`).
+**SVG/D3:** Set visual properties as inline SVG `.attr()` calls, not CSS classes — avoids specificity issues. CSS only for interactive states.
 
 ---
 
-## 7. Maintenance LLM Overwriting mastery_level on Struggling Concepts
+## 9. JSON Parser
 
-### 7.1 Bug: maintenance artificially raised concept scores
-**Date:** 2026-03-16
+**Bug:** Brace-counting JSON extraction broke on code in string values (C++, LaTeX `\frac{a}{b}`, regex `{3,5}`).
 
-**Symptom:** Concept "BehaviorTree.CPP Library" had its `mastery_level` raised from 18→45→55 by the maintenance agent across two runs, despite the user's actual quiz-derived score being ~21. The maintenance remarks said "mastery_level raised to 55. Recent reviews demonstrate solid understanding."
+**Fix:** Try-each-`}` with last-valid-parse in `_extract_json_object()` and `_extract_json_str()`. Tries `json.loads()` at every `}` position, keeps the **last** successful parse (largest valid JSON). Uses `json.loads()` as the validator instead of a brace-counting state machine.
 
-**Root cause (two layers):**
+Why "last valid" not "first valid": partial JSON may parse but miss trailing fields like `"message"`.
 
-1. **LLM ignored prompt instructions.** AGENTS.md said `mastery_level` should only change via `assess`, but the "Struggling Concepts" diagnostic showed the raw score (`score 18/100, 7 reviews`) which tempted the LLM to "correct" it via `update_concept` with `mastery_level: 55`.
-
-2. **No code-level guard.** While `update_concept` is a non-safe maintenance action (requires user approval via Discord buttons), the proposal UI only showed the action name — not which fields were being changed. The user likely clicked "Approve All" without realizing a score change was embedded. Even if the user caught it, there was nothing preventing the action from executing with arbitrary score values.
-
-3. **`execute_maintenance_actions` didn't set action source.** When the user approved proposals via Discord buttons, the execution ran with `action_source='discord'` (the default), so even if a guard existed, it would have been bypassed.
-
-### 7.2 Fix: defense-in-depth (code guard + prompt + context)
-
-1. **Hard guard in `_handle_update_concept` (tools.py):** When `get_action_source() == 'maintenance'`, strip `mastery_level`, `ease_factor`, `interval_days`, `next_review_at`, `last_reviewed_at`, and `review_count` from the update fields. Log a warning when stripping occurs. This is the primary defense — the LLM can propose whatever it wants, but score fields are silently dropped.
-
-2. **Action source in `execute_maintenance_actions` (pipeline.py):** Added `tools.set_action_source('maintenance')` at the top so approved proposals also get the code guard.
-
-3. **Explicit prohibition in AGENTS.md:** Added "What you must NEVER do in maintenance" section with clear instruction to never modify score/scheduling fields.
-
-4. **Reduced temptation in diagnostics (context.py):** Struggling concepts no longer show the raw score. Changed from `(score 18/100, 7 reviews)` to `(7 reviews, still building)` with an inline note: "DO NOT adjust scores. Suggest remarks or concept splitting only."
-
-5. **Reinforced in maintenance prompt (pipeline.py):** Added explicit reminder in the `[MAINTENANCE]` prompt text that score fields must not be changed via `update_concept`.
-
-**Lesson:** When the LLM has both the data (raw scores) and the tool (`update_concept`) to modify it, prompt instructions alone are insufficient — add a code-level guard. Defense in depth: remove the temptation (hide raw scores from maintenance), add the prompt instruction, AND enforce at the code layer.
+Safety net in `process_output()`: if output has no recognized prefix but contains `"action"`, tries extraction and returns the `message` field.
 
 ---
 
-## 7. Pending Review Tracking & Phantom Answer Bug
+## 10. Phantom-Add Prevention
 
-### 7.1 Bug: scheduler sends new questions when user hasn't answered
-**Date:** 2026-03-17
+**Bug:** LLM output `REPLY:` claiming "Added concept X" with no JSON action — nothing saved to DB.
 
-**Symptom:** The scheduler sent 3-4 unanswered review quiz DMs in sequence. The user didn't reply to any of them, but each 15-minute cycle picked a new concept and sent a fresh question. Additionally, the LLM sometimes "perceived" that the user had answered a previous review quiz — generating assessment remarks like "user nailed the vacancy jump" — even though the user never replied.
-
-**Root cause (three layers):**
-
-1. **No pending review tracking.** The scheduler had no concept of "there's an unanswered quiz." The only guard was `_review_sent_at` — an in-memory per-concept cooldown dict (lost on restart). After the cooldown expired (4h), or after a restart, the same concept could be re-sent. Nothing prevented picking a *different* concept every 15 minutes while the first remained unanswered.
-
-2. **Chat history pollution from `[SCHEDULED_REVIEW]`.** When the scheduler generated a quiz, `execute_llm_response()` saved the synthetic `[SCHEDULED_REVIEW] Start a review quiz for...` string as a `role='user'` message in chat history. The LLM's quiz was saved as `role='assistant'`. On the next LLM call (whether scheduler or user-initiated), the history showed what looked like a user→agent exchange — the LLM could interpret this as "the user engaged with the quiz" when they never did. Combined with existing remarks from prior reviews (e.g., "user nailed the vacancy jump last time"), the LLM hallucinated that the user had answered.
-
-3. **No reminder mechanism.** When the user ignored a review DM, the system went silent until the cooldown expired and picked a new concept. No nudge, no escalation, just a growing pile of unanswered questions.
-
-### 7.2 Fix: DB-backed pending state + sanitized chat history + reminders
-
-**a) Pending review state (scheduler.py):**
-- Added `pending_review` session state key storing a JSON blob: `{concept_id, concept_title, question, sent_at, reminder_count}`.
-- Set AFTER `user.send()` succeeds (not before the LLM call) to avoid a race condition where the user answers a previous quiz during the `await`.
-- `_check_reviews()` now checks pending state first:
-  - Pending + concept deleted → clear, fall through to normal flow.
-  - Pending + cooldown not elapsed → skip entirely (no new question).
-  - Pending + cooldown elapsed + reminders left → send static reminder DM (no LLM call), re-set `active_concept_id` for the assess pipeline, return.
-  - Pending + max reminders exhausted → clear, fall through to pick new concept.
-- Replaced the in-memory `_review_sent_at` dict entirely — single DB-backed system.
-
-**b) Chat history sanitization (pipeline.py `execute_llm_response`):**
-- Messages starting with `[SCHEDULED_REVIEW]` are no longer saved raw as `role='user'`.
-- Instead, a sanitized marker is saved: `[system: review quiz sent for concept #12 — awaiting response]`.
-- The assistant's quiz question is still saved normally, giving the LLM the full picture: a quiz was sent, here's the question, the user hasn't answered yet.
-
-**c) Pending cleared on assess only (tools.py `_handle_assess`):**
-- `db.set_session('pending_review', None)` added after successful assessment.
-- This is the only place pending state is cleared (besides max-reminder expiry and concept-deletion guard).
-- Casual messages about unrelated topics do NOT clear the pending review — only an actual answer does.
-
-**d) Static reminders (scheduler.py):**
-- `_send_review_reminder()` sends a fixed-template nudge (no LLM call).
-- Re-sets `active_concept_id` so the assess pipeline works when the user eventually replies.
-- `REVIEW_REMINDER_MAX` config (default 3) limits total reminders before moving on.
-
-**Design decisions:**
-- **Single JSON blob** over multiple session keys — atomic read/write, stores question text for context.
-- **Set pending AFTER `user.send()`** — avoids race condition with concurrent assess during LLM await.
-- **Static reminders** — saves LLM tokens, avoids the LLM generating phantom assessments during reminders.
+**Fix:**
+1. **Anti-phantom-add rule** (skill `core.md`, rule 12): "NEVER claim you created a concept/topic in REPLY. Creating requires a JSON action."
+2. **Button-based `suggest_topic`** flow: single-turn (LLM suggests → buttons → callback creates). LLM does NOT handle Turn 2.
+3. **`SuggestTopicConfirmView`** + shared `execute_suggest_topic_accept()` — DRY between button and text-reply paths
+4. **Unified `_pending_confirmations`** dict in bot.py — handles both `add_concept` and `suggest_topic`
+5. **Silent detection** (pipeline.py): regex logs warning when REPLY contains "Added/Created" without action. Log-only.
 
 ---
 
-## 8. Web UI Graph Visualization
+## 11. Modular Skill Loading
 
-### 8.1 Signal handlers crash when webui runs in a background thread
-**Date:** 2026-03-17
+Split monolithic `AGENTS.md` (~690 lines) into `data/skills/` (4 files, conditional per mode):
 
-**Symptom:** `ValueError: signal only works in main thread of the main interpreter` when starting `bot.py`. The webui server started in Thread-1 tried to register `signal.SIGINT`.
-
-**Root cause:** The fast-shutdown signal handler added for standalone `python webui/server.py` runs unconditionally, but `bot.py` spawns the webui in a background thread where `signal.signal()` is forbidden.
-
-**Fix:** Guard with `if threading.current_thread() is threading.main_thread()`. The signal handler only applies when the webui is the main process; when spawned by the bot, the bot handles its own shutdown.
-
-**Lesson:** Any code that calls `signal.signal()` must check it's running in the main thread, especially in projects with multiple entry points that may embed the server in a thread.
-
-### 8.2 Static file caching hides code changes
-**Date:** 2026-03-17
-
-**Symptom:** CSS and JS changes to graph edges were not visible in the browser despite server restarts. Multiple rounds of edits appeared to have no effect.
-
-**Root cause:** `_serve_static()` sent `Cache-Control: public, max-age=3600` — the browser served stale files from disk cache for up to 1 hour. The `?v=1` query-string bust on `graph.js` was never incremented.
-
-**Fix:** Changed to `Cache-Control: no-cache` for development. For production, switch to fingerprinted filenames or increment `?v=N` on every change.
-
-**Lesson:** During active development, never cache static files aggressively. A 1-hour max-age means your last 4 rounds of CSS tweaks were invisible. Use `no-cache` and bump version strings.
-
-### 8.3 SVG edge visibility: CSS classes vs inline D3 attrs on dark backgrounds
-**Date:** 2026-03-17
-
-**Symptom:** Graph edges (concept→topic membership lines) were nearly invisible on the dark background (`#0d1117`), even after increasing CSS stroke color and opacity multiple times.
-
-**Root cause (two layers):**
-1. **Caching** (§8.2 above) — the real blocker. CSS changes weren't reaching the browser.
-2. **CSS specificity with SVG:** SVG presentation attributes set via D3 `.attr('stroke', ...)` become inline attributes on the `<line>` element, which override CSS class rules. The initial code only set `stroke-width` inline but relied on CSS for color/opacity — a fragile split.
-
-**Fix:** Set all edge visual properties (stroke, stroke-opacity, stroke-width, stroke-dasharray) directly via D3 `.attr()` calls in `graph.js`. CSS classes remain for hover/dim states but the base rendering is self-contained in JS. Membership edges use accent blue (`#58a6ff`) at 0.45 opacity with 1.5px width.
-
-**Lesson:** For D3/SVG visualizations, prefer setting visual properties as inline SVG attributes via `.attr()` rather than relying on CSS classes. This avoids specificity issues between inline attrs and stylesheet rules, and makes the rendering self-documenting in the JS code. Use CSS only for interactive states (hover, dimmed, highlighted) applied via `.classed()`.
-- **`/review` command does NOT set pending state** — user-initiated reviews are active engagement, not unsolicited DMs.
-
----
-
-## 9. Message Truncation & Raw JSON Exposure
-
-### 9.1 Discord messages with button views silently truncated
-**Date:** 2026-03-18
-
-**Symptom:** Long educational answers (e.g. C++ decorator breakdown with code samples) were silently cut off at 1900 characters when the response included Discord button views (add_concept confirmation, quiz navigation). Users saw incomplete answers with no indication content was lost.
-
-**Root cause:** The `send_long()` helper properly splits messages into chunks, but it was only used for plain-text responses (no views). Every code path that attached a view used `response[:config.MAX_MESSAGE_LENGTH]` — a hard truncation with no splitting:
-
-```python
-# Was: silent truncation (5 locations in bot.py)
-sent = await ctx.send(response[:config.MAX_MESSAGE_LENGTH], view=view)
-```
-
-**Fix:** Added `send_long_with_view(send_fn, text, view)` helper that:
-1. Splits text at newline boundaries near the 1900-char limit (prefers `\n` within last 200 chars)
-2. Sends all chunks except the last as plain messages
-3. Sends the final chunk with the view (buttons) attached
-4. Returns the `sent` Message object from the view-bearing chunk (critical for `_pending_concepts[sent.id]` tracking)
-
-Uses a `send_fn` closure pattern so callers provide their own send method (`ctx.send`, `ctx.interaction.followup.send`, or `message.reply`). Also refactored `send_long()` and the inline `on_message` chunking to use the shared `_split_message()` helper.
-
-**All 5 truncation sites replaced:** `learn_command` (pending_action, assess_meta), `review_command` (assess_meta), `on_message` (pending_action, assess_meta). The plain-text `on_message` path was also unified.
-
-### 9.2 Raw JSON shown to user — brace-counting parser breaks on code in strings
-**Date:** 2026-03-18
-
-**Symptom:** When the LLM returned an `add_concept` action whose `message` field contained C++ code with curly braces (e.g. `"int f() { return 1; }"`), the entire raw JSON action block was displayed to the user instead of just the educational message.
-
-**Root cause:** Both `_extract_json_object()` and `_extract_json_str()` used naive brace counting to find where a JSON object ends. Braces inside JSON string values (C++ code, LaTeX `\frac{a}{b}`, regex `[a-z]{3,5}`, etc.) caused premature depth-0 detection, producing a truncated substring that `json.loads()` rejected. The extraction returned `None`, and the fallback path treated the raw JSON as plain text:
-
-```python
-# Old approach — broken by braces in string values
-depth = 0
-for i, ch in enumerate(text[start:]):
-    if ch == '{': depth += 1
-    elif ch == '}':
-        depth -= 1
-        if depth == 0:  # ← hit too early on "{ return 1; }"
-            return json.loads(text[start:start + i + 1])  # ← fails
-```
-
-Additionally, the old code returned `None` on the **first** `json.loads` failure instead of trying subsequent `}` positions — a secondary bug that caused premature give-up even in simpler cases.
-
-**Fix (three layers):**
-
-1. **Try-each-`}` with last-valid-parse** (root cause fix): Replaced brace counting in `_extract_json_object()` and `_extract_json_str()`. New approach tries `json.loads()` at every `}` position and keeps the **last** successful parse — which is the largest valid JSON starting from the first `{`. This handles all edge cases natively because `json.loads()` correctly handles string escaping, nested objects, etc.
-
-   Why "last valid" and not "first valid": a partial JSON like `{"action":"add_concept","params":{"code":"..."}}` can be valid but missing the `"message"` field. The complete object (with `message`) at the final `}` is what we want.
-
-2. **Refactored `extract_fetch_params()`**: Had its own inline brace counter (third copy of the same bug). Now reuses `_extract_json_object()`.
-
-3. **Safety net in `process_output()`**: If output has no recognized prefix but contains `"action"`, tries `_extract_json_object()` and returns the `message` field. This is the single chokepoint before user-visible output for all paths (Discord, API, maintenance).
-
-**Performance note:** The try-each-`}` approach calls `json.loads()` at every `}` in the text. For LLM outputs (typically 1-4KB), this is negligible. `json.loads()` fails fast on truncated input.
-
-**Triggers beyond C++:** LaTeX braces, regex quantifiers `{3,5}`, JSON examples in descriptions, Python dict literals in code blocks, user code echoed in message fields.
-
-**Lesson:** Don't re-implement JSON parsing. The `json` module handles all string/escape edge cases — use it as the validator instead of building a brace-counting state machine.
-
----
-
-## 10. suggest_topic Confirmation Buttons & Anti-Phantom-Add
-
-### 10.1 Bug: suggest_topic had no Discord buttons — phantom add
-**Date:** 2026-03-19
-
-**Symptom:** User asked "what is embedding models" (new area, no matching topic). The LLM output a `REPLY:` claiming "Added concept X under Databases" — plain text with no JSON action. Parser classified it as `("REPLY", ..., None)`, so no action was parsed, no buttons shown, nothing saved to DB. Even when the LLM correctly used `suggest_topic`, the handler only formatted plain text ("Want me to add this?") with no buttons — relied on fragile text follow-up.
-
-**Root cause (two layers):**
-
-1. **Primary — LLM output REPLY instead of JSON action.** The LLM saw "Databases" in the Knowledge Map, decided to auto-add the concept there, but emitted a `REPLY:` prefix instead of a structured `add_concept` or `suggest_topic` action. The parser found `REPLY:` first and returned `(REPLY, text, None)` — no action_data, no interception, no buttons.
-
-2. **Secondary — `suggest_topic` had no button UX.** `_handle_suggest_topic` in tools.py was purely cosmetic — formatted a suggestion message, did zero DB work. No `SuggestTopicConfirmView` existed. The AGENTS.md instructed a two-turn flow (Turn 1: suggest, Turn 2: LLM creates on "yes") which was fragile and could itself trigger phantom adds.
-
-**Fix (four layers):**
-
-1. **AGENTS.md — anti-phantom-add rule (rule 12):** "NEVER claim you added/created a concept or topic in a REPLY/text response. Creating things requires a JSON action."
-
-2. **AGENTS.md — button-based flow for suggest_topic:** Replaced two-turn flow with single-turn: LLM uses `suggest_topic`, system shows ✅/❌ buttons, button callback creates topic + concepts. LLM does NOT handle Turn 2. Added concrete JSON example with `<!-- DO NOT REMOVE -->` to prevent hallucinated structures (same class of fix as §1.1/§1.2). Sharpened "matches existing topic" definition to prevent shoehorning concepts into tangentially related topics.
-
-3. **`SuggestTopicConfirmView` (views.py) + shared accept logic (tools.py):** New view modeled after `AddConceptConfirmView`. Accept button calls `execute_suggest_topic_accept()` — a shared helper that creates topic via `add_topic`, retrieves topic_id from session stash, then creates each concept under it. Both the view callback and the text-reply handler in `bot.py` call this same function (DRY). Chat history records `[confirmed: add topic "X"]` / `[declined: add topic "X"]` with topic title for LLM context.
-
-4. **Unified `_pending_confirmations` dict (bot.py):** Merged `_pending_concepts` into `_pending_confirmations` — single dict handling both `add_concept` and `suggest_topic`. Dispatches by `action_data.get('action')` to create the right view type. Interception in `_handle_user_message` extended to catch both action types.
-
-5. **Silent phantom-add detection (pipeline.py):** Regex guard in `execute_llm_response` logs a warning when a REPLY contains "Added/Created concept/topic" without a JSON action. Log-only — no user-facing disclaimer to avoid false positives on educational content.
-
-**Session stash pattern:** `_handle_add_topic` now stashes `last_added_topic_id` via `db.set_session()` — consistent with `_handle_add_concept`'s `last_added_concept_id` (§6). The `execute_suggest_topic_accept` helper retrieves this instead of parsing result strings.
-
-**`_handle_suggest_topic` stays for non-Discord paths:** The function is only reached when not intercepted (API/CLI). Discord path intercepts before `execute_llm_response` runs.
-
----
-
-## 11. Modular Skill Loading & Session Isolation
-
-### 11.1 AGENTS.md split into data/skills/ (conditional loading)
-**Date:** 2026-03-20
-
-**Problem:** The monolithic `AGENTS.md` (~690 lines, ~5500 tokens) was sent in full on every LLM call regardless of mode. Maintenance mode received quiz instructions it didn't need; review-check received CRUD actions it would never use. As the prompt grows, this wastes tokens and increases noise.
-
-**Design:** Inspired by OpenAI's "Harness Engineering" article (progressive disclosure, conditional skill loading). Split into 4 skill files in `data/skills/`:
-
-| File | Lines | Loaded for |
-|---|---|---|
-| `core.md` | ~155 | All modes (interactive, review, maintenance) |
-| `quiz.md` | ~200 | Interactive + review |
-| `knowledge.md` | ~170 | Interactive + maintenance |
-| `maintenance.md` | ~50 | Maintenance only |
-
-**Skill sets:**
 ```
 interactive (COMMAND/REPLY) → core + quiz + knowledge
 review (REVIEW-CHECK)       → core + quiz
 maintenance (MAINTENANCE)   → core + maintenance + knowledge
 ```
 
-**Implementation in pipeline.py:**
-- `SKILL_SETS` dict maps skill set name → list of skill file names
-- `_mode_to_skill_set(mode)` maps mode strings → skill set names
-- `_get_base_prompt(skill_set)` reads and concatenates skill files + preferences.md, cached per skill set with per-file mtime checks for hot-reload
-- `build_system_prompt(persona, mode)` now accepts `mode`, derives skill set, passes to `_get_base_prompt()`
-- Cache keyed on `(persona, skill_set)` instead of just `persona`
-- `_call_llm()` and `_call_llm_followup()` thread `mode` to `build_system_prompt()`
+`pipeline.py`: `SKILL_SETS` dict → `_mode_to_skill_set()` → `_get_base_prompt(skill_set)` with per-file mtime hot-reload. Cache keyed on `(persona, skill_set)`.
 
-**`AGENTS.md` is now a pointer file** (~25 lines) — references `data/skills/` and describes the loading structure. The LLM never reads this file at runtime; it reads the assembled skill files instead.
+**`AGENTS.md` is a pointer file** (~25 lines) — coding-agent entry point, not read by runtime LLM.
 
-**Backward compatibility:** `build_system_prompt()` defaults to `mode="command"` (interactive skill set), so callers that don't pass mode get the same behavior as before.
+**Session isolation:** Maintenance and review-check modes create dedicated sessions. Interactive modes share `_get_conv_session()` with 5-min idle timeout.
 
-### 11.2 Maintenance mode bug fix
-**Date:** 2026-03-20
+---
 
-**Bug:** `call_maintenance_loop()` passed `mode="command"` in both its main loop and final summary call. This meant `build_lightweight_context()` mode checks never triggered for maintenance, and after the skill split, maintenance would receive interactive skills instead of maintenance skills.
+## Historical (completed — reference only)
 
-**Fix:** Changed both occurrences to `mode="maintenance"`.
+**§H1 — Codebase Restructuring (2026-03-13):** Split `db.py` (1396 lines) → `db/` package (6 submodules). Split `pipeline.py` (750 lines) → `pipeline.py` + `parser.py` + `repair.py` + `dedup.py`. Fixed scheduler↔bot circular dependency via `services/state.py`. Backward compat maintained via re-exports.
 
-### 11.3 Session isolation for maintenance and review-check
-**Date:** 2026-03-20
-
-**Problem:** `call_with_fetch_loop()` used `_get_conv_session()` for all modes, meaning maintenance and review-check shared the interactive session. With `OpenAICompatibleProvider`, the system prompt is cached in the first message of a session — so if maintenance ran while an interactive session was warm, it would inherit the interactive system prompt (wrong skills).
-
-**Fix:** Maintenance and review-check modes now create dedicated sessions (`f"{mode}_{timestamp}"`) in `call_with_fetch_loop()` instead of sharing `_get_conv_session()`. Interactive modes (command/reply) continue using the shared conversation session with 5-minute idle timeout.
+**§H2 — FastAPI Backend & Project Restructuring (2026-03-15):** Created `api.py` as thin FastAPI wrapper using same pipeline. Moved `context.py`, `tools.py` → `services/`. Moved docs → `docs/`. Moved scripts → `scripts/`. Set up standalone git repo with `.env`-based config.

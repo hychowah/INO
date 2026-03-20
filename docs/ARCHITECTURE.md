@@ -76,7 +76,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/skills/quiz.md` | ~200 | Quiz skill — quiz/assess actions, scoring rubric, adaptive quiz evolution (interactive + review) |
 | `data/skills/knowledge.md` | ~170 | Knowledge skill — topic/concept CRUD, casual Q&A, overlap detection (interactive + maintenance) |
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
-| `preferences.md` | ~20 | User learning preferences (interests, style) |
+| `data/preferences.md` | ~20 | User learning preferences (interests, style) |
 | `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
 | `context.py` | ~370 | Prompt/context construction — builds the dynamic context injected into every LLM call |
@@ -113,7 +113,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 The LLM (via AGENTS.md) makes **all** decisions:
 - What to teach, when to quiz, how to adapt difficulty
 - Whether to create topics/concepts from casual conversation
-- How to assess answers (SM-2 quality 0–5)
+- How to assess answers (score-based, 0–100)
 - When to restructure the knowledge graph (merge topics, split oversized ones)
 - What remarks to write for its own future self
 
@@ -295,9 +295,9 @@ concepts
   ├── id (PK)
   ├── title
   ├── description
-  ├── mastery_level    (0–5, SM-2)
-  ├── ease_factor      (float, SM-2, default 2.5)
-  ├── interval_days    (SM-2 review interval)
+  ├── mastery_level    (0–100, score-based)
+  ├── ease_factor      (float, frozen — not used)
+  ├── interval_days    (exponential: e^(score×0.05))
   ├── next_review_at   (ISO datetime)
   ├── last_reviewed_at
   ├── review_count
@@ -319,7 +319,7 @@ review_log (audit trail of every quiz interaction)
   ├── concept_id → concepts.id
   ├── question_asked
   ├── user_response
-  ├── quality        (0–5, SM-2)
+  ├── quality        (0–5, LLM-assessed)
   ├── llm_assessment
   └── reviewed_at
 ```
@@ -354,7 +354,6 @@ conversations
 |:---------|:--------|
 | `build_lightweight_context(mode)` | Assembles conditional context based on mode: COMMAND/REPLY get full context (topic map, due, stats, chat); REVIEW-CHECK gets only due concepts; MAINTENANCE returns empty. Skips all sections when DB is empty. |
 | `build_prompt_context(text, mode)` | Wraps lightweight context + mode declaration. Note: user message is NOT included (pipeline appends it separately to avoid duplication). |
-| `build_full_prompt(text, mode)` | Includes AGENTS.md + preferences.md content inline. Used by the CLI for standalone testing. |
 | `format_fetch_result(data)` | Formats fetch data (topic/concept/search) into markdown. Caps concept remarks to 3, truncates review text to 200 chars. |
 | `build_maintenance_context()` | Runs `db.get_maintenance_diagnostics()` and formats the diagnostic report. |
 
@@ -378,7 +377,7 @@ conversations
 | `unlink_concept` | `_handle_unlink_concept` | `db.unlink_concept_from_topic()` |
 | `remark` | `_handle_remark` | `db.add_remark()` |
 | `quiz` | `_handle_quiz` | Passthrough (question is in `message`) |
-| `assess` | `_handle_assess` | `db.add_review()` + SM-2 update |
+| `assess` | `_handle_assess` | `db.add_review()` + score update |
 | `suggest_topic` | `_handle_suggest_topic` | Formats suggestion (no DB write) |
 | `none` / `reply` | `_handle_none` | Passthrough |
 
@@ -460,17 +459,19 @@ The LLM must respond in exactly one of these formats (enforced by AGENTS.md):
 
 ---
 
-## Spaced Repetition (SM-2)
+## Spaced Repetition (Score-Based)
 
-The SM-2 algorithm is implemented as a collaboration between the LLM and the database:
+Replaced SM-2 with an asymmetric score system (0–100). See DEVNOTES.md §3 for full details.
 
-- **LLM decides** the quality score (0–5) based on the user's answer, guided by the SM-2 rubric in AGENTS.md
-- **LLM calculates** new `ease_factor` and `interval_days` per the rubric
-- **LLM outputs** an `assess` action with `quality`, `new_ease_factor`, `new_interval_days`
-- **tools.py** writes the review log and updates the concept's scheduling fields via `db.add_review()`
-- **db.py** handles the actual SQL update + sets `next_review_at`
+- **LLM decides** quality (0–5) and `question_difficulty` (0–100)
+- **Code calculates** score delta based on gap (difficulty − current score) with asymmetric rules:
+  - Correct: score increases (bigger gain for harder questions)
+  - Wrong + above level: no penalty (probe)
+  - Wrong + at/below level: proportional decrease
+- **`tools.py`** writes the review log and updates score/interval via `db.add_review()`
+- **Interval:** `max(1, round(e^(score × 0.05)))` — exponential spacing
 
-Initial values for new concepts: mastery=0, ease=2.5, interval=1 day.
+Initial values for new concepts: score=0, interval=1 day. `ease_factor` column frozen (not used).
 
 ---
 

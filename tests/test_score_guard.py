@@ -4,7 +4,7 @@ Verifies that mastery_level, ease_factor, interval_days, next_review_at,
 last_reviewed_at, and review_count are stripped from update_concept when
 the action source is 'maintenance', but allowed from other sources.
 
-See DEVNOTES.md §7 for bug history.
+See DEVNOTES.md §6 for bug history.
 
 Run:  pytest tests/test_score_guard.py -v
 """
