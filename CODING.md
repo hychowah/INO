@@ -44,6 +44,7 @@ ROOT
 │   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
 │   ├── tools.py           # Action executor: maps LLM verbs → DB calls
 │   ├── context.py         # Prompt builder: dynamic context for LLM calls
+│   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── llm.py             # LLM provider abstraction (kimi-cli, OpenAI-compat)
 │   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
@@ -54,8 +55,9 @@ ROOT
 │
 ├── db/                    # Database layer (SQLite)
 │   ├── core.py            # Connections, init, migrations, datetime utils
-│   ├── topics.py          # Topic CRUD, topic maps
-│   ├── concepts.py        # Concept CRUD, search, detail views, graph data
+│   ├── topics.py          # Topic CRUD, topic maps; vector sync hooks
+│   ├── concepts.py        # Concept CRUD, search, detail views; vector sync hooks
+│   ├── vectors.py         # Qdrant wrapper (upsert/delete/search, find_nearest, reindex_all)
 │   ├── relations.py       # Concept↔concept relations
 │   ├── reviews.py         # Review log, remarks
 │   ├── chat.py            # Chat history, session state
@@ -63,7 +65,7 @@ ROOT
 │   ├── diagnostics.py     # Maintenance diagnostics
 │   ├── proposals.py       # Maintenance action proposals (user approval)
 │   ├── action_log.py      # Action audit log
-│   └── __init__.py        # Re-exports all public functions
+│   └── __init__.py        # Re-exports all public functions; VECTORS_AVAILABLE flag
 │
 ├── tests/                 # pytest test suite
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
@@ -75,6 +77,8 @@ ROOT
 │   ├── index.md
 │   └── plans/             # Feature plans (mobile-conversion.md, concept-relations.md)
 ├── scripts/               # start.bat, start_api.bat, agent.py (legacy CLI)
+│   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
+│   └── test_similarity.py # Configurable similarity test harness (tune thresholds)
 └── .env                   # Secrets (git-ignored)
 ```
 
@@ -122,6 +126,22 @@ from db.core import _conn, _now_iso, KNOWLEDGE_DB
 
 ---
 
+## How to Test Vector Similarity
+
+Before deploying and before tuning thresholds, run the interactive harness:
+```bash
+python scripts/test_similarity.py              # all groups
+python scripts/test_similarity.py --group steel  # one group
+python scripts/test_similarity.py --list         # list groups
+```
+Add your own concept pairs at the bottom of `scripts/test_similarity.py` in the `TEST_SETS` list. Use the `"Title — description"` format (same as what the real system embeds).
+
+Key thresholds (all in `config.py`, all overridable via env vars):
+- `SIMILARITY_THRESHOLD_DEDUP` (0.92) — blocks near-duplicate `add_concept`
+- `SIMILARITY_THRESHOLD_RELATION` (0.50) — minimum for relation candidate suggestions
+
+---
+
 ## How to Add a New Action
 
 1. **`services/tools.py`** — Write `_handle_<name>(params: dict) -> tuple[str, Any]`:
@@ -156,6 +176,7 @@ from db.core import _conn, _now_iso, KNOWLEDGE_DB
 1. Put it in the appropriate `db/*.py` submodule
 2. Add it to the `db/__init__.py` re-exports
 3. Call it as `db.new_function()` from anywhere
+4. If it adds/updates/deletes a concept or topic, call `_vector_upsert()` or `_vector_delete()` after the SQL write (best-effort, wrapped in try/except)
 
 ---
 
@@ -191,6 +212,11 @@ Tests use **pytest** (run from the venv):
 python -m pytest tests/ -v            # all tests
 python -m pytest tests/test_llm.py -v # single file
 ```
+
+**Vector store tests** (`tests/test_vectors.py`) are automatically skipped when `qdrant-client` is not installed — `pytest.importorskip("qdrant_client")` at module top.
+
+**Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store` — no model or Qdrant needed for the rest of the suite.
+
 Some older test files (e.g. `test_dedup.py`) are still manual scripts
 (`python tests/test_dedup.py`), but newer tests use proper pytest
 classes, fixtures, and assertions.

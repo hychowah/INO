@@ -22,6 +22,7 @@
 9. [JSON Parser](#9-json-parser)
 10. [Phantom-Add Prevention](#10-phantom-add-prevention)
 11. [Modular Skill Loading](#11-modular-skill-loading)
+12. [Hybrid Vector Search & Multi-Quiz](#12-hybrid-vector-search--multi-quiz)
 
 ---
 
@@ -186,6 +187,28 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **`AGENTS.md` is a pointer file** (~25 lines) — coding-agent entry point, not read by runtime LLM.
 
 **Session isolation:** Maintenance and review-check modes create dedicated sessions. Interactive modes share `_get_conv_session()` with 5-min idle timeout.
+
+---
+
+## 12. Hybrid Vector Search & Multi-Quiz
+
+**What was added:** Qdrant embedded vector store + sentence-transformers alongside SQLite. Not classical RAG — no LLM prompt stuffing. Vector similarity is used for search, dedup, relation candidates, and multi-concept quiz clustering.
+
+**Key design decisions:**
+- **Best-effort, non-fatal:** every vector call is wrapped in `try/except`. If `qdrant-client` or the model is absent, FTS5/LIKE fallback activates silently. `db.VECTORS_AVAILABLE` flag for runtime detection.
+- **Lazy model load:** `services/embeddings.py` loads `all-mpnet-base-v2` on first call (~100–200ms on CPU, ~420MB download once). Tests inject a mock instead.
+- **No SQLite schema changes:** Qdrant stores its own files in `data/vectors/`. Existing `knowledge.db` is untouched.
+- **Sync hooks, not triggers:** `_vector_upsert()` / `_vector_delete()` are called at the end of each CRUD function in `db/concepts.py` + `db/topics.py`. SQL always writes first.
+- **Fetch dispatch order bug fixed:** `_handle_fetch()` originally checked `concept_id` before `cluster` — cluster calls never reached `_handle_fetch_cluster()`. Cluster check moved first.
+
+**Threshold tuning:** Use `python scripts/test_similarity.py` to measure real cosine scores before changing `SIMILARITY_THRESHOLD_DEDUP` (0.92) or `SIMILARITY_THRESHOLD_RELATION` (0.5). Technical sub-concepts (e.g. 304 vs 316 stainless) typically score 0.88–0.94 — well below the dedup threshold when descriptions are distinct.
+
+**Multi-quiz session state:**
+- `multi_quiz` → stores `active_concept_ids` (JSON) in session
+- `multi_assess` → scores each concept independently, then clears `active_concept_ids` + `active_concept_id`
+- `context.py` reads `active_concept_ids` first; falls back to single `active_concept_id`
+
+**Migration:** First deploy with existing data requires `python scripts/migrate_vectors.py` once. New writes auto-sync.
 
 ---
 
