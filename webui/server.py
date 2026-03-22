@@ -617,6 +617,36 @@ def page_concept_detail(concept_id: int) -> str:
       </table>
     </div>"""
 
+    # Relations
+    relations = db.get_relations(concept_id)
+    RELATION_COLORS = {
+        'builds_on': '#4CAF50', 'contrasts_with': '#FF9800',
+        'commonly_confused': '#F44336', 'applied_together': '#2196F3',
+        'same_phenomenon': '#9C27B0',
+    }
+    if relations:
+        rel_rows = ""
+        for rel in relations:
+            rtype = rel['relation_type']
+            color = RELATION_COLORS.get(rtype, 'var(--text2)')
+            label = rtype.replace('_', ' ')
+            note_html = f'<div style="font-size:12px;color:var(--text2);margin-top:2px">{rel["note"]}</div>' if rel.get('note') else ''
+            rel_rows += f"""<div class="relation-row">
+              <a href="/concept/{rel['other_concept_id']}">{rel['other_title']}</a>
+              <span class="relation-badge" style="background-color:{color}">{label}</span>
+              {score_bar(rel['other_mastery'])}
+              {note_html}
+            </div>"""
+        relations_html = f"""<div class="section">
+      <h4>Relations ({len(relations)})</h4>
+      {rel_rows}
+    </div>"""
+    else:
+        relations_html = """<div class="section">
+      <h4>Relations (0)</h4>
+      <p style="color:var(--text2);font-size:13px">No related concepts yet.</p>
+    </div>"""
+
     # Remark summary (cached)
     remark_summary = detail.get('remark_summary', '')
     remark_updated = detail.get('remark_updated_at', '')
@@ -665,6 +695,7 @@ def page_concept_detail(concept_id: int) -> str:
     <h2 style="margin:12px 0 4px">{detail['title']}</h2>
     <p style="color:var(--text2);margin-bottom:16px">{detail.get('description') or ''}</p>
     {info_html}
+    {relations_html}
     <div class="section">
       <h4>Remarks ({len(remarks)})</h4>
       {summary_html}
