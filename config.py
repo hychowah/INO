@@ -108,6 +108,8 @@ LLM_MODEL = os.environ.get("LEARN_LLM_MODEL")                  # e.g. "grok-3", 
 LLM_TEMPERATURE = float(os.environ["LEARN_LLM_TEMPERATURE"]) if os.environ.get("LEARN_LLM_TEMPERATURE") else None
 LLM_MAX_TOKENS = int(os.environ["LEARN_LLM_MAX_TOKENS"]) if os.environ.get("LEARN_LLM_MAX_TOKENS") else 4096
 LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "40000"))
+# Thinking mode for models that support it (e.g. kimi-k2.5): "enabled" | "disabled" | None (use model default)
+LLM_THINKING = os.environ.get("LEARN_LLM_THINKING")  # e.g. "disabled"
 
 
 # ============================================================================

@@ -212,6 +212,7 @@ class OpenAICompatibleProvider:
         model: str,
         temperature: float | None = None,
         max_history_tokens: int = 40_000,
+        thinking: str | None = None,
     ):
         try:
             from openai import AsyncOpenAI
@@ -225,6 +226,7 @@ class OpenAICompatibleProvider:
         self._model = model
         self._temperature = temperature
         self._max_history_tokens = max_history_tokens
+        self._thinking = thinking  # "enabled", "disabled", or None
 
         # session_name → (messages list, last_used timestamp)
         self._sessions: dict[str, tuple[list[dict], float]] = {}
@@ -259,6 +261,8 @@ class OpenAICompatibleProvider:
                 kwargs["temperature"] = self._temperature
             if config.LLM_MAX_TOKENS:
                 kwargs["max_tokens"] = config.LLM_MAX_TOKENS
+            if self._thinking:
+                kwargs["extra_body"] = {"thinking": {"type": self._thinking}}
 
             response = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:
@@ -405,12 +409,14 @@ def get_provider() -> LLMProvider:
                 retryable=False,
             )
 
+        thinking = getattr(config, "LLM_THINKING", None)
         _provider_instance = OpenAICompatibleProvider(
             base_url=base_url,
             api_key=api_key,
             model=model,
             temperature=temperature,
             max_history_tokens=max_tokens,
+            thinking=thinking,
         )
         logger.info(f"LLM provider: openai_compat ({model} @ {base_url})")
 
