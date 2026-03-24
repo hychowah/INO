@@ -203,6 +203,7 @@ async def _send_review_reminder(pending: dict):
         # Re-set active_concept_id so the assess pipeline knows which
         # concept the user's eventual reply is about
         db.set_session('active_concept_id', str(cid))
+        db.set_session('quiz_anchor_concept_id', str(cid))
 
         # Update pending state (increment counter, reset timer)
         _update_pending_reminder(pending)
@@ -246,6 +247,7 @@ async def _send_review_quiz(payload: str):
             # Set active concept for subsequent assess action
             if cid:
                 db.set_session('active_concept_id', str(cid))
+                db.set_session('quiz_anchor_concept_id', str(cid))
 
             review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
 

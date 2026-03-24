@@ -144,6 +144,7 @@ def _append_active_quiz_context(parts: list) -> None:
             if elapsed > timeout_minutes:
                 db.set_session('active_concept_id', None)
                 db.set_session('active_concept_ids', None)
+                db.set_session('quiz_anchor_concept_id', None)
                 return
         except (ValueError, TypeError):
             import logging as _log
@@ -153,6 +154,7 @@ def _append_active_quiz_context(parts: list) -> None:
             )
             db.set_session('active_concept_id', None)
             db.set_session('active_concept_ids', None)
+            db.set_session('quiz_anchor_concept_id', None)
             return
 
     # Check for multi-concept quiz first
@@ -177,14 +179,16 @@ def _append_active_quiz_context(parts: list) -> None:
         except (ValueError, TypeError):
             pass
 
-    # Single-concept quiz fallback
-    active_cid = db.get_session('active_concept_id')
+    # Single-concept quiz — prefer quiz anchor (sacred) over active_concept_id
+    # which may have been overwritten by fetch.  See DEVNOTES §16.
+    anchor_cid = db.get_session('quiz_anchor_concept_id')
+    active_cid = anchor_cid or db.get_session('active_concept_id')
     if active_cid:
         concept = db.get_concept(int(active_cid))
         if concept:
             parts.append(
                 f"## Active Quiz Context\n"
-                f"Last fetched/quizzed concept: **#{active_cid} — {concept['title']}**. "
+                f"Quizzed concept: **#{active_cid} — {concept['title']}**. "
                 f"Use this concept_id for `assess` ONLY if the user's message actually "
                 f"answers the quiz question. If they ask an unrelated question or change "
                 f"topic, answer with REPLY: instead — do NOT assess. The quiz stays active "

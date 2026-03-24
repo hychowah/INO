@@ -26,6 +26,7 @@
 13. [Topic Hierarchy Auto-Parenting](#13-topic-hierarchy-auto-parenting)
 14. [Two-Prompt Scheduled Quiz Pipeline](#14-two-prompt-scheduled-quiz-pipeline-migration-11)
 15. [Quiz Intent Detection & Context Lifecycle](#15-quiz-intent-detection--context-lifecycle)
+16. [Quiz Anchor Concept ID](#16-quiz-anchor-concept-id)
 
 ---
 
@@ -267,6 +268,32 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **Context injection text** (`_append_active_quiz_context()`): reworded to "Use this concept_id for assess ONLY if the user's message actually answers the quiz question."
 
 **Key files:** `data/skills/core.md` (intent detection rules), `data/skills/quiz.md` (assess guard), `services/context.py` (staleness + dedup), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`), `config.py` (`QUIZ_STALENESS_TIMEOUT_MINUTES`), `db/chat.py` (`get_session_updated_at`).
+
+---
+
+## 16. Quiz Anchor Concept ID
+
+**Bug:** During an active quiz, the LLM sometimes fetched a related concept for comparison (e.g. user answered about "Decorator pattern" mentioning lambdas, LLM fetched "Lambda Captures"). The fetch loop in `pipeline.py` unconditionally overwrote `active_concept_id` with the fetched concept's ID, causing the subsequent `assess` action to evaluate against the wrong concept. The §15 intent-detection fix handled *new questions* vs *quiz answers*, but this bug occurs when the user IS answering the quiz — just confusingly.
+
+**Root cause (3 layers):**
+1. **Fetch loop overwrite** (`pipeline.py`): `active_concept_id` was updated on every fetch, even during active quiz processing.
+2. **No quiz-specific anchor**: `active_concept_id` served double duty — both "concept being discussed" and "concept being quizzed" — with no way to distinguish enrichment fetches from topic pivots.
+3. **LLM prompt ambiguity** (`quiz.md`): assess docs said "use that ID unless the conversation has moved to a different topic," which the LLM misinterpreted when it fetched a comparison concept.
+
+**Fix — `quiz_anchor_concept_id` lifecycle key:**
+
+- **Set** by `_handle_quiz()` in `tools.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Stored alongside `active_concept_id`.
+- **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
+- **Fallback chain** in `_handle_assess()` in `tools.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
+- **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees.
+- **Cleared** in `pipeline.py` alongside other quiz state by `_QUIZ_CLEARING_ACTIONS` (`assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`). Also cleared by staleness timeout in `context.py`.
+- **Not used** by multi-quiz flows (those use separate `active_concept_ids` key).
+
+**Prompt hardening:**
+- `quiz.md`: assess docs changed to "Always use the concept_id from the 'Active Quiz Context' section" — removes ambiguous "unless conversation moved" language.
+- `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
+
+**Key files:** `services/tools.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`.
 
 ---
 

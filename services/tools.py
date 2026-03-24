@@ -562,8 +562,12 @@ def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     cid = params.get('concept_id')
     message = params.get('message', 'Quiz question sent.')
 
-    # Embed concept_id in the message so chat history preserves it for assess
+    # Anchor quiz concept in session state so assess fallback and context
+    # injection use the correct concept even if fetch overwrites
+    # active_concept_id mid-loop.  See DEVNOTES §16.
     if cid is not None:
+        db.set_session('active_concept_id', str(cid))
+        db.set_session('quiz_anchor_concept_id', str(cid))
         message += f"\n_(quiz on concept #{cid})_"
 
     return ('reply', message)
@@ -594,6 +598,8 @@ def _handle_multi_quiz(params: Dict) -> Tuple[str, Any]:
     import json
     db.set_session('active_concept_ids', json.dumps(valid_ids))
     db.set_session('active_concept_id', str(valid_ids[0]))  # primary
+    # Clear any single-quiz anchor — mutually exclusive states (§16)
+    db.set_session('quiz_anchor_concept_id', None)
 
     # Embed concept IDs in message for chat history
     ids_str = ', '.join(f'#{cid}' for cid in valid_ids)
@@ -749,7 +755,15 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     # Get current concept state
     concept = db.get_concept(cid)
     if not concept:
-        # Fallback 1: check session state for active quiz concept
+        # Fallback 1: quiz anchor (sacred, protected from fetch overwrites)
+        anchor_cid = db.get_session('quiz_anchor_concept_id')
+        if anchor_cid:
+            concept = db.get_concept(int(anchor_cid))
+            if concept:
+                cid = int(anchor_cid)
+
+    if not concept:
+        # Fallback 2: active_concept_id (may have been overwritten by fetch)
         active_cid = db.get_session('active_concept_id')
         if active_cid:
             concept = db.get_concept(int(active_cid))
@@ -757,7 +771,7 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
                 cid = int(active_cid)
 
     if not concept:
-        # Fallback 2: search chat history for the last quiz concept_id
+        # Fallback 3: search chat history for the last quiz concept_id
         history = db.get_chat_history(limit=6)
         import re
         for msg in reversed(history):

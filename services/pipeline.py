@@ -278,6 +278,7 @@ async def execute_action(action_data: dict) -> str:
     if action in _QUIZ_CLEARING_ACTIONS and msg_type != 'error':
         db.set_session('active_concept_id', None)
         db.set_session('active_concept_ids', None)
+        db.set_session('quiz_anchor_concept_id', None)
 
     if msg_type == 'error':
         return f"REPLY: ⚠️ {result}"
@@ -473,8 +474,13 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
             logger.info(f"Fetch loop iteration {iteration + 1}: {fetch_params}")
 
             if 'concept_id' in fetch_params:
-                db.set_session('active_concept_id',
-                               str(fetch_params['concept_id']))
+                # Don't set active_concept_id while a quiz is pending —
+                # the quiz anchor must remain untouched for assess.
+                # Also protect multi-quiz flows.  See DEVNOTES §16.
+                if (not db.get_session('quiz_anchor_concept_id')
+                        and not db.get_session('active_concept_ids')):
+                    db.set_session('active_concept_id',
+                                   str(fetch_params['concept_id']))
 
             msg_type, fetch_data = tools.execute_action('fetch', fetch_params)
 
