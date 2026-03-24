@@ -64,6 +64,10 @@ SESSION_TIMEOUT_MINUTES = 15
 # Review nag cooldown — don't re-send the same concept within this many hours
 REVIEW_NAG_COOLDOWN_HOURS = 4
 
+# Quiz staleness timeout — auto-clear active quiz context after this many
+# minutes of inactivity.  Excludes REVIEW-CHECK mode (intentional quizzes).
+QUIZ_STALENESS_TIMEOUT_MINUTES = int(os.environ.get("LEARN_QUIZ_STALENESS_TIMEOUT", "15"))
+
 # Max reminders for an unanswered review before moving on to the next concept
 REVIEW_REMINDER_MAX = int(os.environ.get("LEARN_REVIEW_REMINDER_MAX", "3"))
 

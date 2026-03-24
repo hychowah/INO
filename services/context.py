@@ -130,8 +130,30 @@ def build_lightweight_context(mode: str = "command") -> str:
 
 def _append_active_quiz_context(parts: list) -> None:
     """If there's an active quiz concept (single or multi), inject it so the LLM
-    knows which concept_id(s) to use for assess."""
+    knows which concept_id(s) to use for assess.
+    Auto-clears stale quiz context after QUIZ_STALENESS_TIMEOUT_MINUTES."""
     import json as _json
+
+    # --- Staleness timeout safety net ---
+    timeout_minutes = getattr(config, 'QUIZ_STALENESS_TIMEOUT_MINUTES', 15)
+    updated_at_str = db.get_session_updated_at('active_concept_id')
+    if updated_at_str:
+        try:
+            updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
+            elapsed = (datetime.now() - updated_at).total_seconds() / 60
+            if elapsed > timeout_minutes:
+                db.set_session('active_concept_id', None)
+                db.set_session('active_concept_ids', None)
+                return
+        except (ValueError, TypeError):
+            import logging as _log
+            _log.getLogger('context').warning(
+                f"Failed to parse quiz timestamp '{updated_at_str}', "
+                "clearing stale quiz context as fallback."
+            )
+            db.set_session('active_concept_id', None)
+            db.set_session('active_concept_ids', None)
+            return
 
     # Check for multi-concept quiz first
     multi_ids_str = db.get_session('active_concept_ids')
@@ -163,15 +185,32 @@ def _append_active_quiz_context(parts: list) -> None:
             parts.append(
                 f"## Active Quiz Context\n"
                 f"Last fetched/quizzed concept: **#{active_cid} — {concept['title']}**. "
-                f"Use this concept_id for `assess` actions unless the conversation "
-                f"has clearly moved to a different topic.\n"
+                f"Use this concept_id for `assess` ONLY if the user's message actually "
+                f"answers the quiz question. If they ask an unrelated question or change "
+                f"topic, answer with REPLY: instead — do NOT assess. The quiz stays active "
+                f"for when they return.\n"
             )
 
 
 def _append_chat_history(parts: list) -> None:
     """Append compressed chat history to context parts.
-    Newest 4 messages: 600 chars, older 8: 150 chars (12 total)."""
-    history = db.get_chat_history(limit=12)
+    Newest 4 messages: 600 chars, older 8: 150 chars (12 total).
+
+    For session-based LLM providers (OpenAI-compat) the two most recent
+    messages are already in the provider's session memory, so we skip them
+    here to avoid double reinforcement of quiz/topic context.
+    """
+    from services.llm import get_provider
+    provider = get_provider()
+    session_based = hasattr(provider, '_sessions')
+
+    limit = 14 if session_based else 12
+    history = db.get_chat_history(limit=limit)
+
+    # Drop the 2 newest messages when the provider already has them in-session
+    if session_based and len(history) > 2:
+        history = history[:-2]
+
     parts.append("## Recent Conversation")
     if history:
         for i, msg in enumerate(history):

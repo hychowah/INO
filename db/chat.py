@@ -78,6 +78,14 @@ def get_session(key: str) -> Optional[str]:
     return row[0] if row else None
 
 
+def get_session_updated_at(key: str) -> Optional[str]:
+    """Get the updated_at timestamp for a session state key, or None."""
+    conn = sqlite3.connect(CHAT_DB)
+    row = conn.execute("SELECT updated_at FROM session_state WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 def clear_session():
     """Clear all session state."""
     conn = sqlite3.connect(CHAT_DB)

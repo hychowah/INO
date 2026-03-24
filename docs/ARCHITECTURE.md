@@ -147,7 +147,8 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │         ├── db.get_hierarchical_topic_map()
          │         ├── db.get_due_concepts(limit=5)
          │         ├── db.get_review_stats()
-         │         └── db.get_chat_history(limit=20)
+         │         ├── _append_chat_history()  (dedup: session-based providers skip 2 newest)
+         │         └── _append_active_quiz_context()  (auto-clears if stale > 15min)
          │
          ├─── Assemble prompt:
          │      "Read AGENTS.md at <path>"
@@ -184,6 +185,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │       pipeline.execute_action(action_data)
          │           → tools.execute_action(action, params)
          │               → db.<crud_operation>(...)
+         │           → if action in _QUIZ_CLEARING_ACTIONS: clear quiz context
          │
          ├── db.add_chat_message('user', text)
          ├── db.add_chat_message('assistant', result)

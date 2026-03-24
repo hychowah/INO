@@ -23,6 +23,9 @@
 10. [Phantom-Add Prevention](#10-phantom-add-prevention)
 11. [Modular Skill Loading](#11-modular-skill-loading)
 12. [Hybrid Vector Search & Multi-Quiz](#12-hybrid-vector-search--multi-quiz)
+13. [Topic Hierarchy Auto-Parenting](#13-topic-hierarchy-auto-parenting)
+14. [Two-Prompt Scheduled Quiz Pipeline](#14-two-prompt-scheduled-quiz-pipeline-migration-11)
+15. [Quiz Intent Detection & Context Lifecycle](#15-quiz-intent-detection--context-lifecycle)
 
 ---
 
@@ -104,7 +107,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 **Lesson:** When an action creates an entity whose ID is needed by a future turn, stash the ID in session state at creation time. Don't parse formatted result strings. Follow the existing stash pattern.
 
-**Why NOT `active_concept_id`?** That key powers "Active Quiz Context" — setting it after creation (not quiz) would mislead the LLM into phantom assessments.
+**Why NOT `active_concept_id`?** That key powers "Active Quiz Context" — setting it after creation (not quiz) would mislead the LLM into phantom assessments. Note: `active_concept_id` is now auto-cleared after `QUIZ_STALENESS_TIMEOUT_MINUTES` of inactivity, and also cleared when the LLM executes any action in `_QUIZ_CLEARING_ACTIONS` (see §15).
 
 ---
 
@@ -247,6 +250,23 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` table. Stores raw P1 JSON output for debugging/inspection. Displayed in webui concept detail page. Non-functional — purely for transparency.
 
 **Key files:** `services/pipeline.py` (`generate_quiz_question`, `package_quiz_for_discord`), `services/scheduler.py` (`_send_review_quiz`), `services/llm.py` (`get_reasoning_provider`), `services/context.py` (`build_quiz_generator_context`), `config.py` (REASONING_LLM_* vars).
+
+---
+
+## 15. Quiz Intent Detection & Context Lifecycle
+
+**Bug:** When a quiz was active and the user sent an unrelated question (e.g. "async vs thread" during an embeddings quiz), the LLM treated it as a quiz answer and assessed it. Three root causes: (1) no criteria in instructions for distinguishing quiz answers from new questions, (2) `active_concept_id` only cleared after `assess`, persisting indefinitely, (3) chat history duplicated in OpenAI-compat provider.
+
+**Fix (defense-in-depth, 3 layers):**
+
+1. **LLM instructions** (`core.md` MODE: REPLY → "Intent Detection During Active Quiz"): signal lists for quiz-answer vs new-question, decision rule ("if not answering quiz → REPLY: instead of assess"), worked examples. `quiz.md` assess docs reinforced with same rule.
+2. **Backend clearing** (`pipeline.py` `_QUIZ_CLEARING_ACTIONS`): quiz context clears after `assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`. NOT after `fetch`, `quiz`, `multi_quiz`, or plain REPLY:. Also clears `active_concept_ids` for multi-quiz.
+3. **Staleness timeout** (`context.py` `_append_active_quiz_context()`): checks `session_state.updated_at` via `db.get_session_updated_at()`. If elapsed > `QUIZ_STALENESS_TIMEOUT_MINUTES` (config, default 15 min), auto-clears and skips injection. Excludes REVIEW-CHECK mode (returns early before reaching this code).
+4. **Chat history dedup** (`context.py` `_append_chat_history()`): for session-based providers (OpenAI-compat), skips 2 most recent messages already in provider session memory. Reduces double reinforcement of quiz-topic context.
+
+**Context injection text** (`_append_active_quiz_context()`): reworded to "Use this concept_id for assess ONLY if the user's message actually answers the quiz question."
+
+**Key files:** `data/skills/core.md` (intent detection rules), `data/skills/quiz.md` (assess guard), `services/context.py` (staleness + dedup), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`), `config.py` (`QUIZ_STALENESS_TIMEOUT_MINUTES`), `db/chat.py` (`get_session_updated_at`).
 
 ---
 

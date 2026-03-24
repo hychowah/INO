@@ -46,6 +46,14 @@ SKILL_SETS: dict[str, list[str]] = {
     "quiz-packaging": ["core", "quiz"],
 }
 
+# Actions that clear active quiz context — the LLM moved on from the quiz.
+# quiz/multi_quiz are NOT here: they set new context that must persist for assess.
+# multi_assess clears in tools.py but is included for consistency.
+_QUIZ_CLEARING_ACTIONS = frozenset({
+    'assess', 'multi_assess',
+    'add_concept', 'suggest_topic', 'add_topic', 'remark',
+})
+
 # Actions that maintenance can execute without user confirmation.
 # Everything else is collected as a proposal for the user to approve.
 SAFE_MAINTENANCE_ACTIONS = frozenset({
@@ -265,9 +273,11 @@ async def execute_action(action_data: dict) -> str:
             if msg_type != 'error':
                 message = r_message
 
-    # Clear active concept after a successful assess (quiz cycle complete)
-    if action == 'assess' and msg_type != 'error':
+    # Clear active quiz context when the LLM chose a non-quiz action
+    # (quiz cycle complete, or intent shifted). See module-level constant.
+    if action in _QUIZ_CLEARING_ACTIONS and msg_type != 'error':
         db.set_session('active_concept_id', None)
+        db.set_session('active_concept_ids', None)
 
     if msg_type == 'error':
         return f"REPLY: ⚠️ {result}"

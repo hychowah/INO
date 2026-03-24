@@ -49,7 +49,7 @@ from db.reviews import (
 # Chat & Session
 from db.chat import (
     add_chat_message, get_chat_history, clear_chat_history,
-    set_session, get_session, clear_session,
+    set_session, get_session, get_session_updated_at, clear_session,
 )
 
 # Diagnostics

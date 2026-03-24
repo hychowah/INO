@@ -34,7 +34,7 @@ Generate and output one quiz question. The LLM writes the question in `message`.
 Judge the user's answer to a quiz question. Updates score + schedules next review.
 
 **Parameters:**
-- `concept_id` (int, required): **Check the "Active Quiz Context" section in your context** — it shows the last fetched/quizzed concept. Use that ID unless the conversation has moved to a different topic.
+- `concept_id` (int, required): **Check the "Active Quiz Context" section in your context** — it shows the last fetched/quizzed concept. Use that ID unless the conversation has moved to a different topic. **Before assessing, confirm the user's message actually answers the quiz question** (see "Intent Detection During Active Quiz" in the MODE: REPLY section for the full decision logic). **If it's an unrelated question, answer with REPLY: instead — do NOT force an assess. The quiz remains active for when they return.**
 - `quality` (int, required): 0–5 (see Quality Rubric below)
 - `question_difficulty` (int, required): 0–100, how hard was the question you asked? See **Difficulty Estimation** below.
 - `assessment` (string): Your feedback to the user
