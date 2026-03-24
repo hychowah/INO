@@ -111,6 +111,15 @@ LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "400
 # Thinking mode for models that support it (e.g. kimi-k2.5): "enabled" | "disabled" | None (use model default)
 LLM_THINKING = os.environ.get("LEARN_LLM_THINKING")  # e.g. "disabled"
 
+# --- Reasoning provider (optional, for scheduled quiz question generation) ---
+# If set, the reasoning model is used for Prompt 1 (question analysis/generation)
+# while the main provider handles Prompt 2 (personality packaging).
+# Falls back to the main provider if not configured.
+REASONING_LLM_BASE_URL = os.environ.get("LEARN_REASONING_LLM_BASE_URL")
+REASONING_LLM_API_KEY = os.environ.get("LEARN_REASONING_LLM_API_KEY")
+REASONING_LLM_MODEL = os.environ.get("LEARN_REASONING_LLM_MODEL")
+REASONING_LLM_THINKING = os.environ.get("LEARN_REASONING_LLM_THINKING")  # e.g. "enabled"
+
 
 # ============================================================================
 # VALIDATION
@@ -148,5 +157,8 @@ def print_config():
         print(f"  LLM Model      : {LLM_MODEL}")
         print(f"  LLM Base URL   : {LLM_API_BASE_URL}")
         print(f"  LLM API Key    : {'***' + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else '(not set)'}")
+    if REASONING_LLM_MODEL:
+        print(f"  Reasoning Model: {REASONING_LLM_MODEL}")
+        print(f"  Reasoning URL  : {REASONING_LLM_BASE_URL}")
     print(f"  Review Interval: {REVIEW_CHECK_INTERVAL_MINUTES} min")
     print(f"  Session Timeout: {SESSION_TIMEOUT_MINUTES} min")

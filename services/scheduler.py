@@ -101,6 +101,11 @@ async def _check_reviews():
 
     logger.debug("Running review-check...")
 
+    # Suppress if /review command is actively generating a quiz
+    if db.get_session('review_in_progress'):
+        logger.debug("Skipping review check — /review command in progress")
+        return
+
     # --- Handle pending (unanswered) review ---
     pending = _get_pending_review()
     if pending:
@@ -210,11 +215,12 @@ async def _send_review_reminder(pending: dict):
 
 async def _send_review_quiz(payload: str):
     """
-    Send a review quiz DM.
+    Send a review quiz DM using the two-prompt pipeline.
     payload format: concept_id|context_string
 
-    Calls the LLM to generate a quiz question, DMs it to the user,
-    then sets pending review state (AFTER confirmed send).
+    Prompt 1 (reasoning model): Generates the optimal question from pre-loaded data.
+    Prompt 2 (fast model): Packages it with persona voice and action JSON format.
+    Falls back to single-prompt flow if the two-prompt pipeline fails.
     """
     if not _bot or not _authorized_user_id:
         logger.error("Bot not initialized, can't send review")
@@ -226,24 +232,43 @@ async def _send_review_quiz(payload: str):
             logger.error(f"Could not find user {_authorized_user_id}")
             return
 
-        # Extract concept_id and title from payload for pending state
+        # Extract concept_id from payload for pending state
         try:
             cid = int(payload.split("|", 1)[0])
         except (ValueError, IndexError):
             cid = None
 
         try:
-            review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
-
             # Set action source for audit trail
             from services.tools import set_action_source
             set_action_source('scheduler')
 
-            llm_response = await pipeline.call_with_fetch_loop(
-                mode="reply",
-                text=review_text,
-                author=str(_authorized_user_id),
-            )
+            # Set active concept for subsequent assess action
+            if cid:
+                db.set_session('active_concept_id', str(cid))
+
+            review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
+
+            # --- Two-prompt pipeline (with fallback) ---
+            from services.llm import LLMError
+            try:
+                if cid:
+                    p1_result = await pipeline.generate_quiz_question(cid)
+                    llm_response = await pipeline.package_quiz_for_discord(
+                        p1_result, cid
+                    )
+                else:
+                    raise LLMError("No concept_id in payload", retryable=True)
+            except LLMError as e:
+                logger.warning(
+                    f"Two-prompt pipeline failed ({e}), "
+                    f"falling back to single-prompt flow"
+                )
+                llm_response = await pipeline.call_with_fetch_loop(
+                    mode="reply",
+                    text=review_text,
+                    author=str(_authorized_user_id),
+                )
 
             # Parse action JSON and extract human-readable message
             final_result = await pipeline.execute_llm_response(
@@ -252,6 +277,8 @@ async def _send_review_quiz(payload: str):
             _msg_type, message = pipeline.process_output(final_result)
 
             if message and message.strip():
+                # Store the actual question text for accurate review logging
+                db.set_session('last_quiz_question', message.strip())
                 await user.send(truncate_for_discord(
                     f"📚 **Learning Review**\n{message}"))
                 logger.info("Sent review DM")

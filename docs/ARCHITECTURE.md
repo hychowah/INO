@@ -76,6 +76,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/skills/quiz.md` | ~200 | Quiz skill — quiz/assess actions, scoring rubric, adaptive quiz evolution (interactive + review) |
 | `data/skills/knowledge.md` | ~170 | Knowledge skill — topic/concept CRUD, casual Q&A, overlap detection (interactive + maintenance) |
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
+| `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection, JSON output format (scheduled quiz P1 only) |
 | `data/preferences.md` | ~20 | User learning preferences (interests, style) |
 | `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
@@ -214,11 +215,26 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   scheduler._send_review_quiz(payload)
          │
          ▼
-  pipeline.call_with_fetch_loop(               ← async, calls kimi-cli
-      mode="reply",
-      text="[SCHEDULED_REVIEW] Generate a review quiz for: <payload>",
-      author=user_id
-  )
+  ┌─ Two-prompt pipeline (with fallback) ──────────────────────┐
+  │                                                            │
+  │  P1: pipeline.generate_quiz_question(concept_id)           │
+  │    Provider: REASONING_LLM_* (or main provider fallback)   │
+  │    System prompt: data/skills/quiz_generator.md             │
+  │    Input: concept detail + related concepts                │
+  │    Output: JSON {question, difficulty, question_type,      │
+  │             target_facet, reasoning, concept_ids}           │
+  │    Cached in: concepts.last_quiz_generator_output          │
+  │                       │                                    │
+  │                       ▼                                    │
+  │  P2: pipeline.package_quiz_for_discord(p1_result, cid)     │
+  │    Provider: main LLM provider                             │
+  │    Skill set: "quiz-packaging" (core + quiz)               │
+  │    Input: P1 JSON + concept context                        │
+  │    Output: quiz action with persona voice                  │
+  │                                                            │
+  │  Fallback: If P1 fails → pipeline.call_with_fetch_loop()   │
+  │            (single-prompt, same as before)                  │
+  └────────────────────────────────────────────────────────────┘
          │
          ▼
   DM user: "📚 Learning Review\n<quiz question>"

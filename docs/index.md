@@ -12,6 +12,7 @@
 | `data/skills/quiz.md` | Quiz/assess actions, scoring rubric, adaptive quiz evolution | Interactive + review modes |
 | `data/skills/knowledge.md` | Topic/concept CRUD, casual Q&A, overlap detection | Interactive + maintenance modes |
 | `data/skills/maintenance.md` | Maintenance mode behavioral rules, triage priorities | Maintenance mode only |
+| `data/skills/quiz_generator.md` | P1 question generation instructions for reasoning model | Scheduled quiz P1 only (not loaded via SKILL_SETS) |
 | `data/preferences.md` | User learning preferences | Every LLM call |
 | `data/personas/*.md` | Persona presets (mentor, coach, buddy) | Every LLM call (one active) |
 
@@ -28,9 +29,10 @@
 ## Skill Sets by Mode
 
 ```
-COMMAND / REPLY  → interactive → core + quiz + knowledge
-REVIEW-CHECK     → review      → core + quiz
-MAINTENANCE      → maintenance → core + maintenance + knowledge
+COMMAND / REPLY  → interactive    → core + quiz + knowledge
+REVIEW-CHECK     → review         → core + quiz
+MAINTENANCE      → maintenance    → core + maintenance + knowledge
+quiz-packaging   → quiz-packaging → core + quiz  (P2 scheduled quiz packaging)
 ```
 
 Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`.

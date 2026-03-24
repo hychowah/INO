@@ -295,3 +295,17 @@ User: "316L has molybdenum which helps with chloride resistance from the sea air
 → remark: "Solid on Mo/chloride connection. Next time: ask about weld-affected zones."
 → message: feedback + offer next question
 ```
+
+---
+
+## Packaging Pre-Generated Quiz Questions
+
+When you receive a message tagged `[SCHEDULED_REVIEW]` containing pre-generated question data (JSON with `question`, `difficulty`, `question_type`, etc.), your job is to **package** it — not generate a new question.
+
+**Rules:**
+- Output a `quiz` action with `concept_id` from the pre-generated data's `concept_ids` field
+- Place the question in the `message` field
+- You may lightly rephrase the question to match your persona's voice and tone
+- Do **NOT** change the question's scope, difficulty, or core intent
+- Do **NOT** generate a different question or fetch additional data
+- Add personality, emoji, and encouragement as you normally would

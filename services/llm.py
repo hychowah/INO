@@ -373,6 +373,7 @@ def _filter_stderr(stderr: str) -> str:
 # ============================================================================
 
 _provider_instance: LLMProvider | None = None
+_reasoning_provider_instance: LLMProvider | None = None
 
 
 def get_provider() -> LLMProvider:
@@ -428,3 +429,32 @@ def get_provider() -> LLMProvider:
         )
 
     return _provider_instance
+
+
+def get_reasoning_provider() -> LLMProvider:
+    """Return the reasoning LLM provider for quiz question generation.
+
+    Uses REASONING_LLM_* config if set, otherwise falls back to the
+    main provider. Safe to call even when reasoning config is absent."""
+    global _reasoning_provider_instance
+    if _reasoning_provider_instance is not None:
+        return _reasoning_provider_instance
+
+    base_url = getattr(config, "REASONING_LLM_BASE_URL", None)
+    api_key = getattr(config, "REASONING_LLM_API_KEY", None)
+    model = getattr(config, "REASONING_LLM_MODEL", None)
+
+    if not base_url or not api_key or not model:
+        logger.info("Reasoning provider not configured — using main provider")
+        _reasoning_provider_instance = get_provider()
+        return _reasoning_provider_instance
+
+    thinking = getattr(config, "REASONING_LLM_THINKING", None)
+    _reasoning_provider_instance = OpenAICompatibleProvider(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        thinking=thinking,
+    )
+    logger.info(f"Reasoning provider: openai_compat ({model} @ {base_url})")
+    return _reasoning_provider_instance

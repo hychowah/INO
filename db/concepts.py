@@ -134,10 +134,12 @@ def get_concept(concept_id: int) -> Optional[Dict]:
 def update_concept(concept_id: int, **kwargs) -> bool:
     """Update concept fields. Returns True if concept was found.
     Accepts: title, description, mastery_level, ease_factor, interval_days,
-             next_review_at, last_reviewed_at, review_count."""
+             next_review_at, last_reviewed_at, review_count,
+             last_quiz_generator_output."""
     allowed = {
         'title', 'description', 'mastery_level', 'ease_factor',
-        'interval_days', 'next_review_at', 'last_reviewed_at', 'review_count'
+        'interval_days', 'next_review_at', 'last_reviewed_at', 'review_count',
+        'last_quiz_generator_output',
     }
     fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not fields:
@@ -477,12 +479,13 @@ def get_concept_detail(concept_id: int) -> Optional[Dict]:
 
     # Cached summary (used by pipeline/context for LLM)
     summary_row = conn.execute(
-        "SELECT remark_summary, remark_updated_at FROM concepts WHERE id = ?",
+        "SELECT remark_summary, remark_updated_at, last_quiz_generator_output FROM concepts WHERE id = ?",
         (concept_id,)
     ).fetchone()
     if summary_row:
         concept['remark_summary'] = summary_row['remark_summary']
         concept['remark_updated_at'] = summary_row['remark_updated_at']
+        concept['last_quiz_generator_output'] = summary_row['last_quiz_generator_output']
 
     reviews = conn.execute("""
         SELECT id, question_asked, user_response, quality, llm_assessment, reviewed_at

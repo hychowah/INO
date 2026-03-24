@@ -234,6 +234,22 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 ---
 
+## 14. Two-Prompt Scheduled Quiz Pipeline (Migration 11)
+
+**Problem:** Single-prompt quiz generation gave the LLM too many competing responsibilities: analyze concept data, pick the right question type/difficulty, AND format output with persona voice.
+
+**Fix:** Split into two prompts:
+- **P1 (Reasoning model):** Stateless question generation. Uses `data/skills/quiz_generator.md` as system prompt. Receives concept detail + related concepts, outputs structured JSON (`question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`). Uses `REASONING_LLM_*` provider if configured, otherwise falls back to main provider.
+- **P2 (Fast model):** Packages P1 output with persona voice for Discord. Uses skill set `"quiz-packaging"` (core + quiz). Receives P1 JSON, outputs standard `quiz` action.
+
+**Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler falls back to single-prompt `call_with_fetch_loop()` — same behavior as before the change.
+
+**Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` table. Stores raw P1 JSON output for debugging/inspection. Displayed in webui concept detail page. Non-functional — purely for transparency.
+
+**Key files:** `services/pipeline.py` (`generate_quiz_question`, `package_quiz_for_discord`), `services/scheduler.py` (`_send_review_quiz`), `services/llm.py` (`get_reasoning_provider`), `services/context.py` (`build_quiz_generator_context`), `config.py` (REASONING_LLM_* vars).
+
+---
+
 ## Historical (completed — reference only)
 
 **§H1 — Codebase Restructuring (2026-03-13):** Split `db.py` (1396 lines) → `db/` package (6 submodules). Split `pipeline.py` (750 lines) → `pipeline.py` + `parser.py` + `repair.py` + `dedup.py`. Fixed scheduler↔bot circular dependency via `services/state.py`. Backward compat maintained via re-exports.

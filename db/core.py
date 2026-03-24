@@ -22,7 +22,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 # ============================================================================
@@ -460,6 +460,15 @@ def _run_migrations():
         conn.commit()
         conn.close()
         print("[LEARN DB] Migration 10: remark_summary cache column on concepts")
+
+    # --- Migration 11: last_quiz_generator_output cache column ---
+    if current < 11:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        if not _has_column('concepts', 'last_quiz_generator_output'):
+            conn.execute("ALTER TABLE concepts ADD COLUMN last_quiz_generator_output TEXT")
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 11: last_quiz_generator_output column on concepts")
 
     _set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

@@ -159,6 +159,17 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
 
+**Optional (Reasoning model for scheduled quiz P1):**
+
+If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model) generates a structured question, P2 (main provider) packages it with persona voice. Falls back to single-prompt if not set.
+
+| Variable | Example | Purpose |
+|----------|---------|--------|
+| `LEARN_REASONING_LLM_BASE_URL` | `https://api.x.ai/v1` | Reasoning model endpoint |
+| `LEARN_REASONING_LLM_API_KEY` | Your key | Reasoning model API key |
+| `LEARN_REASONING_LLM_MODEL` | `grok-4-1-fast-reasoning` | Reasoning model name |
+| `LEARN_REASONING_LLM_THINKING` | `enabled` | Reasoning model thinking mode |
+
 ## Testing
 
 ```bash

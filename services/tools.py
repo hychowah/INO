@@ -617,6 +617,11 @@ def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
     question = params.get('question_asked', '')
     user_response = params.get('user_response', '')
 
+    # Prefer the actual question text stored at send time over LLM echo
+    stored_question = db.get_session('last_quiz_question')
+    if stored_question and len(stored_question) > len(question):
+        question = stored_question
+
     if not assessments:
         return ('error', "multi_assess requires 'assessments' list")
 
@@ -724,6 +729,12 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     assessment = params.get('assessment', '')
     question = params.get('question_asked', '')
     user_response = params.get('user_response', '')
+
+    # Prefer the actual question text stored at send time over LLM echo,
+    # which may be truncated or paraphrased
+    stored_question = db.get_session('last_quiz_question')
+    if stored_question and len(stored_question) > len(question):
+        question = stored_question
 
     if cid is None or quality is None:
         return ('error', "assess requires concept_id and quality (0-5)")

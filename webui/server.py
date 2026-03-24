@@ -690,6 +690,37 @@ def page_concept_detail(concept_id: int) -> str:
     else:
         review_html = '<p style="color:var(--text2);font-size:13px">No reviews yet.</p>'
 
+    # Last quiz generator (P1) output
+    p1_raw = detail.get('last_quiz_generator_output', '')
+    if p1_raw:
+        try:
+            p1_data = json.loads(p1_raw)
+            p1_question = _esc(p1_data.get('question', ''))
+            p1_type = _esc(p1_data.get('question_type', ''))
+            p1_diff = _esc(str(p1_data.get('difficulty', '')))
+            p1_facet = _esc(p1_data.get('target_facet', ''))
+            p1_reasoning = _esc(p1_data.get('reasoning', ''))
+            p1_cids = p1_data.get('concept_ids', [])
+
+            p1_fields = f'<div class="p1-question">{p1_question}</div>'
+            p1_meta_parts = []
+            if p1_type:
+                p1_meta_parts.append(f'<span class="p1-tag">Type: {p1_type}</span>')
+            if p1_diff:
+                p1_meta_parts.append(f'<span class="p1-tag">Difficulty: {p1_diff}</span>')
+            if p1_facet:
+                p1_meta_parts.append(f'<span class="p1-tag">Facet: {p1_facet}</span>')
+            if p1_cids:
+                cid_links = ', '.join(f'<a href="/concept/{_esc(str(cid))}">#{_esc(str(cid))}</a>' for cid in p1_cids)
+                p1_meta_parts.append(f'<span class="p1-tag">Concepts: {cid_links}</span>')
+            p1_meta = f'<div class="p1-meta">{" ".join(p1_meta_parts)}</div>' if p1_meta_parts else ''
+            p1_reasoning_html = f'<div class="p1-reasoning">{p1_reasoning}</div>' if p1_reasoning else ''
+            p1_html = f'{p1_fields}{p1_meta}{p1_reasoning_html}'
+        except (json.JSONDecodeError, TypeError):
+            p1_html = f'<pre style="font-size:12px;color:var(--text2);white-space:pre-wrap">{_esc(p1_raw[:2000])}</pre>'
+    else:
+        p1_html = '<p style="color:var(--text2);font-size:13px">No quiz generated yet.</p>'
+
     body = f"""
     <p><a href="/concepts">← Concepts</a></p>
     <h2 style="margin:12px 0 4px">{detail['title']}</h2>
@@ -704,6 +735,10 @@ def page_concept_detail(concept_id: int) -> str:
     <div class="section">
       <h4>Recent Reviews ({len(reviews)})</h4>
       {review_html}
+    </div>
+    <div class="section">
+      <h4>🤖 Last Quiz Generator Output (P1)</h4>
+      {p1_html}
     </div>"""
     return layout(detail['title'], body, active="concepts")
 

@@ -213,6 +213,64 @@ You are in {mode.upper()} mode.
 Analyze the user's intent and respond in the required format."""
 
 
+def build_quiz_generator_context(concept_id: int) -> str | None:
+    """Build pre-loaded context for the quiz question generator (Prompt 1).
+
+    Returns a structured text payload with concept detail + related concepts,
+    or None if the concept is not found. No knowledge map, chat history, or
+    stats — only what the reasoning model needs for question generation.
+    """
+    detail = db.get_concept_detail(concept_id)
+    if not detail:
+        return None
+
+    parts = []
+
+    # --- Primary concept ---
+    parts.append(f"## Primary Concept: {detail['title']} (#{detail['id']})")
+    parts.append(f"Description: {detail.get('description', 'N/A')}")
+    parts.append(f"Score: {detail['mastery_level']}/100, "
+                 f"Interval: {detail['interval_days']}d, "
+                 f"Reviews: {detail['review_count']}")
+    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+
+    if detail.get('remark_summary'):
+        parts.append(f"\nRemark summary (updated {detail.get('remark_updated_at', 'N/A')}):")
+        parts.append(f"  {detail['remark_summary']}")
+    elif detail.get('remarks'):
+        parts.append("\nRemarks (latest 3):")
+        for r in detail['remarks'][:3]:
+            parts.append(f"  - [{r['created_at']}] {r['content']}")
+
+    if detail.get('recent_reviews'):
+        parts.append("\nRecent reviews:")
+        for r in detail['recent_reviews']:
+            q = r.get('question_asked', '') or ''
+            a = r.get('user_response', '') or ''
+            assess = r.get('llm_assessment', '') or ''
+            parts.append(f"  - Q: {q[:200]}")
+            parts.append(f"    A: {a[:200]}")
+            parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
+
+    # --- Related concepts ---
+    relations = db.get_relations(concept_id)
+    if relations:
+        parts.append("\n## Related Concepts")
+        for rel in relations[:5]:
+            other_detail = db.get_concept_detail(rel['other_concept_id'])
+            remark = ''
+            if other_detail and other_detail.get('remark_summary'):
+                remark = f"\n    Remark: {other_detail['remark_summary'][:200]}"
+            parts.append(
+                f"- [{rel['relation_type']}] #{rel['other_concept_id']} "
+                f"{rel['other_title']} (score {rel['other_mastery']}/100)"
+                f"{remark}"
+            )
+
+    parts.append("")
+    return "\n".join(parts)
+
+
 # ============================================================================
 # Fetch Result Formatting
 # ============================================================================

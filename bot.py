@@ -479,13 +479,63 @@ async def review_command(ctx):
     payload = review_lines[0]
     try:
         review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
+
+        # Extract concept_id for two-prompt pipeline
+        try:
+            cid = int(payload.split("|", 1)[0])
+        except (ValueError, IndexError):
+            cid = None
+
+        if cid:
+            db.set_session('active_concept_id', str(cid))
+
+        # Prevent scheduler from picking up the same concept during generation
+        db.set_session('review_in_progress', str(cid) if cid else '1')
+
         async with ctx.channel.typing():
-            response, _pending, assess_meta = await _handle_user_message(
-                review_text, str(ctx.author))
+            # --- Two-prompt pipeline (with fallback) ---
+            from services.llm import LLMError
+            try:
+                if cid:
+                    p1_result = await pipeline.generate_quiz_question(cid)
+                    llm_response = await pipeline.package_quiz_for_discord(
+                        p1_result, cid
+                    )
+                else:
+                    raise LLMError("No concept_id in payload", retryable=True)
+            except LLMError as e:
+                logger.warning(
+                    f"Two-prompt pipeline failed ({e}), "
+                    f"falling back to single-prompt flow"
+                )
+                llm_response = await pipeline.call_with_fetch_loop(
+                    mode="reply",
+                    text=review_text,
+                    author=str(ctx.author),
+                )
+
+            final_result = await pipeline.execute_llm_response(
+                review_text, llm_response, "reply"
+            )
+            _msg_type, response = pipeline.process_output(final_result)
+            assess_meta = None
+
+            # Detect successful assess → populate metadata for QuizNavigationView
+            if _msg_type == "reply":
+                prefix, _msg, action_data = parse_llm_response(llm_response)
+                if (action_data
+                        and action_data.get('action', '').lower().strip() == 'assess'
+                        and action_data.get('params', {}).get('quality') is not None):
+                    assess_meta = {
+                        'concept_id': action_data['params'].get('concept_id', cid),
+                        'quality': action_data['params']['quality'],
+                    }
 
         if not response or not response.strip():
             response = "Could not generate a review quiz. Try again?"
         else:
+            # Store the actual question text for accurate review logging
+            db.set_session('last_quiz_question', response.strip())
             response = f"📚 **Learning Review**\n{response}"
 
         if assess_meta:
@@ -508,6 +558,8 @@ async def review_command(ctx):
             await ctx.interaction.followup.send(msg)
         else:
             await ctx.send(msg)
+    finally:
+        db.set_session('review_in_progress', None)
 
 
 def _ensure_db():
