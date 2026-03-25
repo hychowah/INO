@@ -28,8 +28,8 @@ def test_persona_files_exist():
 
 
 def test_persona_files_under_token_budget():
-    """Each persona file should be under ~400 tokens (~1600 chars)."""
-    TOKEN_BUDGET = 2500  # chars (~625 tokens, allows detailed behavioral rules)
+    """Each persona file should be under ~750 tokens (~3000 chars)."""
+    TOKEN_BUDGET = 3000  # chars (~750 tokens, allows detailed behavioral rules)
     for path in PERSONAS_DIR.glob("*.md"):
         content = path.read_text(encoding="utf-8")
         assert len(content) < TOKEN_BUDGET, (

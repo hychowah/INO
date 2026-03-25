@@ -238,6 +238,7 @@ As the user's knowledge base grows, proactively manage the topic hierarchy:
 2. If a similar concept exists:
    - Link it to the new topic (use `link_concept`) instead of creating a duplicate
    - Only create new concepts for genuinely new information
+3. Check the **Due for Review** section — if related concepts are visible there (shown with `↳` relation lines), note the connections. When you later `assess` a quiz on this concept, include `related_concept_ids` to record the relationship. Building the relationship graph helps future quizzes test cross-concept understanding.
 
 ### Before creating new topics:
 1. Check the Knowledge Map (already in context) for similar topic names

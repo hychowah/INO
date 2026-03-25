@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-03-20
+> Last updated: 2026-03-25
 
 ## Overview
 
@@ -80,7 +80,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/preferences.md` | ~20 | User learning preferences (interests, style) |
 | `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
-| `context.py` | ~370 | Prompt/context construction — builds the dynamic context injected into every LLM call |
+| `context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `tools.py` | ~490 | Action executor — maps LLM JSON actions to `db.*` CRUD calls |
 | `db/` | ~1175 | Database package — see submodules below |
 | `agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
@@ -97,7 +97,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/pipeline.py` | ~660 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
+| `services/pipeline.py` | ~675 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
@@ -147,8 +147,12 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │         ├── db.get_hierarchical_topic_map()
          │         ├── db.get_due_concepts(limit=5)
          │         ├── db.get_review_stats()
-         │         ├── _append_chat_history()  (dedup: session-based providers skip 2 newest)
+         │         ├── _append_active_concept_detail()  (auto-includes if active_concept_id set)
+         │         ├── _append_chat_history()  (session-based continuation: skip entirely)
          │         └── _append_active_quiz_context()  (auto-clears if stale > 15min)
+         │
+         ├─── If mode not MAINTENANCE/REVIEW-CHECK:
+         │         └── _preload_mentioned_concept()  (exact title match → concept detail + relations)
          │
          ├─── Assemble prompt:
          │      "Read AGENTS.md at <path>"
@@ -374,10 +378,17 @@ conversations
 ### context.py — Prompt Construction
 | Function | Purpose |
 |:---------|:--------|
-| `build_lightweight_context(mode)` | Assembles conditional context based on mode: COMMAND/REPLY get full context (topic map, due, stats, chat); REVIEW-CHECK gets only due concepts; MAINTENANCE returns empty. Skips all sections when DB is empty. |
-| `build_prompt_context(text, mode)` | Wraps lightweight context + mode declaration. Note: user message is NOT included (pipeline appends it separately to avoid duplication). |
+| `build_lightweight_context(mode, is_new_session)` | Assembles conditional context based on mode: COMMAND/REPLY get full context (topic map, due concepts with relation lines, stats, active concept detail, chat history); REVIEW-CHECK gets only due concepts; MAINTENANCE returns empty. Skips all sections when DB is empty. |
+| `build_prompt_context(text, mode, is_new_session)` | Wraps lightweight context + mode declaration + concept pre-fetch. For non-maintenance/non-review-check modes, calls `_preload_mentioned_concept()` to auto-include concept detail when user message exactly matches a concept title. Note: user message is NOT included (pipeline appends it separately to avoid duplication). |
+| `_append_chat_history(parts, is_new_session)` | Includes recent chat history. For session-based providers (OpenAI-compat), skips entirely on continuation turns (`is_new_session=False`) since the provider already accumulates messages. New sessions and stateless providers always get history. |
+| `_append_active_concept_detail(parts)` | When `active_concept_id` is set and not stale, auto-includes full concept detail (description, score, remark, recent reviews, relations). Eliminates a fetch round-trip. |
+| `_append_active_quiz_context(parts)` | Injects active quiz/multi-quiz context with relation lines per concept. Auto-clears if stale > 15min. |
+| `_preload_mentioned_concept(user_message)` | Exact case-insensitive title match. Returns formatted concept detail + relations. Guarded by topic relevance filter (skips if matched concept is in a different topic than the active concept). Max 200 char messages only. |
+| `_is_quiz_stale()` | Shared helper: checks if `active_concept_id` was last updated more than `QUIZ_STALENESS_TIMEOUT_MINUTES` ago. |
+| `_format_relations_snippet(concept_id, max_rels)` | Shared helper: formats top N relation lines as `↳ relation_type #id title (score, "note")`. Used by due concepts, quiz context, active concept detail, and quiz generator. |
 | `format_fetch_result(data)` | Formats fetch data (topic/concept/search) into markdown. Caps concept remarks to 3, truncates review text to 200 chars. |
 | `build_maintenance_context()` | Runs `db.get_maintenance_diagnostics()` and formats the diagnostic report. |
+| `build_quiz_generator_context(concept_id)` | Builds pre-loaded context for P1 quiz generation. Includes concept detail + enriched related concepts (descriptions, remarks, review Q&As). |
 
 ### tools.py — Action Executor
 - Maps 17 action verbs to database operations via `ACTION_HANDLERS` dict

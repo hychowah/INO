@@ -340,12 +340,14 @@ async def execute_llm_response(user_input: str, llm_response: str,
 
 async def _call_llm(mode: str, text: str, author: str,
                     extra_context: str = "",
-                    session: str | None = None) -> str:
+                    session: str | None = None,
+                    is_new_session: bool = True) -> str:
     """Build prompt with dynamic context, call the configured LLM provider.
     Returns the raw LLM response string."""
     provider = get_provider()
 
-    dynamic_context = ctx.build_prompt_context(text, mode)
+    dynamic_context = ctx.build_prompt_context(text, mode,
+                                              is_new_session=is_new_session)
 
     prompt = (
         f"{dynamic_context}\n\n"
@@ -440,6 +442,7 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
     if mode in ("maintenance", "review-check"):
         now = datetime.now()
         session = f"{mode}_{now.strftime('%H%M%S')}"
+        is_new = True
         logger.info(f"Isolated session for {mode}: {session}")
     else:
         session, is_new = _get_conv_session()
@@ -449,7 +452,7 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
             if iteration == 0:
                 llm_response = await _call_llm(
                     mode, text, author, extra_context=extra_context,
-                    session=session
+                    session=session, is_new_session=is_new
                 )
             else:
                 llm_response = await _call_llm_followup(

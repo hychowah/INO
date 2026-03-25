@@ -127,9 +127,9 @@ def search_similar_concepts(query: str, limit: int = 10,
     client = _get_client()
     query_vector = embed_text(query)
 
-    results = client.search(
+    response = client.query_points(
         collection_name=CONCEPTS_COLLECTION,
-        query_vector=query_vector,
+        query=query_vector,
         limit=limit,
         score_threshold=score_threshold,
     )
@@ -140,7 +140,7 @@ def search_similar_concepts(query: str, limit: int = 10,
             "title": hit.payload.get("title", ""),
             "score": round(hit.score, 4),
         }
-        for hit in results
+        for hit in response.points
     ]
 
 
@@ -179,9 +179,9 @@ def find_nearest_concepts(concept_id: int, limit: int = 5,
     # Qdrant doesn't filter by point ID via FieldCondition easily,
     # so we request extra results and filter post-hoc
     raw_limit = limit + len(all_exclude)
-    results = client.search(
+    response = client.query_points(
         collection_name=CONCEPTS_COLLECTION,
-        query_vector=query_vector,
+        query=query_vector,
         limit=raw_limit,
         score_threshold=score_threshold,
     )
@@ -194,7 +194,7 @@ def find_nearest_concepts(concept_id: int, limit: int = 5,
             "title": hit.payload.get("title", ""),
             "score": round(hit.score, 4),
         }
-        for hit in results
+        for hit in response.points
         if hit.id not in exclude_set
     ]
 
@@ -276,9 +276,9 @@ def search_similar_topics(query: str, limit: int = 10,
     client = _get_client()
     query_vector = embed_text(query)
 
-    results = client.search(
+    response = client.query_points(
         collection_name=TOPICS_COLLECTION,
-        query_vector=query_vector,
+        query=query_vector,
         limit=limit,
         score_threshold=score_threshold,
     )
@@ -289,7 +289,7 @@ def search_similar_topics(query: str, limit: int = 10,
             "title": hit.payload.get("title", ""),
             "score": round(hit.score, 4),
         }
-        for hit in results
+        for hit in response.points
     ]
 
 

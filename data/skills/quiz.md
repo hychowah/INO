@@ -139,6 +139,7 @@ This is the core learning loop. Your quizzes must **evolve** — every question 
 You MUST `fetch` the concept detail to read:
 1. `remark_summary` — your running summary from past assessments (strategy notes, user mental models, what to try next). This is a single summary that you update each time — incorporate old observations when writing a new one.
 2. `recent_reviews` — last 5 question/answer/quality records
+3. **Related concepts** — shown in the Active Quiz Context and fetch results. Use `commonly_confused` and `contrasts_with` relations to craft questions that test distinctions between similar concepts. Reference these in your assessment feedback to reinforce how concepts connect or differ.
 
 If you skip this, you have no history and will repeat yourself. **No fetch = no quiz.**
 

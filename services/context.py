@@ -26,13 +26,18 @@ def _read_file(path: Path) -> str:
 # Lightweight Context (included in every LLM call)
 # ============================================================================
 
-def build_lightweight_context(mode: str = "command") -> str:
+def build_lightweight_context(mode: str = "command", is_new_session: bool = True) -> str:
     """Build the lightweight context string injected into LLM calls.
     Sections are conditional based on mode to minimize token usage.
 
     COMMAND/REPLY: all sections (topic map, due, stats, chat history)
     REVIEW-CHECK: due concepts only (skip topic map, stats, chat)
     MAINTENANCE: returns empty — maintenance uses its own context builder
+
+    Args:
+        is_new_session: When False AND session-based provider, skip chat history
+            (provider already has full history in _sessions). On first turn
+            (is_new=True), keep history for context bootstrapping.
     """
     mode = mode.upper()
 
@@ -53,7 +58,7 @@ def build_lightweight_context(mode: str = "command") -> str:
         if not topic_map:
             parts.append("Knowledge base is empty — waiting for first topic.\n")
             # Still include chat history for continuity
-            _append_chat_history(parts)
+            _append_chat_history(parts, is_new_session=is_new_session)
             return "\n".join(parts)
 
     # --- REVIEW-CHECK: minimal context ---
@@ -95,7 +100,7 @@ def build_lightweight_context(mode: str = "command") -> str:
         parts.append("No topics yet.")
     parts.append("")
 
-    # Due concepts (top 5, with total count)
+    # Due concepts (top 5, with total count + top 2 relations each)
     due = db.get_due_concepts(limit=5)
     total_due = db.get_due_count()
     due_header = f"## Due for Review (top 5 of {total_due})" if total_due > 5 else "## Due for Review (top 5)"
@@ -110,6 +115,14 @@ def build_lightweight_context(mode: str = "command") -> str:
                 f"interval {c['interval_days']}d, "
                 f"reviews: {c['review_count']}, topics: {topic_ids}{remark_preview})"
             )
+            # Show top 2 relations with score + remark snippet
+            relations = db.get_relations(c['id'])
+            for rel in relations[:2]:
+                note_preview = f', "{rel["note"][:60]}"' if rel.get('note') else ''
+                parts.append(
+                    f"  ↳ {rel['relation_type']} #{rel['other_concept_id']} "
+                    f"{rel['other_title']} (score {rel['other_mastery']}/100{note_preview})"
+                )
     else:
         parts.append("Nothing due right now.")
     parts.append("")
@@ -121,11 +134,93 @@ def build_lightweight_context(mode: str = "command") -> str:
         f"Reviews (7d): {stats['reviews_last_7d']} | Avg score: {stats['avg_mastery']}/100\n"
     )
 
+    # Auto-include active concept detail (eliminates 1 fetch round-trip)
+    _append_active_concept_detail(parts)
+
     # Chat history
-    _append_chat_history(parts)
+    _append_chat_history(parts, is_new_session=is_new_session)
     _append_active_quiz_context(parts)
 
     return "\n".join(parts)
+
+
+def _append_active_concept_detail(parts: list) -> None:
+    """If active_concept_id is set and not stale, include full concept detail
+    with relations. Eliminates 1 fetch round-trip for the common case where
+    the LLM needs this concept's data to proceed."""
+    if _is_quiz_stale():
+        return
+
+    active_cid = db.get_session('active_concept_id')
+    if not active_cid:
+        return
+
+    try:
+        cid = int(active_cid)
+    except (ValueError, TypeError):
+        return
+
+    detail = db.get_concept_detail(cid)
+    if not detail:
+        return
+
+    parts.append(f"## Active Concept Detail: {detail['title']} (#{detail['id']})")
+    parts.append(f"Description: {detail.get('description', 'N/A')}")
+    parts.append(f"Score: {detail['mastery_level']}/100, "
+                 f"Interval: {detail['interval_days']}d, "
+                 f"Reviews: {detail['review_count']}")
+    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+
+    if detail.get('remark_summary'):
+        parts.append(f"Remark: {detail['remark_summary']}")
+
+    if detail.get('recent_reviews'):
+        parts.append("Recent reviews:")
+        for r in detail['recent_reviews'][:3]:
+            q = r.get('question_asked', '') or ''
+            a = r.get('user_response', '') or ''
+            parts.append(f"  - Q: {q[:150]}")
+            parts.append(f"    A: {a[:150]}")
+            parts.append(f"    Quality: {r['quality']}/5")
+
+    rel_lines = _format_relations_snippet(cid, max_rels=3)
+    if rel_lines:
+        parts.append("Relations:")
+        parts.extend(rel_lines)
+
+    parts.append("")
+
+
+def _is_quiz_stale() -> bool:
+    """Check if the active quiz context is stale (past timeout).
+    Returns True if stale or unparseable, False if fresh or no timestamp."""
+    timeout_minutes = getattr(config, 'QUIZ_STALENESS_TIMEOUT_MINUTES', 15)
+    updated_at_str = db.get_session_updated_at('active_concept_id')
+    if not updated_at_str:
+        return False
+    try:
+        updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
+        elapsed = (datetime.now() - updated_at).total_seconds() / 60
+        return elapsed > timeout_minutes
+    except (ValueError, TypeError):
+        import logging as _log
+        _log.getLogger('context').warning(
+            f"Failed to parse quiz timestamp '{updated_at_str}', treating as stale."
+        )
+        return True
+
+
+def _format_relations_snippet(concept_id: int, max_rels: int = 2) -> list[str]:
+    """Return formatted relation lines for a concept (for inline context injection)."""
+    lines = []
+    relations = db.get_relations(concept_id)
+    for rel in relations[:max_rels]:
+        note_preview = f', "{rel["note"][:60]}"' if rel.get('note') else ''
+        lines.append(
+            f"  ↳ {rel['relation_type']} #{rel['other_concept_id']} "
+            f"{rel['other_title']} (score {rel['other_mastery']}/100{note_preview})"
+        )
+    return lines
 
 
 def _append_active_quiz_context(parts: list) -> None:
@@ -135,27 +230,11 @@ def _append_active_quiz_context(parts: list) -> None:
     import json as _json
 
     # --- Staleness timeout safety net ---
-    timeout_minutes = getattr(config, 'QUIZ_STALENESS_TIMEOUT_MINUTES', 15)
-    updated_at_str = db.get_session_updated_at('active_concept_id')
-    if updated_at_str:
-        try:
-            updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
-            elapsed = (datetime.now() - updated_at).total_seconds() / 60
-            if elapsed > timeout_minutes:
-                db.set_session('active_concept_id', None)
-                db.set_session('active_concept_ids', None)
-                db.set_session('quiz_anchor_concept_id', None)
-                return
-        except (ValueError, TypeError):
-            import logging as _log
-            _log.getLogger('context').warning(
-                f"Failed to parse quiz timestamp '{updated_at_str}', "
-                "clearing stale quiz context as fallback."
-            )
-            db.set_session('active_concept_id', None)
-            db.set_session('active_concept_ids', None)
-            db.set_session('quiz_anchor_concept_id', None)
-            return
+    if _is_quiz_stale():
+        db.set_session('active_concept_id', None)
+        db.set_session('active_concept_ids', None)
+        db.set_session('quiz_anchor_concept_id', None)
+        return
 
     # Check for multi-concept quiz first
     multi_ids_str = db.get_session('active_concept_ids')
@@ -163,16 +242,17 @@ def _append_active_quiz_context(parts: list) -> None:
         try:
             concept_ids = _json.loads(multi_ids_str)
             if concept_ids and isinstance(concept_ids, list):
-                concepts = []
+                concept_lines = []
                 for cid in concept_ids:
                     c = db.get_concept(int(cid))
                     if c:
-                        concepts.append(f"#{cid} — {c['title']} (score {c['mastery_level']}/100)")
-                if concepts:
+                        concept_lines.append(f"- #{cid} — {c['title']} (score {c['mastery_level']}/100)")
+                        concept_lines.extend(_format_relations_snippet(int(cid)))
+                if concept_lines:
                     parts.append(
                         f"## Active Multi-Concept Quiz\n"
                         f"Concepts being quizzed together:\n"
-                        + "\n".join(f"- {c}" for c in concepts)
+                        + "\n".join(concept_lines)
                         + "\n\nUse `multi_assess` with individual scores per concept.\n"
                     )
                     return
@@ -186,9 +266,12 @@ def _append_active_quiz_context(parts: list) -> None:
     if active_cid:
         concept = db.get_concept(int(active_cid))
         if concept:
+            rel_lines = _format_relations_snippet(int(active_cid))
+            rel_section = "\n" + "\n".join(rel_lines) + "\n" if rel_lines else ""
             parts.append(
                 f"## Active Quiz Context\n"
-                f"Quizzed concept: **#{active_cid} — {concept['title']}**. "
+                f"Quizzed concept: **#{active_cid} — {concept['title']}** "
+                f"(score {concept['mastery_level']}/100).{rel_section}"
                 f"Use this concept_id for `assess` ONLY if the user's message actually "
                 f"answers the quiz question. If they ask an unrelated question or change "
                 f"topic, answer with REPLY: instead — do NOT assess. The quiz stays active "
@@ -196,24 +279,27 @@ def _append_active_quiz_context(parts: list) -> None:
             )
 
 
-def _append_chat_history(parts: list) -> None:
+def _append_chat_history(parts: list, is_new_session: bool = True) -> None:
     """Append compressed chat history to context parts.
     Newest 4 messages: 600 chars, older 8: 150 chars (12 total).
 
-    For session-based LLM providers (OpenAI-compat) the two most recent
-    messages are already in the provider's session memory, so we skip them
-    here to avoid double reinforcement of quiz/topic context.
+    For session-based LLM providers (OpenAI-compat) on continuation turns
+    (is_new_session=False), the provider already has full conversation
+    history in _sessions — skip the section entirely to avoid duplication.
+    On the first turn of a new session (is_new_session=True), include
+    history since _sessions is empty and needs bootstrapping.
     """
     from services.llm import get_provider
     provider = get_provider()
     session_based = hasattr(provider, '_sessions')
 
-    limit = 14 if session_based else 12
-    history = db.get_chat_history(limit=limit)
+    # Session-based provider on a continuation turn: skip entirely.
+    # The provider's _sessions already has the full conversation.
+    if session_based and not is_new_session:
+        return
 
-    # Drop the 2 newest messages when the provider already has them in-session
-    if session_based and len(history) > 2:
-        history = history[:-2]
+    limit = 12
+    history = db.get_chat_history(limit=limit)
 
     parts.append("## Recent Conversation")
     if history:
@@ -240,15 +326,72 @@ def _append_chat_history(parts: list) -> None:
 # Prompt Construction
 # ============================================================================
 
-def build_prompt_context(user_message: str, mode: str = "command") -> str:
+def _preload_mentioned_concept(user_message: str) -> str:
+    """If the user's message exactly matches a concept title (case-insensitive),
+    pre-load its detail to eliminate a fetch round-trip.
+    Returns formatted concept detail string, or empty string if no match.
+    Only exact full-message matches — no substring or fuzzy matching."""
+    text = user_message.strip()
+    if not text or len(text) > 200:
+        return ""
+
+    concept = db.find_concept_by_title(text)
+    if not concept:
+        return ""
+
+    # Topic relevance filter: if there's an active concept in session,
+    # only pre-fetch if the matched concept shares at least one topic.
+    active_cid = db.get_session('active_concept_id')
+    if active_cid:
+        try:
+            active_detail = db.get_concept_detail(int(active_cid))
+            if active_detail:
+                active_topics = {t['id'] for t in active_detail.get('topics', [])}
+                matched_topics = set(concept.get('topic_ids', []))
+                if active_topics and matched_topics and not (active_topics & matched_topics):
+                    return ""  # Different topic context; skip pre-fetch
+        except (ValueError, TypeError):
+            pass
+
+    detail = db.get_concept_detail(concept['id'])
+    if not detail:
+        return ""
+
+    parts = []
+    parts.append(f"## Pre-loaded Concept (matched from message): {detail['title']} (#{detail['id']})")
+    parts.append(f"Description: {detail.get('description', 'N/A')}")
+    parts.append(f"Score: {detail['mastery_level']}/100, "
+                 f"Interval: {detail['interval_days']}d, "
+                 f"Reviews: {detail['review_count']}")
+    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+
+    if detail.get('remark_summary'):
+        parts.append(f"Remark: {detail['remark_summary']}")
+
+    rel_lines = _format_relations_snippet(detail['id'], max_rels=3)
+    if rel_lines:
+        parts.append("Relations:")
+        parts.extend(rel_lines)
+
+    parts.append("")
+    return "\n".join(parts)
+
+
+def build_prompt_context(user_message: str, mode: str = "command",
+                        is_new_session: bool = True) -> str:
     """Build only the dynamic context (no AGENTS.md/preferences content).
     Used by the pipeline which tells kimi-cli to read AGENTS.md by file path.
     Note: user_message is NOT included here — the pipeline appends it separately
     to avoid duplication."""
-    lightweight = build_lightweight_context(mode)
+    lightweight = build_lightweight_context(mode, is_new_session=is_new_session)
+
+    # Pre-load concept if user message exactly matches a concept title
+    preloaded = ""
+    if mode.upper() not in ("MAINTENANCE", "REVIEW-CHECK"):
+        preloaded = _preload_mentioned_concept(user_message)
 
     return f"""{lightweight}
-## Mode
+{preloaded}## Mode
 You are in {mode.upper()} mode.
 
 ## Your Response
@@ -295,20 +438,31 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
             parts.append(f"    A: {a[:200]}")
             parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
 
-    # --- Related concepts ---
+    # --- Related concepts (enriched with description + recent reviews) ---
     relations = db.get_relations(concept_id)
     if relations:
         parts.append("\n## Related Concepts")
         for rel in relations[:5]:
             other_detail = db.get_concept_detail(rel['other_concept_id'])
-            remark = ''
-            if other_detail and other_detail.get('remark_summary'):
-                remark = f"\n    Remark: {other_detail['remark_summary'][:200]}"
             parts.append(
                 f"- [{rel['relation_type']}] #{rel['other_concept_id']} "
                 f"{rel['other_title']} (score {rel['other_mastery']}/100)"
-                f"{remark}"
             )
+            if rel.get('note'):
+                parts.append(f"    Note: {rel['note'][:100]}")
+            if other_detail:
+                desc = other_detail.get('description', '')
+                if desc:
+                    parts.append(f"    Description: {desc[:300]}")
+                if other_detail.get('remark_summary'):
+                    parts.append(f"    Remark: {other_detail['remark_summary'][:200]}")
+                if other_detail.get('recent_reviews'):
+                    for r in other_detail['recent_reviews'][:2]:
+                        q = r.get('question_asked', '') or ''
+                        a = r.get('user_response', '') or ''
+                        parts.append(f"    Q: {q[:100]}")
+                        parts.append(f"    A: {a[:100]}")
+                        parts.append(f"    Quality: {r['quality']}/5")
 
     parts.append("")
     return "\n".join(parts)

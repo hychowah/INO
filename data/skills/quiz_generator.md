@@ -72,6 +72,7 @@ Read every `question_asked` in `recent_reviews`. Your new question must:
 - **Building tier**: Mention a related concept to test if the user sees the connection.
 - **Solid/Mastered tier**: Craft synthesis questions that span the primary concept and 1–2 related concepts. Test how concepts interact, contrast, or apply together in real scenarios.
 - **Don't reference related concepts the user has never seen** (score 0, no reviews). Only bridge to concepts the user has some familiarity with.
+- **Base questions ONLY on data provided** in concept descriptions, remark summaries, and review history. Do not invent technical claims, API details, or behaviors not mentioned in the input data. Use related concept data for comparison/contrast questions but only reference facts present in their descriptions and remarks.
 
 ### Step 5: Tier-specific strategies
 

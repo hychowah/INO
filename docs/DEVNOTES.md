@@ -27,6 +27,7 @@
 14. [Two-Prompt Scheduled Quiz Pipeline](#14-two-prompt-scheduled-quiz-pipeline-migration-11)
 15. [Quiz Intent Detection & Context Lifecycle](#15-quiz-intent-detection--context-lifecycle)
 16. [Quiz Anchor Concept ID](#16-quiz-anchor-concept-id)
+17. [Context Enrichment & Qdrant Migration](#17-context-enrichment--qdrant-migration)
 
 ---
 
@@ -263,7 +264,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 1. **LLM instructions** (`core.md` MODE: REPLY → "Intent Detection During Active Quiz"): signal lists for quiz-answer vs new-question, decision rule ("if not answering quiz → REPLY: instead of assess"), worked examples. `quiz.md` assess docs reinforced with same rule.
 2. **Backend clearing** (`pipeline.py` `_QUIZ_CLEARING_ACTIONS`): quiz context clears after `assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`. NOT after `fetch`, `quiz`, `multi_quiz`, or plain REPLY:. Also clears `active_concept_ids` for multi-quiz.
 3. **Staleness timeout** (`context.py` `_append_active_quiz_context()`): checks `session_state.updated_at` via `db.get_session_updated_at()`. If elapsed > `QUIZ_STALENESS_TIMEOUT_MINUTES` (config, default 15 min), auto-clears and skips injection. Excludes REVIEW-CHECK mode (returns early before reaching this code).
-4. **Chat history dedup** (`context.py` `_append_chat_history()`): for session-based providers (OpenAI-compat), skips 2 most recent messages already in provider session memory. Reduces double reinforcement of quiz-topic context.
+4. **Chat history dedup** (`context.py` `_append_chat_history()`): for session-based providers (OpenAI-compat), skips the entire "Recent Conversation" section on continuation turns (`is_new_session=False`). The provider already accumulates full history in its `_sessions` dict — injecting truncated chat history caused the LLM to see the same messages twice with slightly different content (old ones from context, newer ones from provider memory). New sessions and stateless providers always get history. Parameter `is_new_session` is threaded from `_get_conv_session()` through `call_with_fetch_loop()` → `_call_llm()` → `build_prompt_context()`.
 
 **Context injection text** (`_append_active_quiz_context()`): reworded to "Use this concept_id for assess ONLY if the user's message actually answers the quiz question."
 
@@ -302,3 +303,27 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **§H1 — Codebase Restructuring (2026-03-13):** Split `db.py` (1396 lines) → `db/` package (6 submodules). Split `pipeline.py` (750 lines) → `pipeline.py` + `parser.py` + `repair.py` + `dedup.py`. Fixed scheduler↔bot circular dependency via `services/state.py`. Backward compat maintained via re-exports.
 
 **§H2 — FastAPI Backend & Project Restructuring (2026-03-15):** Created `api.py` as thin FastAPI wrapper using same pipeline. Moved `context.py`, `tools.py` → `services/`. Moved docs → `docs/`. Moved scripts → `scripts/`. Set up standalone git repo with `.env`-based config.
+
+---
+
+## 17. Context Enrichment & Qdrant Migration
+
+**Problem:** Concept relationships (stored in `concept_relations` table since migration 9) were invisible to the LLM at runtime. Due concepts, quiz context, and the P1 quiz generator received no relation data. Additionally, the Qdrant client library upgrade (1.17.x) removed `client.search()` in favor of `client.query_points()`.
+
+**Fix — 7-step context enrichment (2026-03-25):**
+
+1. **Chat history dedup** (see §15 point 4 update): session-based providers skip entire chat history section on continuation turns.
+2. **Due concept relation lines**: `build_lightweight_context()` now calls `db.get_relations(c['id'])` per due concept, appending top 2 relation lines formatted as `↳ relation_type #id title (score, "note")`.
+3. **Skill file updates**: `knowledge.md` instructs LLM to check `↳` relation lines and note connections for future `assess` calls (via `related_concept_ids`). `quiz.md` instructs use of `commonly_confused`/`contrasts_with` for distinction-testing. `quiz_generator.md` added anti-hallucination guard.
+4. **Quiz context relations**: `_append_active_quiz_context()` refactored to use shared `_is_quiz_stale()` and `_format_relations_snippet()` helpers. Both single and multi-quiz paths include relation lines.
+5. **Active concept auto-include**: New `_append_active_concept_detail(parts)` inserts full concept detail (description, score, remark, recent reviews, relations) when `active_concept_id` is set and not stale. Eliminates a fetch round-trip.
+6. **Concept name pre-fetch**: New `_preload_mentioned_concept(user_message)` does exact case-insensitive title match. Guarded by: max 200 chars, topic relevance filter (skips if matched concept is in a different topic than the active concept). DB uniqueness enforced by case-insensitive UNIQUE index (migration 8).
+7. **Quiz generator enrichment**: `build_quiz_generator_context()` now includes related concept descriptions (300 chars), remark summaries (200 chars), and last 2 review Q&As (100 chars each) per related concept.
+
+**Shared helpers:**
+- `_is_quiz_stale()`: checks `get_session_updated_at('active_concept_id')` against `QUIZ_STALENESS_TIMEOUT_MINUTES`
+- `_format_relations_snippet(concept_id, max_rels)`: reusable relation formatter used in steps 2, 4, 5, 6, and 7
+
+**Qdrant API migration:** `client.search()` removed in qdrant-client 1.17.x. Migrated 3 call sites in `db/vectors.py` to `client.query_points()`: `query_vector` parameter renamed to `query`, results accessed via `.points` property. Test fake embeddings changed from SHA-256 hash (which produced uncorrelated vectors) to bag-of-words (word → stable dimension via `hash(word) % 768`), producing meaningful cosine similarity for overlapping text.
+
+**Key files:** `services/context.py` (all enrichment), `services/pipeline.py` (`is_new_session` threading), `db/vectors.py` (Qdrant migration), `data/skills/{knowledge,quiz,quiz_generator}.md` (instructions), `tests/test_context_enrichment.py` (30 tests), `tests/test_vectors.py` (embedding fix).

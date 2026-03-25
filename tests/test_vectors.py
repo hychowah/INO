@@ -20,15 +20,17 @@ pytest.importorskip("qdrant_client", reason="qdrant-client not installed")
 # Stable fake embeddings (768-dim like all-mpnet-base-v2)
 def _fake_embed(text):
     """Deterministic fake embedding based on text hash."""
-    import hashlib
-    h = hashlib.sha256(text.encode()).digest()
-    # Create a 768-dim vector from hash bytes (repeating)
-    vec = []
-    for i in range(768):
-        vec.append((h[i % len(h)] - 128) / 128.0)
-    # Normalize
     import math
-    norm = math.sqrt(sum(x*x for x in vec))
+    # Bag-of-words embedding: each unique word maps to a stable
+    # dimension via hash, producing high cosine similarity for
+    # texts sharing words (unlike SHA-256 which destroys overlap).
+    DIM = 768
+    vec = [0.0] * DIM
+    for word in text.lower().split():
+        idx = hash(word) % DIM
+        vec[idx] += 1.0
+    # Normalize
+    norm = math.sqrt(sum(x * x for x in vec))
     if norm > 0:
         vec = [x / norm for x in vec]
     return vec
@@ -117,7 +119,7 @@ class TestVectorCRUD:
         with patch('services.embeddings.embed_text', side_effect=_fake_embed):
             vectors.upsert_concept(1, "Test Concept", "A test")
             vectors.delete_concept(1)
-            results = vectors.search_similar_concepts("Test Concept", limit=5, score_threshold=0.0)
+            results = vectors.search_similar_concepts("Test Concept", limit=5)
 
         # Should not find the deleted concept
         matching = [r for r in results if r['id'] == 1]
@@ -139,7 +141,7 @@ class TestVectorCRUD:
         with patch('services.embeddings.embed_text', side_effect=_fake_embed):
             vectors.upsert_topic(1, "Test Topic", "A test")
             vectors.delete_topic(1)
-            results = vectors.search_similar_topics("Test Topic", limit=5, score_threshold=0.0)
+            results = vectors.search_similar_topics("Test Topic", limit=5)
 
         matching = [r for r in results if r['id'] == 1]
         assert len(matching) == 0
