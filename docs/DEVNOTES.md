@@ -327,3 +327,27 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **Qdrant API migration:** `client.search()` removed in qdrant-client 1.17.x. Migrated 3 call sites in `db/vectors.py` to `client.query_points()`: `query_vector` parameter renamed to `query`, results accessed via `.points` property. Test fake embeddings changed from SHA-256 hash (which produced uncorrelated vectors) to bag-of-words (word → stable dimension via `hash(word) % 768`), producing meaningful cosine similarity for overlapping text.
 
 **Key files:** `services/context.py` (all enrichment), `services/pipeline.py` (`is_new_session` threading), `db/vectors.py` (Qdrant migration), `data/skills/{knowledge,quiz,quiz_generator}.md` (instructions), `tests/test_context_enrichment.py` (30 tests), `tests/test_vectors.py` (embedding fix).
+
+---
+
+## 18. Quiz Skip ("I know this") Button
+
+**Problem:** Users who already know a concept's answer shouldn't be forced to type it out. A "skip" mechanism awards full credit and moves on, but must not be gameable on first encounters.
+
+**Design — button-only, not an LLM action:**
+
+The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButton`), calling `tools.skip_quiz()` directly. It is **not** registered in `ACTION_HANDLERS` because the LLM should never autonomously skip a quiz — only the user presses the button.
+
+**Scoring:** Uses the same quality=5 algorithm as a normal perfect answer. A synthetic `question_difficulty = min(100, current_score + 10)` is used since no actual question was assessed. This gives `base_gain=7` plus a gap-proportional bonus (`gap * 0.15`), typically ~8.5 points — identical to what a real quality-5 assessment would yield.
+
+**Anti-gaming guard:** The skip button only appears when `review_count >= 2` for the concept. First-time and once-reviewed concepts must be answered properly. Enforced in both `_send_quiz_response` (button visibility) and `skip_quiz()` (server-side check).
+
+**Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call. The Discord button's `clicked` flag also prevents duplicate button presses.
+
+**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` tells callers whether to attach a `QuizQuestionView`. All 5 unpack sites updated: `learn_command`, `on_message`, and the 3 `QuizNavigationView` button callbacks.
+
+**Synthetic remark & LLM continuity:** `skip_quiz()` writes a synthetic remark (`"[Skipped — user indicated prior knowledge]"`) to preserve the LLM's strategy context. `quiz.md` instructs the LLM to probe skipped concepts more rigorously on next encounter.
+
+**Session cleanup:** `skip_quiz()` clears `last_quiz_question`, `last_assess_concept_id`, `last_assess_quality`, and `pending_review` to prevent stale state from interfering with subsequent interactions.
+
+**Key files:** `services/tools.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`), `bot.py` (4-tuple handling, `QuizQuestionView` attachment), `data/skills/quiz.md` (LLM skip guidance).

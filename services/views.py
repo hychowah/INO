@@ -511,7 +511,8 @@ class QuizNavigationView(discord.ui.View):
       - quality <= 2 (wrong):   "Explain" primary, "Quiz again" secondary
 
     The message_handler callable avoids a circular import with bot.py.
-    It must have signature: async (str, str) -> tuple[str, dict|None, dict|None]
+    It must have signature: async (str, str) -> tuple[str, dict|None, dict|None, dict|None]
+    (response, pending_action, assess_meta, quiz_meta)
     """
 
     def __init__(self, concept_id: int, quality: int,
@@ -565,7 +566,7 @@ class _QuizAgainButton(discord.ui.Button):
 
         try:
             async with interaction.channel.typing():
-                response, _, _ = await self.parent_view.message_handler(
+                response, _, _, _ = await self.parent_view.message_handler(
                     text, str(interaction.user))
             await _send_quiz_response(interaction, response, self.parent_view.message_handler)
         except Exception as e:
@@ -595,7 +596,7 @@ class _QuizNextDueButton(discord.ui.Button):
         text = "[BUTTON] Quiz me on the next due concept"
         try:
             async with interaction.channel.typing():
-                response, _, _ = await self.parent_view.message_handler(
+                response, _, _, _ = await self.parent_view.message_handler(
                     text, str(interaction.user))
             await _send_quiz_response(interaction, response, self.parent_view.message_handler)
         except Exception as e:
@@ -629,7 +630,7 @@ class _QuizExplainButton(discord.ui.Button):
 
         try:
             async with interaction.channel.typing():
-                response, _, _ = await self.parent_view.message_handler(
+                response, _, _, _ = await self.parent_view.message_handler(
                     text, str(interaction.user))
             # Explain is not an assess, so send plain (no nav buttons)
             await interaction.followup.send(
@@ -666,6 +667,84 @@ class _QuizDoneButton(discord.ui.Button):
         self.parent_view.stop()
 
 
+# ============================================================================
+# Quiz question view (pre-answer skip button)
+# ============================================================================
+
+class QuizQuestionView(discord.ui.View):
+    """Optional button shown with quiz questions: allows skipping if eligible.
+
+    Only contains the skip button when show_skip=True (concept has
+    review_count >= 2). The message_handler is passed through to
+    QuizNavigationView for post-skip navigation.
+    """
+
+    def __init__(self, concept_id: int,
+                 message_handler: Callable[..., Awaitable],
+                 show_skip: bool = True):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.concept_id = concept_id
+        self.message_handler = message_handler
+        self.clicked = False
+
+        if show_skip:
+            self.add_item(_QuizSkipButton(self))
+
+    def _disable_all(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    async def on_timeout(self):
+        self._disable_all()
+
+
+class _QuizSkipButton(discord.ui.Button):
+    """Skip the quiz — user claims confident recall."""
+
+    def __init__(self, parent_view: QuizQuestionView):
+        super().__init__(label="I know this", emoji="⏭️",
+                         style=discord.ButtonStyle.secondary, row=0)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.parent_view.clicked:
+            return
+        self.parent_view.clicked = True
+        self.parent_view._disable_all()
+        await interaction.response.edit_message(view=self.parent_view)
+
+        from services.tools import skip_quiz
+        try:
+            result = skip_quiz(
+                self.parent_view.concept_id,
+                user_id=str(interaction.user),
+            )
+
+            if 'error' in result:
+                await interaction.followup.send(f"⚠️ {result['error']}")
+                self.parent_view.stop()
+                return
+
+            confirmation = (
+                f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
+                f"next review in {result['interval_days']}d"
+            )
+            nav_view = QuizNavigationView(
+                concept_id=result['concept_id'],
+                quality=5,
+                message_handler=self.parent_view.message_handler,
+            )
+            await interaction.followup.send(confirmation, view=nav_view)
+        except Exception as e:
+            logger.error(f"QuizSkip callback error: {e}", exc_info=True)
+            try:
+                await interaction.followup.send(f"⚠️ Error: {e}")
+            except discord.errors.NotFound:
+                pass
+        self.parent_view.stop()
+
+
 async def _send_quiz_response(interaction: discord.Interaction,
                               response: str,
                               message_handler: Callable[..., Awaitable]) -> None:
@@ -688,4 +767,19 @@ async def _send_quiz_response(interaction: discord.Interaction,
     # will return a quiz question (not assess) from these buttons, so this
     # is a safety net for unusual flows.
     # For now, send plain — buttons reappear on the *next* assess naturally.
+
+    # Check if a new quiz was delivered — attach skip button if eligible
+    quiz_cid = db.get_session('quiz_anchor_concept_id')
+    if quiz_cid:
+        concept = db.get_concept(int(quiz_cid))
+        if concept and concept.get('review_count', 0) >= 2:
+            view = QuizQuestionView(
+                concept_id=int(quiz_cid),
+                message_handler=message_handler,
+                show_skip=True,
+            )
+            await interaction.followup.send(
+                truncate_for_discord(response), view=view)
+            return
+
     await interaction.followup.send(truncate_for_discord(response))

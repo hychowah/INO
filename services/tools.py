@@ -879,6 +879,92 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
                                             f"next review in {new_interval} day(s)"))
 
 
+def skip_quiz(concept_id: int, user_id: str = "default") -> dict:
+    """Skip a quiz question without answering. Scores as quality=5 with
+    synthetic difficulty, writes a synthetic remark, and logs the review.
+
+    Only allowed when the concept has review_count >= 2 (anti-gaming guard).
+    Returns dict with {concept_id, title, old_score, new_score, interval_days}
+    or {error: str} on failure.
+    """
+    concept = db.get_concept(concept_id)
+    if not concept:
+        return {'error': f"Concept #{concept_id} not found"}
+
+    if concept.get('review_count', 0) < 2:
+        return {'error': "Need at least 2 reviews before skipping"}
+
+    # Race guard: prevent double-processing if user already answered
+    if db.get_session('quiz_answered'):
+        db.set_session('quiz_answered', None)
+        return {'error': "Quiz already answered or skipped"}
+
+    current_score = concept.get('mastery_level', 0)
+    old_interval = concept.get('interval_days', 1)
+
+    # Score using normal quality=5 algorithm with synthetic difficulty
+    question_difficulty = min(100, current_score + 10)
+    gap = question_difficulty - current_score  # 10 or less at cap
+    base_gain = 7  # quality=5
+    delta = base_gain + gap * 0.15
+    new_score = min(100, round(current_score + delta))
+
+    # Interval from score: exponential curve
+    new_interval = max(1, round(math.exp(new_score * 0.05)))
+
+    now = datetime.now()
+    next_review = (now + timedelta(days=new_interval)).strftime('%Y-%m-%d %H:%M:%S')
+
+    db.update_concept(concept_id,
+        mastery_level=new_score,
+        interval_days=new_interval,
+        next_review_at=next_review,
+        last_reviewed_at=now.strftime('%Y-%m-%d %H:%M:%S'),
+        review_count=concept.get('review_count', 0) + 1,
+    )
+
+    # Log the review
+    stored_question = db.get_session('last_quiz_question') or '(question not stored)'
+    db.add_review(concept_id, stored_question, '[Skipped]', 5,
+                  'Skipped by user — claimed confident recall')
+
+    # Synthetic remark preserves LLM strategy continuity
+    db.add_remark(concept_id,
+        f"⏭️ Skipped — user claimed confident recall. "
+        f"Score {current_score}→{new_score}, interval {old_interval}d→{new_interval}d.")
+
+    # Session vars for QuizNavigationView
+    db.set_session('last_assess_concept_id', str(concept_id))
+    db.set_session('last_assess_quality', '5')
+
+    # Clean up session state
+    db.set_session('pending_review', None)
+    db.set_session('quiz_anchor_concept_id', None)
+    db.set_session('last_quiz_question', None)
+    db.set_session('quiz_answered', '1')
+
+    # Audit trail
+    db.log_action(
+        action='skip_quiz',
+        params={'concept_id': concept_id},
+        result_type='reply',
+        result=f"score {current_score}→{new_score}",
+        source='discord',
+        user_id=user_id,
+    )
+
+    logger.info(f"[skip_quiz] Concept #{concept_id} '{concept['title']}': "
+                f"{current_score}→{new_score}, next in {new_interval}d")
+
+    return {
+        'concept_id': concept_id,
+        'title': concept['title'],
+        'old_score': current_score,
+        'new_score': new_score,
+        'interval_days': new_interval,
+    }
+
+
 # ============================================================================
 # Suggest Topic (from casual Q&A)
 # ============================================================================

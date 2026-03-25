@@ -44,7 +44,7 @@ import config
 import db
 from services import pipeline, scheduler, state
 from services.parser import parse_llm_response
-from services.views import AddConceptConfirmView, QuizNavigationView, SuggestTopicConfirmView
+from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
 from services.formatting import truncate_with_suffix
 
 # ============================================================================
@@ -201,7 +201,7 @@ async def learn_command(ctx, *, text: str = ""):
 
     try:
         async with ctx.channel.typing():
-            response, pending_action, assess_meta = await _handle_user_message(
+            response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
                 text or "hello", str(ctx.author))
 
         if pending_action:
@@ -222,6 +222,17 @@ async def learn_command(ctx, *, text: str = ""):
                 concept_id=assess_meta['concept_id'],
                 quality=assess_meta['quality'],
                 message_handler=_handle_user_message,
+            )
+            if is_interaction:
+                send_fn = ctx.interaction.followup.send
+            else:
+                send_fn = ctx.send
+            await send_long_with_view(send_fn, response, view=view)
+        elif quiz_meta and quiz_meta.get('show_skip'):
+            view = QuizQuestionView(
+                concept_id=quiz_meta['concept_id'],
+                message_handler=_handle_user_message,
+                show_skip=True,
             )
             if is_interaction:
                 send_fn = ctx.interaction.followup.send
@@ -549,6 +560,22 @@ async def review_command(ctx):
             else:
                 send_fn = ctx.send
             await send_long_with_view(send_fn, response, view=view)
+        elif cid:
+            # Quiz question delivered — attach skip button if eligible
+            review_concept = db.get_concept(cid)
+            if review_concept and review_concept.get('review_count', 0) >= 2:
+                view = QuizQuestionView(
+                    concept_id=cid,
+                    message_handler=_handle_user_message,
+                    show_skip=True,
+                )
+                if is_interaction:
+                    send_fn = ctx.interaction.followup.send
+                else:
+                    send_fn = ctx.send
+                await send_long_with_view(send_fn, response, view=view)
+            else:
+                await send_long(ctx, response)
         else:
             await send_long(ctx, response)
     except Exception as e:
@@ -574,8 +601,8 @@ def _ensure_db():
 # CORE HANDLER
 # ============================================================================
 
-async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None, dict | None]:
-    """Core handler: text in → (response, pending_action | None, assess_meta | None).
+async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None, dict | None, dict | None]:
+    """Core handler: text in → (response, pending_action | None, assess_meta | None, quiz_meta | None).
 
     If the LLM wants to add_concept (and this is not a button callback),
     the action is NOT executed — raw action_data is returned so the caller
@@ -583,9 +610,15 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
 
     If the action was a successful assess, assess_meta is returned with
     concept_id and quality so the caller can attach QuizNavigationView.
+
+    If the action was a quiz, quiz_meta is returned with concept_id and
+    show_skip flag so the caller can attach QuizQuestionView.
     """
     _ensure_db()
     state.last_activity_at = datetime.now()
+
+    # Reset race guard — new message means new quiz cycle
+    db.set_session('quiz_answered', None)
 
     # Set action source for audit trail
     from services.tools import set_action_source
@@ -609,7 +642,7 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
             db.add_chat_message('assistant', display_msg)
         action_name = action_data.get('action', '').lower().strip()
         logger.info(f"Intercepted {action_name} — pending user confirmation")
-        return display_msg, action_data, None
+        return display_msg, action_data, None, None
 
     # All other actions: execute normally
     final_result = await pipeline.execute_llm_response(text, llm_response, "command")
@@ -632,7 +665,19 @@ async def _handle_user_message(text: str, author: str) -> tuple[str, dict | None
                 'quality': int(quality),
             }
 
-    return msg, None, assess_meta
+    # Detect quiz delivery → populate metadata for QuizQuestionView
+    quiz_meta = None
+    if (action_data
+            and action_data.get('action', '').lower().strip() == 'quiz'
+            and action_data.get('params', {}).get('concept_id') is not None):
+        quiz_cid = int(action_data['params']['concept_id'])
+        quiz_concept = db.get_concept(quiz_cid)
+        quiz_meta = {
+            'concept_id': quiz_cid,
+            'show_skip': (quiz_concept.get('review_count', 0) >= 2) if quiz_concept else False,
+        }
+
+    return msg, None, assess_meta, quiz_meta
 
 
 # ============================================================================
@@ -789,7 +834,7 @@ async def on_message(message):
     # Route every plain message through the learning pipeline
     try:
         async with message.channel.typing():
-            response, pending_action, assess_meta = await _handle_user_message(
+            response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
                 text, str(message.author))
 
         if not response or not response.strip():
@@ -811,6 +856,13 @@ async def on_message(message):
                 concept_id=assess_meta['concept_id'],
                 quality=assess_meta['quality'],
                 message_handler=_handle_user_message,
+            )
+            await send_long_with_view(message.reply, response, view=view)
+        elif quiz_meta and quiz_meta.get('show_skip'):
+            view = QuizQuestionView(
+                concept_id=quiz_meta['concept_id'],
+                message_handler=_handle_user_message,
+                show_skip=True,
             )
             await send_long_with_view(message.reply, response, view=view)
         else:

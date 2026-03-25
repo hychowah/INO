@@ -138,7 +138,8 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │
          ▼
   bot._handle_user_message(text, author)
-         │
+         │  returns tuple[str, dict|None, dict|None, dict|None]
+         │  (response, pending_action, assess_meta, quiz_meta)
          ▼
   pipeline.call_with_fetch_loop("command", text, author)     ← async
          │
