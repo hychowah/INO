@@ -173,6 +173,16 @@ def _handle_delete_topic(params: Dict) -> Tuple[str, Any]:
     if not topic:
         return ('error', f"Topic #{tid} not found")
 
+    # Guard: refuse to delete topics that still have concepts or children
+    concepts = db.get_concepts_for_topic(int(tid))
+    if concepts:
+        return ('error', f"Cannot delete topic #{tid} '{topic['title']}': "
+                f"still has {len(concepts)} concept(s). Unlink or move them first.")
+    children = db.get_topic_children(int(tid))
+    if children:
+        return ('error', f"Cannot delete topic #{tid} '{topic['title']}': "
+                f"still has {len(children)} child topic(s). Unlink them first.")
+
     db.delete_topic(int(tid))
     return ('reply', f"Deleted topic **{topic['title']}** (#{tid})")
 

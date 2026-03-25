@@ -241,13 +241,32 @@ async def update_topic(topic_id: int, req: UpdateTopicRequest):
 
 
 @app.delete("/api/topics/{topic_id}", dependencies=[Depends(verify_token)])
-async def delete_topic(topic_id: int):
-    """Delete a topic."""
+async def delete_topic(topic_id: int, force: bool = False):
+    """Delete a topic. Returns 409 if it still has concepts or children unless force=True."""
     from services.tools import set_action_source
     set_action_source('api')
 
-    if not db.delete_topic(topic_id):
+    topic = db.get_topic(topic_id)
+    if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+
+    if not force:
+        concepts = db.get_concepts_for_topic(topic_id)
+        if concepts:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Topic still has {len(concepts)} concept(s). "
+                       f"Unlink them first, or use ?force=true.",
+            )
+        children = db.get_topic_children(topic_id)
+        if children:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Topic still has {len(children)} child topic(s). "
+                       f"Unlink them first, or use ?force=true.",
+            )
+
+    db.delete_topic(topic_id)
     return {"message": f"Topic {topic_id} deleted."}
 
 

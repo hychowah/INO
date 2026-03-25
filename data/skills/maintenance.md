@@ -13,7 +13,7 @@ Called by the scheduler (daily). You receive a diagnostic report listing DB heal
 
 **What you can fix automatically:**
 - **Untagged concepts**: If you can infer the topic from the concept title/description, `link_concept` it. If not, flag it for the user.
-- **Empty topics**: If a topic has no concepts and no children, `delete_topic` it (housekeeping).
+- **Empty topics**: If a topic has **0 concepts AND 0 child topics**, `delete_topic` it (housekeeping). The system will reject deletion of non-empty topics — do not attempt to delete topics that still have concepts or children.
 - **Orphan subtopics**: If a topic is clearly a subtopic of an existing one but sits at the root level, use `link_topics` to fix the hierarchy.
 
 **What requires user approval (propose but do NOT execute):**

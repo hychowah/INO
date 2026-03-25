@@ -175,12 +175,13 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         LIMIT 20
     """).fetchall()
 
-    # 2. Empty topics (no concepts linked)
+    # 2. Empty topics (no concepts linked AND no child topics)
     empty_topics = conn.execute("""
         SELECT t.id, t.title, t.created_at
         FROM topics t
         LEFT JOIN concept_topics ct ON t.id = ct.topic_id
-        WHERE ct.concept_id IS NULL
+        LEFT JOIN topic_relations tr ON t.id = tr.parent_id
+        WHERE ct.concept_id IS NULL AND tr.child_id IS NULL
         ORDER BY t.created_at DESC
         LIMIT 20
     """).fetchall()

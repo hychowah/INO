@@ -126,6 +126,25 @@ class TestTopicCRUD:
         assert resp.status_code == 404
 
     @pytest.mark.anyio
+    async def test_delete_topic_with_concepts_409(self, client):
+        """Deleting a topic that still has concepts returns 409."""
+        tid = _make_topic("Has Concepts")
+        cid = db.add_concept("Linked Concept", "desc")
+        db.link_concept(cid, [tid])
+        resp = await client.delete(f"/api/topics/{tid}")
+        assert resp.status_code == 409
+        assert 'concept(s)' in resp.json()['detail']
+
+    @pytest.mark.anyio
+    async def test_delete_topic_with_concepts_force(self, client):
+        """Deleting a non-empty topic with ?force=true succeeds."""
+        tid = _make_topic("Force Delete")
+        cid = db.add_concept("Linked Concept", "desc")
+        db.link_concept(cid, [tid])
+        resp = await client.delete(f"/api/topics/{tid}?force=true")
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
     async def test_link_topics(self, client):
         p = _make_topic("Parent")
         c = _make_topic("Child")
