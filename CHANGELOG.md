@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `CHANGELOG.md` — this file
-- `CONTRIBUTING.md` — contributor setup and workflow guide
 - `Makefile` — common developer commands
 - `requirements-dev.txt` — development/test/lint dependencies separated from runtime
 - `docs/API.md` — overview of all API surfaces (Discord bot, FastAPI, Web UI)

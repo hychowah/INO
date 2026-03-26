@@ -20,7 +20,6 @@
 
 | Path | Purpose |
 |---|---|
-| `CONTRIBUTING.md` | Contributor guide: local setup, testing, linting, PR workflow |
 | `CODING.md` | Development instructions for AI coding assistants |
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `docs/API.md` | API reference: Discord commands, REST endpoints, Web UI pages |

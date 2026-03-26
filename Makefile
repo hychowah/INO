@@ -2,12 +2,12 @@
 
 # Run the test suite
 test:
-	LEARN_LLM_PROVIDER=kimi LEARN_AUTHORIZED_USER_ID=123456789 \
 	pytest tests/ -v --tb=short
 
 # Lint with Ruff
 lint:
 	ruff check .
+	ruff format --check .
 
 # Format with Ruff
 format:
