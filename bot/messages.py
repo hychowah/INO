@@ -1,0 +1,55 @@
+"""Discord message helpers — splitting long text and sending with views."""
+
+import discord
+
+import config
+
+
+def _split_message(text: str, limit: int = config.MAX_MESSAGE_LENGTH) -> list[str]:
+    """Split text into chunks, preferring newline boundaries."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        search_start = max(0, limit - 200)
+        newline_pos = text.rfind('\n', search_start, limit)
+        if newline_pos > 0:
+            chunks.append(text[:newline_pos])
+            text = text[newline_pos + 1:]
+        else:
+            chunks.append(text[:limit])
+            text = text[limit:]
+    return chunks
+
+
+async def send_long(ctx, text: str, title: str = "Learn"):
+    """Send text to Discord, handling length limits."""
+    is_interaction = ctx.interaction is not None
+
+    if not text or not text.strip():
+        text = "(empty response)"
+
+    chunks = _split_message(text)
+
+    for chunk in chunks:
+        if is_interaction:
+            await ctx.interaction.followup.send(chunk)
+        else:
+            await ctx.send(chunk)
+
+
+async def send_long_with_view(send_fn, text: str, view=None) -> "discord.Message":
+    """Send a long message with a Discord view (buttons) on the last chunk."""
+    if not text or not text.strip():
+        text = "(empty response)"
+
+    chunks = _split_message(text)
+
+    for chunk in chunks[:-1]:
+        await send_fn(chunk)
+
+    sent = await send_fn(chunks[-1], view=view)
+    return sent
