@@ -63,11 +63,11 @@ LEARN_LLM_API_KEY=your-api-key
 LEARN_LLM_BASE_URL=https://api.moonshot.cn/v1
 
 # Discord (required for bot)
-LEARN_DISCORD_TOKEN=your-discord-bot-token
+LEARN_BOT_TOKEN=your-discord-bot-token
 LEARN_AUTHORIZED_USER_ID=your-discord-user-id   # numeric ID
 
 # REST API token (required for api.py)
-LEARN_API_TOKEN=choose-a-secret-token
+LEARN_API_SECRET_KEY=choose-a-secret-token
 
 # Database paths (optional — defaults work for local dev)
 # LEARN_DB_PATH=data/knowledge.db

@@ -38,10 +38,10 @@ Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Disc
 
 ## 2. FastAPI REST API (`api.py`)
 
-The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_TOKEN`). All endpoints except `/api/health` require the header:
+The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_SECRET_KEY`). All endpoints except `/api/health` require the header:
 
 ```
-Authorization: Bearer <LEARN_API_TOKEN>
+Authorization: Bearer <LEARN_API_SECRET_KEY>
 ```
 
 Start the server:
@@ -150,7 +150,7 @@ The Web UI reads directly from the same SQLite databases used by the bot and API
 | Surface | Mechanism | Variable |
 |---------|-----------|----------|
 | Discord bot | Discord user ID allowlist | `LEARN_AUTHORIZED_USER_ID` |
-| REST API | Bearer token header | `LEARN_API_TOKEN` |
+| REST API | Bearer token header | `LEARN_API_SECRET_KEY` |
 | Web UI | None (localhost-only by design) | — |
 
 ---
@@ -165,8 +165,8 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_LLM_MODEL` | Model name to use |
 | `LEARN_LLM_API_KEY` | API key for the LLM provider |
 | `LEARN_LLM_BASE_URL` | Base URL for the LLM API |
-| `LEARN_DISCORD_TOKEN` | Discord bot token |
+| `LEARN_BOT_TOKEN` | Discord bot token |
 | `LEARN_AUTHORIZED_USER_ID` | Discord user ID allowed to use the bot |
-| `LEARN_API_TOKEN` | Bearer token for the REST API |
+| `LEARN_API_SECRET_KEY` | Bearer token for the REST API |
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |

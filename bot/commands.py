@@ -6,7 +6,6 @@ import discord
 import db
 from services import pipeline
 from services.views import AddConceptConfirmView, QuizNavigationView, SuggestTopicConfirmView
-from services.formatting import truncate_with_suffix
 from services.parser import parse_llm_response
 
 import config

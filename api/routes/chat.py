@@ -1,6 +1,7 @@
 """Chat endpoints — conversational learning pipeline."""
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -23,7 +24,7 @@ async def chat(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    state.last_activity_at = __import__("datetime").datetime.now()
+    state.last_activity_at = datetime.now()
 
     set_action_source('api')
 

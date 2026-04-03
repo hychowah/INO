@@ -3,5 +3,8 @@
 #   pip install -r requirements.txt
 #   pip install -r requirements-dev.txt
 
+anyio[trio]>=4.0
+httpx>=0.23
 pytest>=7.0
+pytest-anyio>=0.0.0
 ruff>=0.4
