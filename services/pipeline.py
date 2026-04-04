@@ -255,6 +255,21 @@ async def execute_action(action_data: dict) -> str:
             return f"FETCH: {json.dumps(result, default=str)}"
         return f"REPLY: {result}"
 
+    # Guard: only allow assess/multi_assess when a quiz is actually active.
+    # After a quiz is answered, _QUIZ_CLEARING_ACTIONS clears both
+    # quiz_anchor_concept_id (single-quiz) and active_concept_ids (multi-quiz).
+    # Without this guard, the LLM may keep calling assess on follow-up
+    # questions, triggering spurious score changes and duplicate log entries.
+    if action in ('assess', 'multi_assess'):
+        has_single_quiz = bool(db.get_session('quiz_anchor_concept_id'))
+        has_multi_quiz = bool(db.get_session('active_concept_ids'))
+        if not has_single_quiz and not has_multi_quiz:
+            logger.warning(
+                f"[pipeline] Blocked '{action}' — no active quiz. "
+                f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
+            )
+            return f"REPLY: {message}" if message else "REPLY: "
+
     msg_type, result = tools.execute_action(action, params)
 
     # Repair sub-agent: if unknown action, try to fix via kimi session
