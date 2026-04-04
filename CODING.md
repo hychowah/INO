@@ -188,6 +188,27 @@ Key thresholds (all in `config.py`, all overridable via env vars):
 
 ---
 
+## Quiz State Guards
+
+### `is_quiz_active()` — single source of truth
+
+`services/pipeline.py::is_quiz_active()` is the **only** place that decides whether a quiz session is currently in progress. It checks the two session keys used today:
+
+| Key | Set by | Cleared by |
+|-----|--------|------------|
+| `quiz_anchor_concept_id` | `_handle_quiz` | `_QUIZ_CLEARING_ACTIONS` after `assess` |
+| `active_concept_ids` | `_handle_multi_quiz` | `_handle_multi_assess` at completion |
+
+**If you add a new quiz type**, update `is_quiz_active()` to check its session key. Do **not** add a separate quiz-active check elsewhere — all callers depend on this one function.
+
+### Guards belong in `execute_action`, not in action handlers
+
+Actions that mutate scores (`assess`, `multi_assess`) are gated in `execute_action` (both `services/pipeline.py` and `scripts/agent.py`). The handler functions (`_handle_assess`, `_handle_multi_assess`) do **not** repeat this check.
+
+**Rule:** If a new score-mutating action needs a prerequisite guard, add it in `execute_action` at the same level as the existing `assess`/`multi_assess` guard — not inside the handler. This keeps all bypass-prevention in one layer and leaves handlers as pure executors.
+
+---
+
 ## How to Add a New API Endpoint
 
 1. **`api.py`** — Add the route with `@app.get/post`, include `dependencies=[Depends(verify_token)]`
@@ -242,6 +263,8 @@ python -m pytest tests/test_llm.py -v # single file
 **Vector store tests** (`tests/test_vectors.py`) are automatically skipped when `qdrant-client` is not installed — `pytest.importorskip("qdrant_client")` at module top.
 
 **Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store` — no model or Qdrant needed for the rest of the suite.
+
+**Any test that touches `session_state`** (reads or writes `db.get_session` / `db.set_session`) **must use the `test_db` fixture**. `db.chat` imports `CHAT_DB` by value at import time, so patching `db.core.CHAT_DB` alone is not sufficient — the `test_db` fixture patches `db.chat.CHAT_DB` directly. Without this, session writes in the test bleed into the real `chat_history.db`.
 
 Some older test files (e.g. `test_dedup.py`) are still manual scripts
 (`python tests/test_dedup.py`), but newer tests use proper pytest
