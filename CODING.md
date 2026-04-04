@@ -264,7 +264,7 @@ python -m pytest tests/test_llm.py -v # single file
 
 **Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store` — no model or Qdrant needed for the rest of the suite.
 
-**Any test that touches `session_state`** (reads or writes `db.get_session` / `db.set_session`) **must use the `test_db` fixture**. `db.chat` imports `CHAT_DB` by value at import time, so patching `db.core.CHAT_DB` alone is not sufficient — the `test_db` fixture patches `db.chat.CHAT_DB` directly. Without this, session writes in the test bleed into the real `chat_history.db`.
+**Any test that reads or writes `session_state`** (via `db.get_session` / `db.set_session`) **must use the `test_db` fixture**. The reason: `db.chat` imports `CHAT_DB` by value at import time, so patching `db.core.CHAT_DB` alone is not sufficient. The `test_db` fixture patches `db.chat.CHAT_DB` directly. Without it, session writes in the test bleed into the real `chat_history.db`.
 
 Some older test files (e.g. `test_dedup.py`) are still manual scripts
 (`python tests/test_dedup.py`), but newer tests use proper pytest
