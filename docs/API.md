@@ -4,7 +4,7 @@ This document describes all public API surfaces exposed by the Learning Agent: t
 
 ---
 
-## 1. Discord Bot (`bot.py`)
+## 1. Discord Bot (`bot.py` + `bot/` package)
 
 The bot is the primary user-facing interface. All commands require the calling user to be listed in `LEARN_AUTHORIZED_USER_ID`.
 
@@ -13,7 +13,7 @@ The bot is the primary user-facing interface. All commands require the calling u
 | Command | Description |
 |---------|-------------|
 | `/learn [text]` | Start or continue a learning session. Optionally pass a topic or question as `text`. |
-| `/review` | Trigger a spaced-repetition quiz session. |
+| `/review` | Trigger a spaced-repetition quiz session. Concepts with 2+ prior reviews can show an `I know this` skip button for confident recall. |
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
@@ -29,6 +29,13 @@ Any non-command message in an authorised channel is routed through `_handle_user
 ```
 on_message → _handle_user_message → services/pipeline.py → LLM → tools/actions → response
 ```
+
+### Quiz UI Behavior
+
+- Quiz questions can render Discord buttons in addition to the text reply.
+- After an assessment, the bot shows navigation buttons such as `Quiz again`, `Next due`, and `Explain`.
+- For concepts with `review_count >= 2`, eligible quiz questions can also show an `I know this` button that scores the review as confident recall without requiring a typed answer.
+- The skip button is a Discord-only UI affordance. It is not a public REST action and is not emitted by the LLM.
 
 ### Authentication
 
@@ -47,10 +54,11 @@ Authorization: Bearer <LEARN_API_SECRET_KEY>
 Start the server:
 
 ```bash
-uvicorn api:app --reload --host 0.0.0.0 --port 8000
+python api.py
+# or: uvicorn api:app --reload --host 0.0.0.0 --port 8080
 ```
 
-Interactive docs are available at `http://localhost:8000/docs` (Swagger UI) and `http://localhost:8000/redoc`.
+Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and `http://localhost:8080/redoc`.
 
 ### Chat
 

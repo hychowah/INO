@@ -9,13 +9,61 @@ Verifies that:
 - staleness timeout clears quiz_anchor
 """
 
+import asyncio
 import math
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import db
+from services import views as quiz_views
 from services.tools import execute_action
+from services.tools_assess import skip_quiz
+
+
+class _MockFollowup:
+    def __init__(self):
+        self.calls = []
+
+    async def send(self, content, view=None):
+        self.calls.append({'content': content, 'view': view})
+
+
+class _MockResponse:
+    def __init__(self):
+        self.calls = []
+
+    async def edit_message(self, *, content=None, view=None):
+        self.calls.append({'content': content, 'view': view})
+
+
+class _MockTyping:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _MockChannel:
+    def typing(self):
+        return _MockTyping()
+
+
+class _MockInteraction:
+    def __init__(self):
+        self.followup = _MockFollowup()
+        self.response = _MockResponse()
+        self.channel = _MockChannel()
+        self.user = 'test-user'
+        self.message = type('Message', (), {'content': ''})()
+
+
+def _get_button(view: quiz_views.QuizNavigationView, label: str):
+    for child in view.children:
+        if getattr(child, 'label', None) == label:
+            return child
+    raise AssertionError(f"Button not found: {label}")
 
 
 class TestQuizAnchor:
@@ -361,3 +409,183 @@ class TestDeletedConceptFallback:
         assert msg_type == 'reply'
         # c2 should have been scored via Fallback 2
         assert db.get_concept(c2)['review_count'] == 1
+
+
+class TestQuizResponseViewDelivery:
+    """Test metadata-first quiz view delivery for button flows."""
+
+    def test_send_quiz_response_uses_quiz_meta_when_anchor_cleared(self, test_db):
+        """Fresh quiz_meta reattaches the skip button even with no anchor state."""
+        cid = db.add_concept("Fresh Quiz", "Desc")
+        db.update_concept(cid, review_count=3)
+        interaction = _MockInteraction()
+
+        async def _send():
+            await quiz_views._send_quiz_response(
+                interaction,
+                "Fresh quiz",
+                lambda *_args: None,
+                quiz_meta={'concept_id': cid, 'show_skip': True},
+            )
+
+        asyncio.run(_send())
+
+        assert len(interaction.followup.calls) == 1
+        sent = interaction.followup.calls[0]
+        assert sent['content'] == "Fresh quiz"
+        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
+        assert sent['view'].concept_id == cid
+
+    def test_send_quiz_response_falls_back_to_session_anchor(self, test_db):
+        """Legacy callers without quiz_meta still get the skip button from session state."""
+        cid = db.add_concept("Fallback Quiz", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session('quiz_anchor_concept_id', str(cid))
+
+        interaction = _MockInteraction()
+
+        async def _send():
+            await quiz_views._send_quiz_response(
+                interaction,
+                "Fallback quiz",
+                lambda *_args: None,
+            )
+
+        asyncio.run(_send())
+
+        assert len(interaction.followup.calls) == 1
+        sent = interaction.followup.calls[0]
+        assert sent['content'] == "Fallback quiz"
+        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
+        assert sent['view'].concept_id == cid
+
+    def test_send_quiz_response_honors_explicit_no_skip(self, test_db):
+        """Explicit quiz_meta with show_skip=False sends plain text and skips fallback."""
+        cid = db.add_concept("No Skip Quiz", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session('quiz_anchor_concept_id', str(cid))
+
+        interaction = _MockInteraction()
+
+        async def _send():
+            await quiz_views._send_quiz_response(
+                interaction,
+                "No skip quiz",
+                lambda *_args: None,
+                quiz_meta={'concept_id': cid, 'show_skip': False},
+            )
+
+        asyncio.run(_send())
+
+        assert len(interaction.followup.calls) == 1
+        sent = interaction.followup.calls[0]
+        assert sent['content'] == "No skip quiz"
+        assert sent['view'] is None
+
+
+class TestQuizNavigationButtonMetadata:
+    """Test that navigation buttons pass quiz_meta through to the sender helper."""
+
+    def test_quiz_again_button_passes_quiz_meta(self, test_db):
+        """Quiz again must forward fresh quiz metadata to the sender helper."""
+        cid = db.add_concept("Quiz Again Concept", "Desc")
+        interaction = _MockInteraction()
+        captured = {}
+
+        async def message_handler(text, author):
+            captured['handler_text'] = text
+            captured['handler_author'] = author
+            return "Fresh quiz", None, None, {'concept_id': cid, 'show_skip': True}
+
+        async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
+            captured['interaction'] = interaction_arg
+            captured['response'] = response
+            captured['message_handler'] = message_handler_arg
+            captured['quiz_meta'] = quiz_meta
+
+        view = quiz_views.QuizNavigationView(cid, 5, message_handler)
+        button = _get_button(view, "Quiz again")
+
+        async def _click():
+            with patch.object(quiz_views, '_send_quiz_response', new=fake_send):
+                await button.callback(interaction)
+
+        asyncio.run(_click())
+
+        assert captured['handler_text'].startswith("[BUTTON] Quiz me again")
+        assert captured['handler_author'] == 'test-user'
+        assert captured['interaction'] is interaction
+        assert captured['response'] == "Fresh quiz"
+        assert captured['message_handler'] is message_handler
+        assert captured['quiz_meta'] == {'concept_id': cid, 'show_skip': True}
+
+    def test_quiz_next_due_button_passes_quiz_meta(self, test_db):
+        """Next due must forward fresh quiz metadata to the sender helper."""
+        cid = db.add_concept("Next Due Concept", "Desc")
+        interaction = _MockInteraction()
+        captured = {}
+
+        async def message_handler(text, author):
+            captured['handler_text'] = text
+            captured['handler_author'] = author
+            return "Due quiz", None, None, {'concept_id': cid, 'show_skip': True}
+
+        async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
+            captured['interaction'] = interaction_arg
+            captured['response'] = response
+            captured['message_handler'] = message_handler_arg
+            captured['quiz_meta'] = quiz_meta
+
+        view = quiz_views.QuizNavigationView(cid, 5, message_handler)
+        button = _get_button(view, "Next due")
+
+        async def _click():
+            with patch.object(quiz_views, '_send_quiz_response', new=fake_send):
+                await button.callback(interaction)
+
+        asyncio.run(_click())
+
+        assert captured['handler_text'] == "[BUTTON] Quiz me on the next due concept"
+        assert captured['handler_author'] == 'test-user'
+        assert captured['interaction'] is interaction
+        assert captured['response'] == "Due quiz"
+        assert captured['message_handler'] is message_handler
+        assert captured['quiz_meta'] == {'concept_id': cid, 'show_skip': True}
+
+
+class TestSkipQuizButtonRegression:
+    """Regression coverage for skip -> navigation -> skip-button reappearance."""
+
+    def test_skip_then_quiz_again_reattaches_skip_button(self, test_db):
+        """After skip_quiz clears the anchor, Quiz again still shows the skip button."""
+        cid = db.add_concept("Repeatable Quiz", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session('quiz_answered', None)
+        db.set_session('quiz_anchor_concept_id', str(cid))
+        db.set_session('last_quiz_question', 'What is it?')
+
+        result = skip_quiz(cid, user_id='test-user')
+        assert 'error' not in result
+        assert db.get_session('quiz_anchor_concept_id') is None
+
+        interaction = _MockInteraction()
+
+        async def message_handler(_text, _author):
+            return "Fresh quiz after skip", None, None, {
+                'concept_id': cid,
+                'show_skip': True,
+            }
+
+        view = quiz_views.QuizNavigationView(cid, 5, message_handler)
+        button = _get_button(view, "Quiz again")
+
+        async def _click():
+            await button.callback(interaction)
+
+        asyncio.run(_click())
+
+        assert len(interaction.followup.calls) == 1
+        sent = interaction.followup.calls[0]
+        assert sent['content'] == "Fresh quiz after skip"
+        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
+        assert sent['view'].concept_id == cid

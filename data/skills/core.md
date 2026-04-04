@@ -138,6 +138,19 @@ Called by the scheduler. Find due concepts and generate quiz questions for DM de
 
 ---
 
+## Quiz Button UI
+
+After you assess a quiz answer, Discord may render navigation buttons below the response:
+- `Quiz again` — request another quiz on the same concept
+- `Next due` — move to the next due concept
+- `Explain` — ask for a plain-language explanation without scoring
+
+Eligible quiz questions may also show an `I know this` skip button when the concept has `review_count >= 2`.
+
+These buttons are Discord UI only. You do NOT output button markup or button actions in your response — you only emit the normal `quiz`, `assess`, `multi_quiz`, `multi_assess`, `ASK:`, or `REPLY:` output, and the application decides which views to attach.
+
+---
+
 ## Actions Reference
 
 ### fetch

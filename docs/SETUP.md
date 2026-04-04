@@ -10,7 +10,7 @@ This guide walks you through setting up a fully functional local development env
 | pip | latest | `pip install --upgrade pip` |
 | git | any | |
 | Discord account | — | Required for bot testing |
-| LLM API key | — | Any OpenAI-compatible provider |
+| LLM API key | — | `kimi` CLI or any OpenAI-compatible provider |
 
 ---
 
@@ -78,19 +78,11 @@ See `.env.example` for the complete variable reference.
 
 ---
 
-## 4. (Optional) Qdrant Vector Store
+## 4. Embedded Vector Store
 
-Qdrant runs in embedded mode by default — no separate server is needed. The first run automatically initialises the embedded database.
+Qdrant runs in embedded mode by default — no separate server or URL configuration is required. The first run automatically initialises the embedded database under `data/vectors/`.
 
-If you want to test with a standalone Qdrant server:
-
-```bash
-docker run -p 6333:6333 qdrant/qdrant
-```
-
-Then set `LEARN_QDRANT_URL=http://localhost:6333` in `.env`.
-
-The application degrades gracefully if Qdrant is unavailable: it falls back to SQLite FTS5 full-text search.
+The application degrades gracefully if embeddings or vector storage are unavailable: it falls back to SQLite FTS5 full-text search.
 
 ---
 
@@ -98,8 +90,7 @@ The application degrades gracefully if Qdrant is unavailable: it falls back to S
 
 ```bash
 make test
-# equivalent to:
-# LEARN_LLM_PROVIDER=kimi LEARN_AUTHORIZED_USER_ID=123456789 pytest tests/ -v --tb=short
+# equivalent to: pytest tests/ -v --tb=short
 ```
 
 The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required.
@@ -135,11 +126,12 @@ The bot connects to Discord and registers slash commands on startup. Use `/sync`
 
 ```bash
 make run-api
-# equivalent to: uvicorn api:app --reload --host 0.0.0.0 --port 8000
+# equivalent host/port to: python api.py
+# defaults to LEARN_API_PORT=8080 unless overridden in .env
 ```
 
-- API docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/api/health`
+- API docs: `http://localhost:8080/docs`
+- Health check: `http://localhost:8080/api/health`
 
 ### Web UI Dashboard
 
@@ -183,7 +175,24 @@ INO/
 
 ---
 
-## 9. Common Issues
+## 9. Available Discord Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/learn [text]` | Chat with the learning coach, ask questions, or start a quiz flow. |
+| `/review` | Pull the next due review quiz. Concepts with 2+ prior reviews can show an `I know this` skip button. |
+| `/due` | List concepts currently due for review. |
+| `/topics` | Show the current topic hierarchy and knowledge map. |
+| `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |
+| `/maintain` | Run manual maintenance diagnostics and cleanup suggestions. |
+| `/clear` | Clear the current channel's saved chat history. |
+| `/sync` | Admin command to sync slash commands with Discord. |
+
+For endpoint and feature details, see [API.md](API.md).
+
+---
+
+## 10. Common Issues
 
 ### `ModuleNotFoundError: No module named 'discord'`
 Run `pip install -r requirements.txt` inside your active virtual environment.
@@ -203,7 +212,7 @@ Run `/sync` in your Discord server after starting the bot for the first time, or
 
 ---
 
-## 10. Scripts
+## 11. Scripts
 
 | Script | Purpose |
 |--------|---------|

@@ -9,10 +9,11 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 
 - **LLM-driven pedagogy** — Topic/concept extraction, quiz generation, and knowledge assessment are all handled by the LLM via a modular prompt system with hot-reloadable skill files
 - **Score-based spaced repetition** — Asymmetric 0–100 scoring with exponential intervals (custom algorithm, not SM-2)
+- **Quiz skip button** — After 2+ reviews, eligible quiz questions show an `I know this` button that scores confident recall without forcing a typed answer
 - **Hybrid search** — Qdrant vector store (768-dim, `all-mpnet-base-v2`) + SQLite FTS5, with graceful degradation if Qdrant is unavailable
 - **Multi-concept synthesis quizzes** — Semantically clusters related concepts for cross-topic questions
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
-- **Dual interfaces** — Discord bot (`bot.py`) and REST API (`api.py`) share the same pipeline
+- **Dual interfaces** — Discord bot (`bot.py` wrapper + `bot/` package) and REST API (`api.py`) share the same pipeline
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
 - **Web dashboard** — Zero-dependency read-only HTTP UI with interactive D3.js topic tree and force-directed graph
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
@@ -60,7 +61,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 
 The **fetch loop** is the key architectural pattern: the LLM can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before composing its response. This keeps the LLM in control of what data it needs, without sending everything upfront.
 
-See [docs/architecture.md](docs/architecture.md) for the full architecture documentation with data flow diagrams, schema definitions, and module responsibilities.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture documentation with data flow diagrams, schema definitions, and module responsibilities.
 
 ## Tech Stack
 
@@ -70,7 +71,7 @@ See [docs/architecture.md](docs/architecture.md) for the full architecture docum
 | Databases | SQLite (WAL mode) × 2 |
 | Vector Store | Qdrant (embedded mode) |
 | Embeddings | sentence-transformers (`all-mpnet-base-v2`, 768-dim) |
-| LLM Backend | Any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
+| LLM Backend | `kimi` CLI or any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
 | Discord | discord.py |
 | REST API | FastAPI + Uvicorn |
 | Web UI | Vanilla JS + D3.js (zero build step) |
@@ -107,6 +108,8 @@ LEARN_LLM_API_KEY=your_api_key_here
 LEARN_LLM_MODEL=grok-3
 LEARN_AUTHORIZED_USER_ID=your_discord_user_id
 ```
+
+If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`.
 
 Then run:
 
@@ -159,6 +162,8 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
 
+See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
+
 **Optional (Reasoning model for scheduled quiz P1):**
 
 If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model) generates a structured question, P2 (main provider) packages it with persona voice. Falls back to single-prompt if not set.
@@ -181,7 +186,14 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 ## Project Structure
 
 ```
-├── bot.py                  # Discord bot entry point
+├── bot.py                  # Discord bot entry point (thin wrapper)
+├── bot/
+│   ├── app.py              # Bot client setup and shared app state
+│   ├── handler.py          # Core message handler (returns response, pending_action, assess_meta, quiz_meta)
+│   ├── commands.py         # Slash command implementations
+│   ├── events.py           # Discord event handlers
+│   ├── messages.py         # Message splitting and view helpers
+│   └── auth.py             # Authorization helpers
 ├── api.py                  # FastAPI REST entry point
 ├── config.py               # Environment-based configuration
 ├── services/
@@ -217,7 +229,7 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — Architecture diagrams, data flows, schema, module map
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architecture diagrams, data flows, schema, module map
 - [CODING.md](CODING.md) — Development guide, conventions, async/sync patterns
 - [docs/DEVNOTES.md](docs/DEVNOTES.md) — Bug stories with root causes, multi-layer fixes, and design rationale
 

@@ -124,7 +124,7 @@ You do NOT need to calculate or provide intervals — the code derives them from
 
 **After assessment, always output an `assess` action** with quality and question_difficulty. Include a `remark` noting what the user got right/wrong, plus the score context for your future self.
 
-**Skipped quizzes:** The user can skip a quiz via a button, claiming confident recall. Skipped reviews appear in `recent_reviews` with `user_response: "[Skipped]"` and `quality: 5`. When you see skipped entries, probe the concept harder next time — ask an application or synthesis question one tier above their current level to verify actual knowledge before fully trusting the claim. A synthetic remark is auto-written for skips, so your strategy notes remain continuous.
+**Skipped quizzes:** The user can skip a quiz via a button, claiming confident recall. The skip button only appears for concepts with `review_count >= 2` — first encounters must be answered normally to prevent gaming. Skipped reviews appear in `recent_reviews` with `user_response: "[Skipped]"` and `quality: 5`. When you see skipped entries, probe the concept harder next time — ask an application or synthesis question one tier above their current level to verify actual knowledge before fully trusting the claim. A synthetic remark is auto-written for skips, so your strategy notes remain continuous.
 
 **Initial values for new concepts:**
 - score (mastery_level): 0

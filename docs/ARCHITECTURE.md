@@ -1,10 +1,15 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-03-25
+> Last updated: 2026-04-04
 
 ## Overview
 
-The Learning Agent is a Discord-based spaced repetition system where **all learning intelligence lives in an LLM prompt** (AGENTS.md), not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database.
+The Learning Agent is a Discord-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database.
+
+**Entry points:**
+- `bot.py` is a thin wrapper that starts the Discord bot
+- `bot/` contains the actual Discord bot logic (`app.py`, `handler.py`, `commands.py`, `events.py`, `messages.py`)
+- `api.py` exposes the same learning pipeline through FastAPI
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -78,13 +83,18 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
 | `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection, JSON output format (scheduled quiz P1 only) |
 | `data/preferences.md` | ~20 | User learning preferences (interests, style) |
-| `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
+| `bot.py` | ~62 | Thin Discord bot entry point wrapper |
+| `bot/app.py` | ~40 | Bot client setup and shared application instance |
+| `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
+| `bot/commands.py` | ~280 | Slash command implementations (`/learn`, `/review`, `/maintain`, etc.) |
+| `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
+| `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
-| `context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
-| `tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
+| `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
+| `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `db/` | ~2715 | Database package — see submodules below |
-| `agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
+| `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
 | `webui/server.py` | ~200 | Zero-dependency HTTP server — routing, Handler class, static file serving |
 | `webui/helpers.py` | ~145 | HTML helpers (`score_bar`, `layout`, `_esc`, etc.) extracted from `server.py` |
 | `webui/pages.py` | ~890 | Page renderers (`page_dashboard`, `page_topic_detail`, etc.) extracted from `server.py` |
@@ -126,7 +136,7 @@ The LLM (via AGENTS.md) makes **all** decisions:
 - When to restructure the knowledge graph (merge topics, split oversized ones)
 - What remarks to write for its own future self
 
-The code is intentionally "dumb" — it provides CRUD primitives and a pipeline, nothing more. To change a behavior, **edit AGENTS.md**, not code.
+The code is intentionally "dumb" — it provides CRUD primitives and a pipeline, nothing more. To change runtime behavior, **edit `data/skills/*.md`**, not the root `AGENTS.md` pointer file.
 
 ---
 
@@ -138,10 +148,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   User types in Discord
          │
          ▼
-  bot.py: on_message or /learn command
+    bot/events.py:on_message or bot/commands.py:/learn
          │
          ▼
-  bot._handle_user_message(text, author)
+    bot/handler.py:_handle_user_message(text, author)
          │  returns tuple[str, dict|None, dict|None, dict|None]
          │  (response, pending_action, assess_meta, quiz_meta)
          ▼
@@ -160,8 +170,8 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │         └── _preload_mentioned_concept()  (exact title match → concept detail + relations)
          │
          ├─── Assemble prompt:
-         │      "Read AGENTS.md at <path>"
-         │      "Read preferences.md at <path>"
+         │      build_system_prompt(mode)
+         │      → loads data/skills/* + active persona + preferences.md
          │      + dynamic context (topics, due, chat history)
          │      + "User said: <text>"
          │

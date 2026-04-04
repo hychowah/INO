@@ -2,7 +2,8 @@
 
 <!-- DEV NOTE: This file is the TABLE OF CONTENTS. Full instructions are assembled
      from data/skills/ at runtime by pipeline.py. Edit the source files there.
-     Copilot/coding assistants: read docs/DEVNOTES.md before editing code. -->
+     Copilot/coding assistants: read docs/DEVNOTES.md before editing code.
+     Runtime LLM instructions belong in data/skills/*.md, not this file. -->
 
 This file is the entry point for the runtime LLM system prompt.
 

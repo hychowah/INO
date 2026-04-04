@@ -566,9 +566,14 @@ class _QuizAgainButton(discord.ui.Button):
 
         try:
             async with interaction.channel.typing():
-                response, _, _, _ = await self.parent_view.message_handler(
+                response, _, _, quiz_meta = await self.parent_view.message_handler(
                     text, str(interaction.user))
-            await _send_quiz_response(interaction, response, self.parent_view.message_handler)
+            await _send_quiz_response(
+                interaction,
+                response,
+                self.parent_view.message_handler,
+                quiz_meta=quiz_meta,
+            )
         except Exception as e:
             logger.error(f"QuizAgain callback error: {e}", exc_info=True)
             try:
@@ -596,9 +601,14 @@ class _QuizNextDueButton(discord.ui.Button):
         text = "[BUTTON] Quiz me on the next due concept"
         try:
             async with interaction.channel.typing():
-                response, _, _, _ = await self.parent_view.message_handler(
+                response, _, _, quiz_meta = await self.parent_view.message_handler(
                     text, str(interaction.user))
-            await _send_quiz_response(interaction, response, self.parent_view.message_handler)
+            await _send_quiz_response(
+                interaction,
+                response,
+                self.parent_view.message_handler,
+                quiz_meta=quiz_meta,
+            )
         except Exception as e:
             logger.error(f"QuizNextDue callback error: {e}", exc_info=True)
             try:
@@ -747,28 +757,34 @@ class _QuizSkipButton(discord.ui.Button):
 
 async def _send_quiz_response(interaction: discord.Interaction,
                               response: str,
-                              message_handler: Callable[..., Awaitable]) -> None:
+                              message_handler: Callable[..., Awaitable],
+                              *,
+                              quiz_meta: dict | None = None) -> None:
     """Send the LLM response from a quiz button click.
 
-    If the LLM just did another assess (recursive quiz chain), attach a new
-    QuizNavigationView to the response. Otherwise send plain text.
+    Prefer explicit quiz metadata from the handler. Fall back to session state
+    only for callers that do not provide quiz_meta.
     """
     if not response or not response.strip():
         response = "✅ No concepts due right now!"
 
-    # Check if this response itself was an assess (for recursive button chaining)
-    assess_cid = db.get_session('last_assess_concept_id')
-    assess_q = db.get_session('last_assess_quality')
+    if quiz_meta is not None:
+        quiz_cid = quiz_meta.get('concept_id')
+        if quiz_cid is not None and quiz_meta.get('show_skip'):
+            concept = db.get_concept(int(quiz_cid))
+            if concept and concept.get('review_count', 0) >= 2:
+                view = QuizQuestionView(
+                    concept_id=int(quiz_cid),
+                    message_handler=message_handler,
+                    show_skip=True,
+                )
+                await interaction.followup.send(
+                    truncate_for_discord(response), view=view)
+                return
 
-    # The session values are set by _handle_assess — but we only use them
-    # if the LLM response looks like it came from an assess (heuristic: the
-    # response was generated from a quiz-me button, so if session has fresh
-    # values, it's likely another assess completed). In practice, the LLM
-    # will return a quiz question (not assess) from these buttons, so this
-    # is a safety net for unusual flows.
-    # For now, send plain — buttons reappear on the *next* assess naturally.
+        await interaction.followup.send(truncate_for_discord(response))
+        return
 
-    # Check if a new quiz was delivered — attach skip button if eligible
     quiz_cid = db.get_session('quiz_anchor_concept_id')
     if quiz_cid:
         concept = db.get_concept(int(quiz_cid))

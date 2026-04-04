@@ -19,4 +19,4 @@ run-bot:
 
 # Start the FastAPI backend (with live-reload)
 run-api:
-	uvicorn api:app --reload --host 0.0.0.0 --port 8000
+	python -c "import config, uvicorn; uvicorn.run('api:app', host=config.API_HOST, port=config.API_PORT, reload=True)"

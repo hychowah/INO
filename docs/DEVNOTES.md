@@ -346,7 +346,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call. The Discord button's `clicked` flag also prevents duplicate button presses.
 
-**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` tells callers whether to attach a `QuizQuestionView`. All 5 unpack sites updated: `learn_command`, `on_message`, and the 3 `QuizNavigationView` button callbacks.
+**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` tells callers whether to attach a `QuizQuestionView`. `learn_command` and `on_message` used it correctly for initial quiz delivery. A later regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed by passing `quiz_meta` through `_send_quiz_response()`. `Explain` remains plain-text by design.
 
 **Synthetic remark & LLM continuity:** `skip_quiz()` writes a synthetic remark (`"[Skipped — user indicated prior knowledge]"`) to preserve the LLM's strategy context. `quiz.md` instructs the LLM to probe skipped concepts more rigorously on next encounter.
 
