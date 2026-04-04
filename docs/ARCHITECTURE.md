@@ -9,7 +9,8 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
 - `bot/` contains the actual Discord bot logic (`app.py`, `handler.py`, `commands.py`, `events.py`, `messages.py`)
-- `api.py` exposes the same learning pipeline through FastAPI
+- `api.py` is a thin wrapper for the FastAPI app defined in `api/app.py`
+- `api/routes/` contains the REST route modules registered by `api/app.py`
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -31,17 +32,15 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 │      │         │    │                            │                    │
 │      │         │    ▼                            │                    │
 │      │         │  ┌──────────────┐               │                    │
-│      │         │  │  kimi.py     │               │                    │
-│      │         │  │  (subprocess)│               │                    │
+│      │         │  │   llm.py     │               │                    │
+│      │         │  │ (providers)  │               │                    │
 │      │         │  └──────┬───────┘               │                    │
 │      │         │         │                       │                    │
 │      │         │         ▼                       │                    │
 │      │         │  ┌──────────────┐               │                    │
-│      │         │  │  kimi-cli    │               │                    │
-│      │         │  │  (external)  │               │                    │
-│      │         │  │  Reads:      │               │                    │
-│      │         │  │  AGENTS.md   │               │                    │
-│      │         │  │  preferences │               │                    │
+│      │         │  │ kimi CLI or  │               │                    │
+│      │         │  │ OpenAI compat│               │                    │
+│      │         │  │ backend      │               │                    │
 │      │         │  └──────────────┘               │                    │
 │      │         │                                 │                    │
 │      ▼         ▼                                 │                    │
@@ -69,6 +68,8 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 │   └──────────────────┘   └───────────────────┘  └────────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+**LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and `data/preferences.md`. With `LLM_PROVIDER="openai_compat"`, that assembled prompt is sent directly in the API request. With `LLM_PROVIDER="kimi"`, the provider prepends file references for `AGENTS.md`, the active persona file, and `data/preferences.md` before invoking the CLI.
 
 ---
 
@@ -112,6 +113,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
 | `services/pipeline.py` | ~675 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
+| `services/llm.py` | ~330 | LLM provider abstraction — kimi CLI integration and OpenAI-compatible chat-completions adapter |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
@@ -129,7 +131,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 
 ## Core Design Principle: LLM-First
 
-The LLM (via AGENTS.md) makes **all** decisions:
+The LLM (via the assembled runtime skill prompt) makes **all** decisions:
 - What to teach, when to quiz, how to adapt difficulty
 - Whether to create topics/concepts from casual conversation
 - How to assess answers (score-based, 0–100)
@@ -175,10 +177,11 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │      + dynamic context (topics, due, chat history)
          │      + "User said: <text>"
          │
-         ├─── kimi.run_kimi(prompt)                          ← only subprocess
+         ├─── llm_provider.send(prompt, system_prompt)       ← provider abstraction
          │         │
-         │         └── kimi-cli reads AGENTS.md + preferences.md from disk
-         │             returns structured response (JSON action, REPLY:, etc.)
+         │         ├── openai_compat: sends assembled prompt directly in API messages
+         │         └── kimi: prepends file refs (AGENTS.md + persona + preferences)
+         │             before invoking the CLI subprocess
          │
          ├─── pipeline.extract_llm_action(raw_output)
          │         └── strips echoed prompt, finds last JSON or prefix

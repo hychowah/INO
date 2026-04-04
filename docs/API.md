@@ -13,7 +13,7 @@ The bot is the primary user-facing interface. All commands require the calling u
 | Command | Description |
 |---------|-------------|
 | `/learn [text]` | Start or continue a learning session. Optionally pass a topic or question as `text`. |
-| `/review` | Trigger a spaced-repetition quiz session. Concepts with 2+ prior reviews can show an `I know this` skip button for confident recall. |
+| `/review` | Trigger a spaced-repetition quiz session. Both manual `/review` calls and scheduler-triggered review DMs use the same skip-button eligibility rule (`review_count >= 2`). |
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
@@ -33,7 +33,8 @@ on_message → _handle_user_message → services/pipeline.py → LLM → tools/a
 ### Quiz UI Behavior
 
 - Quiz questions can render Discord buttons in addition to the text reply.
-- After an assessment, the bot shows navigation buttons such as `Quiz again`, `Next due`, and `Explain`.
+- After an assessment, the bot shows navigation buttons: `Quiz again`, `Next due`, `Explain`, and `Done`.
+- The button emphasis adapts to the score: stronger answers promote `Next due`, while weaker answers promote `Explain`.
 - For concepts with `review_count >= 2`, eligible quiz questions can also show an `I know this` button that scores the review as confident recall without requiring a typed answer.
 - The skip button is a Discord-only UI affordance. It is not a public REST action and is not emitted by the LLM.
 
@@ -43,9 +44,9 @@ Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Disc
 
 ---
 
-## 2. FastAPI REST API (`api.py`)
+## 2. FastAPI REST API (`api.py`, `api/app.py`, `api/routes/`)
 
-The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_SECRET_KEY`). All endpoints except `/api/health` require the header:
+`api.py` is a thin wrapper that starts the FastAPI app from `api/app.py`, and route handlers live under `api/routes/`. The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_SECRET_KEY`). All endpoints except `/api/health` require the header:
 
 ```
 Authorization: Bearer <LEARN_API_SECRET_KEY>
@@ -132,8 +133,9 @@ Start with:
 
 ```bash
 python webui/server.py
-# or via the main API lifespan when WEBUI_ENABLED=true
 ```
+
+Running `python bot.py` also starts the same Web UI automatically after the Discord bot comes online.
 
 ### Pages
 
@@ -169,12 +171,13 @@ See `.env.example` for the full list. Key variables:
 
 | Variable | Purpose |
 |----------|---------|
-| `LEARN_LLM_PROVIDER` | LLM backend (`kimi`, `openai`, `deepseek`, …) |
-| `LEARN_LLM_MODEL` | Model name to use |
-| `LEARN_LLM_API_KEY` | API key for the LLM provider |
-| `LEARN_LLM_BASE_URL` | Base URL for the LLM API |
+| `LEARN_LLM_PROVIDER` | LLM backend (`kimi` or `openai_compat`) |
+| `LEARN_LLM_MODEL` | Model name for the OpenAI-compatible backend |
+| `LEARN_LLM_API_KEY` | API key for the OpenAI-compatible backend |
+| `LEARN_LLM_BASE_URL` | Base URL for the OpenAI-compatible backend |
 | `LEARN_BOT_TOKEN` | Discord bot token |
 | `LEARN_AUTHORIZED_USER_ID` | Discord user ID allowed to use the bot |
 | `LEARN_API_SECRET_KEY` | Bearer token for the REST API |
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
+| `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |

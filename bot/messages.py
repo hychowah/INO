@@ -1,8 +1,12 @@
 """Discord message helpers — splitting long text and sending with views."""
 
+from typing import Awaitable, Callable
+
 import discord
+import db
 
 import config
+from services.views import QuizQuestionView, should_show_quiz_skip_button
 
 
 def _split_message(text: str, limit: int = config.MAX_MESSAGE_LENGTH) -> list[str]:
@@ -53,3 +57,22 @@ async def send_long_with_view(send_fn, text: str, view=None) -> "discord.Message
 
     sent = await send_fn(chunks[-1], view=view)
     return sent
+
+
+async def send_review_question(send_fn,
+                               question: str,
+                               concept_id: int | None,
+                               message_handler: Callable[..., Awaitable]) -> "discord.Message":
+    """Send a review question and attach the skip button when eligible."""
+    view = None
+
+    if concept_id is not None:
+        concept = db.get_concept(concept_id)
+        if should_show_quiz_skip_button(concept):
+            view = QuizQuestionView(
+                concept_id=concept_id,
+                message_handler=message_handler,
+                show_skip=True,
+            )
+
+    return await send_long_with_view(send_fn, f"📚 **Learning Review**\n{question}", view=view)

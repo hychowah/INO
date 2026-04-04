@@ -84,7 +84,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 ```bash
 # Clone and set up
 git clone https://github.com/hychowah/INO.git
-cd learning-agent
+cd INO
 python -m venv venv
 
 # Activate virtual environment
@@ -109,7 +109,7 @@ LEARN_LLM_MODEL=grok-3
 LEARN_AUTHORIZED_USER_ID=your_discord_user_id
 ```
 
-If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`.
+If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`. For the `kimi` CLI path, install and authenticate the `kimi` binary, then either omit the OpenAI-compatible block above or set `LEARN_LLM_PROVIDER=kimi` explicitly.
 
 Then run:
 
@@ -151,6 +151,8 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_LLM_API_KEY` | Your API key |
 | `LEARN_LLM_MODEL` | `grok-3`, `deepseek-chat`, etc. |
 
+For `kimi`, the CLI backend is used instead of the OpenAI-compatible settings above.
+
 **Optional** (sensible defaults):
 
 | Variable | Default | Purpose |
@@ -182,6 +184,8 @@ pytest tests/ -v
 ```
 
 Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
+
+`make test` injects safe defaults for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` if your shell does not already provide them.
 
 ## Project Structure
 

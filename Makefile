@@ -2,7 +2,7 @@
 
 # Run the test suite
 test:
-	pytest tests/ -v --tb=short
+	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/', '-v', '--tb=short'], env=env))"
 
 # Lint with Ruff
 lint:

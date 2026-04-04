@@ -352,4 +352,6 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Session cleanup:** `skip_quiz()` clears `last_quiz_question`, `last_assess_concept_id`, `last_assess_quality`, and `pending_review` to prevent stale state from interfering with subsequent interactions.
 
+**Delivery-path parity fix:** The manual `/review` command already attached `QuizQuestionView` when `review_count >= 2`, but scheduler-triggered review DMs originally sent plain text only. Both manual and scheduler review-question delivery now route through `bot.messages.send_review_question()`, so timer-triggered quizzes and manual reviews attach the skip button with the same eligibility rule and message-splitting behavior.
+
 **Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, `QuizQuestionView` attachment), `data/skills/quiz.md` (LLM skip guidance).

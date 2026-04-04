@@ -2,6 +2,7 @@
 Database core — connection helpers and initialization.
 """
 
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -10,9 +11,24 @@ from pathlib import Path
 from typing import Optional
 
 # Database paths
-DATA_DIR = Path(__file__).parent.parent / "data"
-KNOWLEDGE_DB = DATA_DIR / "knowledge.db"
-CHAT_DB = DATA_DIR / "chat_history.db"
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+
+def _resolve_repo_path(env_name: str, default_path: Path) -> Path:
+    """Resolve an optional repo-relative path override from the environment."""
+    raw = os.environ.get(env_name)
+    if not raw:
+        return default_path
+
+    path = Path(raw)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path
+
+
+KNOWLEDGE_DB = _resolve_repo_path("LEARN_DB_PATH", DATA_DIR / "knowledge.db")
+CHAT_DB = _resolve_repo_path("LEARN_CHAT_DB_PATH", DATA_DIR / "chat_history.db")
 
 # Configuration
 MAX_CHAT_HISTORY = 100
@@ -30,6 +46,8 @@ SCHEMA_VERSION = 11
 def init_databases():
     """Initialize all databases with schema, then run migrations."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    KNOWLEDGE_DB.parent.mkdir(parents=True, exist_ok=True)
+    CHAT_DB.parent.mkdir(parents=True, exist_ok=True)
     _init_knowledge_db()
     _init_chat_db()
     _run_migrations()

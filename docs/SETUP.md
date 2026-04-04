@@ -57,10 +57,14 @@ Open `.env` and fill in the required values:
 
 ```ini
 # LLM backend (required)
-LEARN_LLM_PROVIDER=kimi          # or openai, deepseek, …
-LEARN_LLM_MODEL=moonshot-v1-8k
-LEARN_LLM_API_KEY=your-api-key
-LEARN_LLM_BASE_URL=https://api.moonshot.cn/v1
+# For kimi CLI: set LEARN_LLM_PROVIDER=kimi or omit it entirely.
+LEARN_LLM_PROVIDER=kimi
+
+# For OpenAI-compatible providers instead, use:
+# LEARN_LLM_PROVIDER=openai_compat
+# LEARN_LLM_BASE_URL=https://api.x.ai/v1
+# LEARN_LLM_API_KEY=your-api-key
+# LEARN_LLM_MODEL=grok-3
 
 # Discord (required for bot)
 LEARN_BOT_TOKEN=your-discord-bot-token
@@ -69,7 +73,7 @@ LEARN_AUTHORIZED_USER_ID=your-discord-user-id   # numeric ID
 # REST API token (required for api.py)
 LEARN_API_SECRET_KEY=choose-a-secret-token
 
-# Database paths (optional — defaults work for local dev)
+# Database paths (optional — repo-relative or absolute)
 # LEARN_DB_PATH=data/knowledge.db
 # LEARN_CHAT_DB_PATH=data/chat_history.db
 ```
@@ -90,10 +94,10 @@ The application degrades gracefully if embeddings or vector storage are unavaila
 
 ```bash
 make test
-# equivalent to: pytest tests/ -v --tb=short
+# equivalent to: python -m pytest tests/ -v --tb=short
 ```
 
-The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required.
+The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing.
 
 ---
 
@@ -121,6 +125,7 @@ make run-bot
 ```
 
 The bot connects to Discord and registers slash commands on startup. Use `/sync` (in Discord) the first time you run it to publish commands to your server.
+It also starts the read-only Web UI on `http://localhost:8050` after the bot reaches `on_ready()`.
 
 ### FastAPI Backend
 
@@ -139,7 +144,7 @@ make run-api
 python webui/server.py
 ```
 
-Open `http://localhost:8050` in your browser.
+Open `http://localhost:8050` in your browser. This standalone command is optional if you already started `python bot.py`, because the bot launches the same Web UI server automatically.
 
 ---
 
@@ -202,7 +207,7 @@ The test suite sets safe dummy values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHOR
 ```bash
 LEARN_LLM_PROVIDER=kimi LEARN_AUTHORIZED_USER_ID=123456789 pytest tests/
 ```
-Or use `make test` which sets them automatically.
+Or use `make test`, which injects the same safe defaults automatically.
 
 ### `sentence-transformers` takes a long time to download
 The model (`all-mpnet-base-v2`, ~420 MB) is downloaded once on first use and cached in `~/.cache/huggingface/`. Subsequent starts are fast.

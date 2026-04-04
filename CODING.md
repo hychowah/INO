@@ -392,4 +392,4 @@ These endpoints don't exist yet. They should be added to `api.py` when the backe
 - **Quiz flow:** The `/api/chat` conversational loop handles quizzes naturally — no special quiz endpoints needed. The LLM manages the ask→answer→assess→next cycle.
 - **Push notifications:** Reviews are delivered via Discord DM today. Mobile will need pull-based (`/api/due`) short-term, push (Expo/FCM) long-term.
 - **Auth:** Current Bearer token is fine for single-user. Multi-user would need JWT with `/api/auth/login`.
-- **CORS:** Already configured (`allow_origins=["*"]`) — ready for mobile.
+- **CORS:** Currently limited to localhost origins in `api/app.py` (`localhost` / `127.0.0.1` on ports `8000` and `8080`). Expand that list before relying on mobile or remote clients.

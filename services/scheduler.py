@@ -19,6 +19,7 @@ import discord
 
 import config
 import db
+from bot.messages import send_review_question
 from services import pipeline
 from services.dedup import format_dedup_suggestions
 from services.views import DedupConfirmView
@@ -281,8 +282,8 @@ async def _send_review_quiz(payload: str):
             if message and message.strip():
                 # Store the actual question text for accurate review logging
                 db.set_session('last_quiz_question', message.strip())
-                await user.send(truncate_for_discord(
-                    f"📚 **Learning Review**\n{message}"))
+                from bot.handler import _handle_user_message
+                await send_review_question(user.send, message, cid, _handle_user_message)
                 logger.info("Sent review DM")
 
                 # Set pending review state AFTER DM is confirmed sent.

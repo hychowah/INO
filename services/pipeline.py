@@ -352,7 +352,7 @@ async def _call_llm(mode: str, text: str, author: str,
     prompt = (
         f"{dynamic_context}\n\n"
         f"IMPORTANT — the user said: \"{text}\"\n"
-        f"Process this request RIGHT NOW using the response format from AGENTS.md "
+        f"Process this request RIGHT NOW using the response format defined in the system prompt "
         f"(JSON action block, FETCH action, ASK:, or REPLY:). Do not describe your instructions."
     )
 

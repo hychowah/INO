@@ -709,6 +709,11 @@ class QuizQuestionView(discord.ui.View):
         self._disable_all()
 
 
+def should_show_quiz_skip_button(concept: dict | None) -> bool:
+    """Return whether a concept is eligible for the quiz skip button."""
+    return bool(concept and concept.get('review_count', 0) >= 2)
+
+
 class _QuizSkipButton(discord.ui.Button):
     """Skip the quiz — user claims confident recall."""
 
@@ -772,7 +777,7 @@ async def _send_quiz_response(interaction: discord.Interaction,
         quiz_cid = quiz_meta.get('concept_id')
         if quiz_cid is not None and quiz_meta.get('show_skip'):
             concept = db.get_concept(int(quiz_cid))
-            if concept and concept.get('review_count', 0) >= 2:
+            if should_show_quiz_skip_button(concept):
                 view = QuizQuestionView(
                     concept_id=int(quiz_cid),
                     message_handler=message_handler,
@@ -788,7 +793,7 @@ async def _send_quiz_response(interaction: discord.Interaction,
     quiz_cid = db.get_session('quiz_anchor_concept_id')
     if quiz_cid:
         concept = db.get_concept(int(quiz_cid))
-        if concept and concept.get('review_count', 0) >= 2:
+        if should_show_quiz_skip_button(concept):
             view = QuizQuestionView(
                 concept_id=int(quiz_cid),
                 message_handler=message_handler,

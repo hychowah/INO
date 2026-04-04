@@ -5,14 +5,14 @@ import logging
 import discord
 import db
 from services import pipeline
-from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
+from services.views import AddConceptConfirmView, QuizNavigationView, SuggestTopicConfirmView
 from services.parser import parse_llm_response
 
 import config
 
 from bot.app import bot
 from bot.auth import authorized_only
-from bot.messages import send_long, send_long_with_view
+from bot.messages import send_long, send_long_with_view, send_review_question
 from bot.handler import (
     _handle_user_message,
     _ensure_db,
@@ -366,9 +366,9 @@ async def review_command(ctx):
             response = "Could not generate a review quiz. Try again?"
         else:
             db.set_session('last_quiz_question', response.strip())
-            response = f"📚 **Learning Review**\n{response}"
 
         if assess_meta:
+            response = f"📚 **Learning Review**\n{response}"
             view = QuizNavigationView(
                 concept_id=assess_meta['concept_id'],
                 quality=assess_meta['quality'],
@@ -380,21 +380,11 @@ async def review_command(ctx):
                 send_fn = ctx.send
             await send_long_with_view(send_fn, response, view=view)
         elif cid:
-            # Quiz question delivered — attach skip button if eligible
-            review_concept = db.get_concept(cid)
-            if review_concept and review_concept.get('review_count', 0) >= 2:
-                view = QuizQuestionView(
-                    concept_id=cid,
-                    message_handler=_handle_user_message,
-                    show_skip=True,
-                )
-                if is_interaction:
-                    send_fn = ctx.interaction.followup.send
-                else:
-                    send_fn = ctx.send
-                await send_long_with_view(send_fn, response, view=view)
+            if is_interaction:
+                send_fn = ctx.interaction.followup.send
             else:
-                await send_long(ctx, response)
+                send_fn = ctx.send
+            await send_review_question(send_fn, response, cid, _handle_user_message)
         else:
             await send_long(ctx, response)
     except Exception as e:
