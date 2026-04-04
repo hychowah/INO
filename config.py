@@ -74,6 +74,12 @@ REVIEW_REMINDER_MAX = int(os.environ.get("LEARN_REVIEW_REMINDER_MAX", "3"))
 # Graph visualization — max concept nodes before filtering
 MAX_GRAPH_NODES = int(os.environ.get("LEARN_MAX_GRAPH_NODES", "500"))
 
+# Spaced repetition interval exponent.
+# Interval formula: interval_days = exp(mastery_score * SR_INTERVAL_EXPONENT)
+# At 0.05: score=50 → ~12 days, score=100 → ~148 days.
+# Only affects NEW reviews; existing interval_days values are unchanged.
+SR_INTERVAL_EXPONENT = float(os.environ.get("LEARN_SR_INTERVAL_EXPONENT", "0.075"))
+
 # ============================================================================
 # VECTOR STORE SETTINGS (hybrid search)
 # ============================================================================

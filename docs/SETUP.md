@@ -76,6 +76,9 @@ LEARN_API_SECRET_KEY=choose-a-secret-token
 # Database paths (optional — repo-relative or absolute)
 # LEARN_DB_PATH=data/knowledge.db
 # LEARN_CHAT_DB_PATH=data/chat_history.db
+
+# Spaced repetition interval tuning (optional)
+# LEARN_SR_INTERVAL_EXPONENT=0.05    # interval = e^(score×K): score=50→~12d, score=100→~148d
 ```
 
 See `.env.example` for the complete variable reference.

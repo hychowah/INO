@@ -30,6 +30,7 @@ from webui.pages import (  # noqa: E402
     page_concept_detail,
     page_concepts,
     page_dashboard,
+    page_forecast,
     page_graph,
     page_reviews,
     page_topic_detail,
@@ -83,6 +84,27 @@ class Handler(BaseHTTPRequestHandler):
                 html = page_reviews()
             elif path == "/actions":
                 html = page_actions(parsed.query or "")
+            elif path == "/forecast":
+                html = page_forecast()
+            elif path == "/api/forecast":
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                range_type = qs.get("range", ["weeks"])[0]
+                try:
+                    data = db.get_due_forecast(range_type)
+                    self._json_response(data)
+                except ValueError as e:
+                    self._json_response({"error": str(e)}, status=400)
+                return
+            elif path == "/api/forecast/concepts":
+                qs = urllib.parse.parse_qs(parsed.query or "")
+                range_type = qs.get("range", ["weeks"])[0]
+                bucket_key = qs.get("bucket", ["0"])[0]
+                try:
+                    concepts = db.get_forecast_bucket_concepts(range_type, bucket_key)
+                    self._json_response(concepts)
+                except ValueError as e:
+                    self._json_response({"error": str(e)}, status=400)
+                return
             elif path == "/api/stats":
                 self._json_response(db.get_review_stats())
                 return

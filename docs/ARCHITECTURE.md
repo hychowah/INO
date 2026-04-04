@@ -96,16 +96,24 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
-| `webui/server.py` | ~200 | Zero-dependency HTTP server — routing, Handler class, static file serving |
+| `webui/server.py` | ~220 | Zero-dependency HTTP server — routing, Handler class, static file serving, forecast routes |
 | `webui/helpers.py` | ~145 | HTML helpers (`score_bar`, `layout`, `_esc`, etc.) extracted from `server.py` |
-| `webui/pages.py` | ~890 | Page renderers (`page_dashboard`, `page_topic_detail`, etc.) extracted from `server.py` |
+| **webui/pages/** | | Page renderers split into package modules (~950 total lines) |
+| `webui/pages/__init__.py` | ~25 | Re-exports all 10 page functions |
+| `webui/pages/dashboard.py` | ~190 | `page_dashboard`, `compute_subtree_stats`, `render_tree_node` |
+| `webui/pages/topics.py` | ~160 | `page_topics`, `page_topic_detail`, `build_breadcrumb` |
+| `webui/pages/concepts.py` | ~230 | `page_concepts`, `page_concept_detail` |
+| `webui/pages/reviews.py` | ~70 | `page_reviews`, `page_404`, `page_forecast` |
+| `webui/pages/activity.py` | ~200 | `page_actions` |
+| `webui/pages/graph.py` | ~75 | `page_graph` |
 | `webui/static/style.css` | ~170 | Extracted CSS — dark theme, tree components, responsive layout |
 | `webui/static/tree.js` | ~150 | Vanilla JS — expand/collapse, search/filter, state persistence |
+| `webui/static/forecast.js` | ~245 | D3 v7 bar chart — bucketed review forecast with drill-down |
 | **db/ package** | | |
 | `db/core.py` | ~230 | Connection helpers, `init_databases()`, datetime utils |
 | `db/migrations.py` | ~265 | Schema migration blocks extracted from `core.py` |
 | `db/topics.py` | ~240 | Topic CRUD, topic maps, hierarchical maps |
-| `db/concepts.py` | ~260 | Concept CRUD, search, detail view |
+| `db/concepts.py` | ~555 | Concept CRUD, search, detail view, forecast bucket queries |
 | `db/reviews.py` | ~100 | Review log, remarks |
 | `db/chat.py` | ~105 | Chat history, session state |
 | `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity; vector nearest-neighbor for relation candidates |

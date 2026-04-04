@@ -33,6 +33,7 @@ from db.concepts import (
     link_concept, unlink_concept,
     find_concept_by_title,
     get_concepts_for_topic, get_due_concepts, get_due_count,
+    get_due_forecast, get_forecast_bucket_concepts,
     get_next_review_concept,
     get_all_concepts_summary, get_all_concepts_with_topics,
     get_concept_topic_edges,

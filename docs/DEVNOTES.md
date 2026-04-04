@@ -66,7 +66,7 @@ When `execute_action()` gets an "Unknown action" error, it calls `repair_action(
 - **Wrong + gap > 0:** NO decrease (probe above user's level)
 - **Wrong + gap ≤ 0:** proportional decrease (actual regression)
 
-**Score → interval:** `interval_days = max(1, round(e^(score × 0.05)))`
+**Score → interval:** `interval_days = max(1, round(e^(score × SR_INTERVAL_EXPONENT)))` where `SR_INTERVAL_EXPONENT` defaults to `0.05` (env var `LEARN_SR_INTERVAL_EXPONENT`, set in `config.py`)
 
 | Score | Interval | Score | Interval |
 |-------|----------|-------|----------|
@@ -305,6 +305,8 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **§H2 — FastAPI Backend & Project Restructuring (2026-03-15):** Created `api.py` as thin FastAPI wrapper using same pipeline. Moved `context.py`, `tools.py` → `services/`. Moved docs → `docs/`. Moved scripts → `scripts/`. Set up standalone git repo with `.env`-based config.
 
 **§H3 — Module Extraction Refactor (2026-03-28):** Split oversized files into focused submodules: `db/core.py` (740→232) → extracted `db/migrations.py` (~265 lines, all migration blocks). `webui/server.py` (1090→198) → extracted `webui/helpers.py` (~145, HTML helpers) + `webui/pages.py` (~890, page renderers). `services/tools.py` (960→552) → extracted `services/tools_assess.py` (~360, quiz/assess action handlers). Child modules use `import db.core as _core` for dynamic DB path access (required by test fixtures that patch `db.core.KNOWLEDGE_DB`). Parent modules re-import from children after all local definitions to avoid circular imports.
+
+**§H4 — WebUI Package Split + Forecast Feature + Configurable SR Exponent (2026-04-04):** `webui/pages.py` (~890 lines) further split into `webui/pages/` package (6 modules: `dashboard.py`, `topics.py`, `concepts.py`, `reviews.py`, `activity.py`, `graph.py`; ~950 total lines). All 10 page functions re-exported via `webui/pages/__init__.py`. Added `/forecast` page with D3 v7 bar chart (`webui/static/forecast.js`, ~245 lines) showing due concepts bucketed by days/weeks/months with Overdue always first; drill-down fetches concept list sorted mastery ASC. DB layer: `get_due_forecast(range_type)` and `get_forecast_bucket_concepts(range_type, bucket_key)` added to `db/concepts.py` using rolling `DATE('now', N || ' days')` windows (not calendar weeks). `config.SR_INTERVAL_EXPONENT` introduced (`LEARN_SR_INTERVAL_EXPONENT` env var, default `0.05`) replacing 3 hardcoded literals in `services/tools_assess.py`.
 
 ---
 

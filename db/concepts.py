@@ -343,6 +343,153 @@ def get_due_count() -> int:
     return row['cnt'] if row else 0
 
 
+def get_due_forecast(range_type: str = "weeks") -> Dict:
+    """Return counts of concepts due per upcoming time bucket, plus an Overdue bucket.
+
+    Uses rolling windows (not calendar week numbers) so bucket boundaries are
+    always relative to today, regardless of the day of the week.
+
+    Args:
+        range_type: "days"   → 7 windows of 1 day each starting from today
+                    "weeks"  → 7 windows of 7 days each starting from today
+                    "months" → 7 windows of 30 days each starting from today
+
+    Returns:
+        {
+          "range_type": str,
+          "overdue_count": int,
+          "buckets": [
+            {"label": str, "bucket_key": str, "count": int, "avg_mastery": float},
+            ...  (7 entries, bucket_key "0".."6")
+          ]
+        }
+
+    Raises:
+        ValueError: if range_type is not one of the accepted values.
+    """
+    if range_type not in ("days", "weeks", "months"):
+        raise ValueError(f"Invalid range_type {range_type!r}. Must be 'days', 'weeks', or 'months'.")
+
+    window_sizes = {"days": 1, "weeks": 7, "months": 30}
+    window_days = window_sizes[range_type]
+    num_buckets = 7
+
+    conn = _conn()
+
+    # --- Overdue bucket ---
+    overdue_row = conn.execute("""
+        SELECT COUNT(*) as cnt, COALESCE(AVG(mastery_level), 0) as avg_m
+        FROM concepts
+        WHERE next_review_at IS NOT NULL
+          AND DATE(next_review_at) < DATE('now')
+    """).fetchone()
+    overdue_count = overdue_row['cnt'] if overdue_row else 0
+    # Not included in main buckets list — returned separately for chart rendering
+
+    # --- Rolling window buckets ---
+    buckets = []
+    for i in range(num_buckets):
+        start_offset = i * window_days
+        end_offset = (i + 1) * window_days
+
+        row = conn.execute("""
+            SELECT COUNT(*) as cnt, COALESCE(AVG(mastery_level), 0) as avg_m
+            FROM concepts
+            WHERE next_review_at IS NOT NULL
+              AND DATE(next_review_at) >= DATE('now', ? || ' days')
+              AND DATE(next_review_at) < DATE('now', ? || ' days')
+        """, (str(start_offset), str(end_offset))).fetchone()
+
+        count = row['cnt'] if row else 0
+        avg_mastery = round(row['avg_m'], 1) if row else 0.0
+
+        # Human-readable label
+        if range_type == "days":
+            if i == 0:
+                label = "Today"
+            elif i == 1:
+                label = "Tomorrow"
+            else:
+                label = f"Day +{i}"
+        elif range_type == "weeks":
+            if i == 0:
+                label = "This week"
+            elif i == 1:
+                label = "Next week"
+            else:
+                label = f"Week +{i}"
+        else:  # months
+            if i == 0:
+                label = "This month"
+            elif i == 1:
+                label = "Next month"
+            else:
+                label = f"Month +{i}"
+
+        buckets.append({
+            "label": label,
+            "bucket_key": str(i),
+            "count": count,
+            "avg_mastery": avg_mastery,
+        })
+
+    conn.close()
+
+    return {
+        "range_type": range_type,
+        "overdue_count": overdue_count,
+        "buckets": buckets,
+    }
+
+
+def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]:
+    """Return full concept list for one forecast bucket (for on-click detail).
+
+    bucket_key "overdue" → concepts where next_review_at < today
+    bucket_key "0".."6"  → concepts in rolling window bucket i
+    Results are sorted by mastery_level ASC (worst first).
+
+    Raises:
+        ValueError: if range_type is invalid.
+    """
+    window_sizes = {"days": 1, "weeks": 7, "months": 30}
+    if range_type not in window_sizes:
+        raise ValueError(f"Invalid range_type {range_type!r}. Must be 'days', 'weeks', or 'months'.")
+
+    window_days = window_sizes[range_type]
+    conn = _conn()
+
+    if bucket_key == "overdue":
+        rows = conn.execute("""
+            SELECT c.id, c.title, c.mastery_level, c.next_review_at,
+                   c.interval_days, c.review_count
+            FROM concepts c
+            WHERE c.next_review_at IS NOT NULL
+              AND DATE(c.next_review_at) < DATE('now')
+            ORDER BY c.mastery_level ASC
+        """).fetchall()
+    else:
+        try:
+            i = int(bucket_key)
+        except ValueError:
+            conn.close()
+            return []
+        start_offset = i * window_days
+        end_offset = (i + 1) * window_days
+        rows = conn.execute("""
+            SELECT c.id, c.title, c.mastery_level, c.next_review_at,
+                   c.interval_days, c.review_count
+            FROM concepts c
+            WHERE c.next_review_at IS NOT NULL
+              AND DATE(c.next_review_at) >= DATE('now', ? || ' days')
+              AND DATE(c.next_review_at) < DATE('now', ? || ' days')
+            ORDER BY c.mastery_level ASC
+        """, (str(start_offset), str(end_offset))).fetchall()
+
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_all_concepts_with_topics() -> List[Dict]:
     """Get all concepts with structured topic data and latest remark.
     Returns list of dicts, each with a 'topics' list of {id, title} dicts.

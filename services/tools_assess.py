@@ -8,6 +8,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple
 
+import config
 import db
 from services.tools import execute_action
 
@@ -147,7 +148,7 @@ def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
                 delta = base_loss + abs(gap) * 0.2
             new_score = max(0, round(current_score - delta))
 
-        new_interval = max(1, round(math.exp(new_score * 0.05)))
+        new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
 
         now = datetime.now()
         next_review = (now + timedelta(days=new_interval)).strftime('%Y-%m-%d %H:%M:%S')
@@ -289,8 +290,8 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
         new_score = max(0, round(current_score - delta))
 
     # --- Interval from score: exponential curve ---
-    # score 0→1d, 25→3d, 50→12d, 75→43d, 100→148d
-    new_interval = max(1, round(math.exp(new_score * 0.05)))
+    # score 0→1d, 25→3d, 50→12d, 75→43d, 100→148d  (at default exponent 0.05)
+    new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
 
     now = datetime.now()
     next_review = (now + timedelta(days=new_interval)).strftime('%Y-%m-%d %H:%M:%S')
@@ -473,7 +474,7 @@ def skip_quiz(concept_id: int, user_id: str = "default") -> dict:
     new_score = min(100, round(current_score + delta))
 
     # Interval from score: exponential curve
-    new_interval = max(1, round(math.exp(new_score * 0.05)))
+    new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
 
     now = datetime.now()
     next_review = (now + timedelta(days=new_interval)).strftime('%Y-%m-%d %H:%M:%S')

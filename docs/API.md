@@ -148,6 +148,9 @@ Running `python bot.py` also starts the same Web UI automatically after the Disc
 | `/concepts/{id}` | Concept detail — score history, remarks, relations |
 | `/reviews` | Review history |
 | `/actions` | Action log with filtering and time-range picker |
+| `/forecast` | Review forecast — due concepts bucketed by days / weeks / months |
+| `/api/forecast?range=` | JSON forecast data — overdue count + 7 rolling buckets with counts and avg mastery |
+| `/api/forecast/concepts?range=&bucket=` | JSON concept list for a specific bucket, sorted by mastery ASC |
 | `/graph` | Interactive D3.js force-directed knowledge graph |
 | `/static/*` | Static assets (JS, CSS) |
 
@@ -180,4 +183,5 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_API_SECRET_KEY` | Bearer token for the REST API |
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
+| `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.05`); `interval_days = e^(score × exponent)` |
 | `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |

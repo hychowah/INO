@@ -39,6 +39,7 @@ def layout(title: str, body: str, active: str = "", extra_scripts: str = "", bod
         ("concepts", "Concepts"),
         ("graph", "Graph"),
         ("reviews", "Reviews"),
+        ("forecast", "Forecast"),
         ("actions", "Activity"),
     ]
     nav_html = ""
