@@ -188,13 +188,15 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 │   ├── pipeline.py         # Core orchestrator (context → LLM → parse → execute)
 │   ├── context.py          # Prompt/context construction
 │   ├── tools.py            # Action executor (LLM JSON → DB calls)
+│   ├── tools_assess.py     # Quiz/assess handlers (extracted from tools.py)
 │   ├── llm.py              # LLM provider abstraction
 │   ├── parser.py           # LLM response parsing
 │   ├── embeddings.py       # Sentence-transformers singleton
 │   ├── dedup.py            # Duplicate detection (vector + fuzzy)
 │   └── ...
 ├── db/                     # Database package (SQLite + Qdrant)
-│   ├── core.py             # Connections, migrations, schema
+│   ├── core.py             # Connections, schema init
+│   ├── migrations.py       # Schema migrations (extracted from core.py)
 │   ├── topics.py           # Topic CRUD + hierarchy
 │   ├── concepts.py         # Concept CRUD + search
 │   ├── vectors.py          # Qdrant wrapper
@@ -203,6 +205,9 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 │   ├── skills/             # Modular LLM skill files (hot-reloadable)
 │   └── personas/           # Persona presets (buddy, coach, mentor)
 ├── webui/                  # Zero-dependency web dashboard
+│   ├── server.py           # HTTP server + routing
+│   ├── helpers.py          # HTML helpers (extracted from server.py)
+│   └── pages.py            # Page renderers (extracted from server.py)
 ├── tests/                  # pytest test suite
 └── docs/
     ├── architecture.md     # Full architecture documentation

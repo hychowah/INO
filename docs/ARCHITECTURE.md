@@ -51,7 +51,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 │       ▼             ▼                            ▼                    │
 │   ┌────────────────────────────────────────────────────┐             │
 │   │                  db/ package                       │             │
-│   │  core.py · topics.py · concepts.py                 │             │
+│   │  core.py · migrations.py · topics.py · concepts.py │             │
 │   │  reviews.py · chat.py · diagnostics.py             │             │
 │   └──────────┬────────────────────────┬────────────────┘             │
 │              ▼                        ▼                              │
@@ -81,14 +81,18 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `bot.py` | ~300 | Discord bot entry point — events, commands, message routing |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
 | `context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
-| `tools.py` | ~490 | Action executor — maps LLM JSON actions to `db.*` CRUD calls |
-| `db/` | ~1175 | Database package — see submodules below |
+| `tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
+| `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
+| `db/` | ~2715 | Database package — see submodules below |
 | `agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
-| `webui/server.py` | ~530 | Zero-dependency HTTP UI — interactive topic tree, static file serving |
+| `webui/server.py` | ~200 | Zero-dependency HTTP server — routing, Handler class, static file serving |
+| `webui/helpers.py` | ~145 | HTML helpers (`score_bar`, `layout`, `_esc`, etc.) extracted from `server.py` |
+| `webui/pages.py` | ~890 | Page renderers (`page_dashboard`, `page_topic_detail`, etc.) extracted from `server.py` |
 | `webui/static/style.css` | ~170 | Extracted CSS — dark theme, tree components, responsive layout |
 | `webui/static/tree.js` | ~150 | Vanilla JS — expand/collapse, search/filter, state persistence |
 | **db/ package** | | |
-| `db/core.py` | ~310 | Connection helpers, `init_databases()`, migrations, datetime utils |
+| `db/core.py` | ~230 | Connection helpers, `init_databases()`, datetime utils |
+| `db/migrations.py` | ~265 | Schema migration blocks extracted from `core.py` |
 | `db/topics.py` | ~240 | Topic CRUD, topic maps, hierarchical maps |
 | `db/concepts.py` | ~260 | Concept CRUD, search, detail view |
 | `db/reviews.py` | ~100 | Review log, remarks |

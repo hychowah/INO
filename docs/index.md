@@ -21,7 +21,9 @@
 | Path | Purpose |
 |---|---|
 | `CODING.md` | Development instructions for AI coding assistants |
-| `docs/architecture.md` | System architecture, file map, data flow, diagrams; **§ Semantic Search & Vector Store** |
+| `docs/SETUP.md` | Step-by-step local development setup guide |
+| `docs/API.md` | API reference: Discord commands, REST endpoints, Web UI pages |
+| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, diagrams; **§ Semantic Search & Vector Store** |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **§12 Hybrid Vector Search** |
 | `docs/plans/mobile-conversion.md` | Mobile app conversion roadmap |
 | `docs/plans/concept-relations.md` | Concept relations feature design |

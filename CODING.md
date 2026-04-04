@@ -33,7 +33,7 @@ A personal learning coach with spaced repetition. Two entry points talk to the s
 
 ```
 bot.py  (Discord)  ─┐
-                     ├──→  services/pipeline.py  →  services/tools.py  →  db/
+                     ├──→  services/pipeline.py  →  services/tools.py (+tools_assess.py)  →  db/
 api.py  (FastAPI)   ─┘
 ```
 
@@ -63,6 +63,7 @@ ROOT
 ├── services/              # All business logic
 │   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
 │   ├── tools.py           # Action executor: maps LLM verbs → DB calls
+│   ├── tools_assess.py    # Quiz/assess action handlers extracted from tools.py
 │   ├── context.py         # Prompt builder: dynamic context for LLM calls
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
@@ -74,7 +75,8 @@ ROOT
 │   └── kimi.py            # kimi-cli specific helpers
 │
 ├── db/                    # Database layer (SQLite)
-│   ├── core.py            # Connections, init, migrations, datetime utils
+│   ├── core.py            # Connections, init, datetime utils
+│   ├── migrations.py      # Schema migration blocks (extracted from core.py)
 │   ├── topics.py          # Topic CRUD, topic maps; vector sync hooks
 │   ├── concepts.py        # Concept CRUD, search, detail views; vector sync hooks
 │   ├── vectors.py         # Qdrant wrapper (upsert/delete/search, find_nearest, reindex_all)
@@ -89,7 +91,9 @@ ROOT
 │
 ├── tests/                 # pytest test suite
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
-│   ├── server.py          # stdlib HTTP server, all routes + page renderers
+│   ├── server.py          # stdlib HTTP server, routing + Handler class
+│   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
+│   ├── pages.py           # Page renderers (page_dashboard, page_topic_detail, etc.)
 │   └── static/            # CSS, JS (graph.js for D3 graph, concepts.js, tree.js)
 ├── docs/                  # Architecture, dev notes, plans (index.md for map)
 │   ├── architecture.md
@@ -165,7 +169,7 @@ Key thresholds (all in `config.py`, all overridable via env vars):
 
 ## How to Add a New Action
 
-1. **`services/tools.py`** — Write `_handle_<name>(params: dict) -> tuple[str, Any]`:
+1. **`services/tools.py`** (or `services/tools_assess.py` for quiz/assess handlers) — Write `_handle_<name>(params: dict) -> tuple[str, Any]`:
    - Return `('reply', result_string)` on success
    - Return `('error', error_string)` on failure
    - Return `('fetch', data_dict)` for fetch actions
@@ -253,7 +257,7 @@ classes, fixtures, and assertions.
 | `AGENTS.md` | **Low** | Pointer file only — references data/skills/. No instructions here. |
 | `data/preferences.md` | **Medium** | User preferences injected into every LLM call. |
 | `data/personas/*.md` | **Medium** | Persona presets. Changes reflected without restart (mtime cache). Token budget: ~600 tokens max per file. |
-| `db/core.py` migrations | **High** | Schema migrations are append-only. Never modify existing migration blocks. |
+| `db/core.py` migrations | **High** | Schema migrations are append-only (in `db/migrations.py`). Never modify existing migration blocks. |
 | `services/pipeline.py` | **Medium** | Central orchestrator. Changes here affect both Discord and API. |
 
 ---
