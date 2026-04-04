@@ -134,7 +134,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 **Fix:**
 - **DB-backed pending state** (`pending_review` session key): JSON blob with `{concept_id, concept_title, question, sent_at, reminder_count}`
 - **Chat history sanitized**: `[SCHEDULED_REVIEW]` → `[system: review quiz sent for concept #N — awaiting response]`
-- **Pending cleared on assess only** (tools.py `_handle_assess`) — casual messages don't clear it
+- **Pending cleared on assess only** (tools_assess.py `_handle_assess`) — casual messages don't clear it
 - **Static reminders** (no LLM call) with `REVIEW_REMINDER_MAX` (default 3) before moving on
 - Set pending AFTER `user.send()` succeeds — avoids race condition
 
@@ -223,7 +223,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 **Fix (three layers):**
 1. **Prompt rules** (knowledge.md): "Always check the Knowledge Map first" — LLM must set `parent_ids` on `add_topic` and `suggest_topic` when a parent exists. Both action specs include examples showing `parent_ids` usage.
-2. **`execute_suggest_topic_accept()`** (tools.py): Passes `parent_ids` from `action_data['params']` through to `execute_action('add_topic', ...)`. The data survives the confirm round-trip via `action_data` dict in `_pending_confirmations` / `SuggestTopicConfirmView` — no session stash needed.
+2. **`execute_suggest_topic_accept()`** (tools_assess.py): Passes `parent_ids` from `action_data['params']` through to `execute_action('add_topic', ...)`. The data survives the confirm round-trip via `action_data` dict in `_pending_confirmations` / `SuggestTopicConfirmView` — no session stash needed.
 3. **`_find_candidate_parents()`** (tools.py): When `_resolve_topic_ids` auto-creates a topic from `topic_titles`, uses `db.search_similar_topics()` to find parents before creation.
 
 **Auto-parent heuristics** (`_find_candidate_parents`):
@@ -283,9 +283,9 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 **Fix — `quiz_anchor_concept_id` lifecycle key:**
 
-- **Set** by `_handle_quiz()` in `tools.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Stored alongside `active_concept_id`.
+- **Set** by `_handle_quiz()` in `tools_assess.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Stored alongside `active_concept_id`.
 - **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
-- **Fallback chain** in `_handle_assess()` in `tools.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
+- **Fallback chain** in `_handle_assess()` in `tools_assess.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
 - **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees.
 - **Cleared** in `pipeline.py` alongside other quiz state by `_QUIZ_CLEARING_ACTIONS` (`assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`). Also cleared by staleness timeout in `context.py`.
 - **Not used** by multi-quiz flows (those use separate `active_concept_ids` key).
@@ -294,7 +294,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 - `quiz.md`: assess docs changed to "Always use the concept_id from the 'Active Quiz Context' section" — removes ambiguous "unless conversation moved" language.
 - `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
 
-**Key files:** `services/tools.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`.
+**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`.
 
 ---
 
@@ -303,6 +303,8 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 **§H1 — Codebase Restructuring (2026-03-13):** Split `db.py` (1396 lines) → `db/` package (6 submodules). Split `pipeline.py` (750 lines) → `pipeline.py` + `parser.py` + `repair.py` + `dedup.py`. Fixed scheduler↔bot circular dependency via `services/state.py`. Backward compat maintained via re-exports.
 
 **§H2 — FastAPI Backend & Project Restructuring (2026-03-15):** Created `api.py` as thin FastAPI wrapper using same pipeline. Moved `context.py`, `tools.py` → `services/`. Moved docs → `docs/`. Moved scripts → `scripts/`. Set up standalone git repo with `.env`-based config.
+
+**§H3 — Module Extraction Refactor (2026-03-28):** Split oversized files into focused submodules: `db/core.py` (740→232) → extracted `db/migrations.py` (~265 lines, all migration blocks). `webui/server.py` (1090→198) → extracted `webui/helpers.py` (~145, HTML helpers) + `webui/pages.py` (~890, page renderers). `services/tools.py` (960→552) → extracted `services/tools_assess.py` (~360, quiz/assess action handlers). Child modules use `import db.core as _core` for dynamic DB path access (required by test fixtures that patch `db.core.KNOWLEDGE_DB`). Parent modules re-import from children after all local definitions to avoid circular imports.
 
 ---
 

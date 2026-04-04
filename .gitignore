@@ -1,7 +1,6 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
 *.egg-info/
 dist/
 build/
@@ -26,6 +25,12 @@ data/
 # OS
 Thumbs.db
 .DS_Store
+
+# Testing / coverage
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Environment variables
 .env

@@ -159,8 +159,11 @@ INO/
 ├── api.py              # FastAPI backend entry point
 ├── config.py           # Shared configuration and env-var loading
 ├── db/                 # SQLite database access layer
-├── services/           # Core business logic (pipeline, tools, context, …)
+├── services/           # Core business logic (pipeline, tools, tools_assess, context, …)
 ├── webui/              # Read-only web dashboard
+│   ├── server.py       # HTTP server + routing
+│   ├── helpers.py      # HTML helpers (extracted from server.py)
+│   ├── pages.py        # Page renderers (extracted from server.py)
 │   └── static/         # JS and CSS assets
 ├── data/
 │   ├── skills/         # LLM skill files (hot-reloadable)

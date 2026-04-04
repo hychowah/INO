@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.github/workflows/tests.yml` — installs dev dependencies from `requirements-dev.txt`
 - `docs/index.md` — updated to reference new documentation files
 
+### Refactored
+- Extracted `db/migrations.py` (~265 lines) from `db/core.py` — all schema migration blocks
+- Extracted `webui/helpers.py` (~145 lines) and `webui/pages.py` (~890 lines) from `webui/server.py`
+- Extracted `services/tools_assess.py` (~360 lines) from `services/tools.py` — quiz/assess action handlers
+- Updated all documentation to reflect new module structure
+
 ---
 
 ## [0.1.0] — Initial release
