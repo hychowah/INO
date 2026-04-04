@@ -50,6 +50,12 @@ def execute_action(action_data: dict) -> str:
             return f"FETCH: {json.dumps(result, default=str)}"
         return f"REPLY: {result}"
 
+    # Guard: mirror pipeline.execute_action — block assess/multi_assess when no
+    # quiz is active. Prevents duplicate score writes during CLI/webui testing.
+    if action in ('assess', 'multi_assess'):
+        if not db.get_session('quiz_anchor_concept_id') and not db.get_session('active_concept_ids'):
+            return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+
     # All other actions
     msg_type, result = tools.execute_action(action, params)
 

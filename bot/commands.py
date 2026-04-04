@@ -322,6 +322,7 @@ async def review_command(ctx):
 
         if cid:
             db.set_session('active_concept_id', str(cid))
+            db.set_session('quiz_anchor_concept_id', str(cid))
 
         db.set_session('review_in_progress', str(cid) if cid else '1')
 

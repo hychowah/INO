@@ -64,6 +64,16 @@ async def confirm_action(req: ConfirmRequest):
     if not action:
         raise HTTPException(status_code=400, detail="Missing 'action' in action_data")
 
+    # Whitelist: only user-confirmation flows are allowed through this endpoint.
+    # Actions that mutate scores (assess, multi_assess) must go through the
+    # full pipeline so the quiz-active guard and audit trail apply correctly.
+    _CONFIRMABLE_ACTIONS = frozenset({'add_concept', 'suggest_topic', 'add_topic', 'link_concept'})
+    if action not in _CONFIRMABLE_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Action '{action}' cannot be confirmed via this endpoint",
+        )
+
     try:
         msg_type, result = execute_action(action, params)
         display_msg = req.action_data.get('message', '')

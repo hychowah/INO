@@ -213,6 +213,8 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │
          ├── If action_data:
          │       pipeline.execute_action(action_data)
+         │           → if action in ('assess','multi_assess') and not is_quiz_active():
+         │               short-circuit → return "REPLY: (assessment skipped -- no active quiz)"
          │           → tools.execute_action(action, params)
          │               → db.<crud_operation>(...)
          │           → if action in _QUIZ_CLEARING_ACTIONS: clear quiz context
@@ -449,6 +451,8 @@ The core brain of the system. Coordinates everything:
 4. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
 5. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
 6. **Parsing utilities** — `parse_llm_response()`, `extract_llm_action()`, `process_output()`.
+7. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
+8. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
 
 ### services/kimi.py — LLM Subprocess (the only one)
 - Wraps `kimi-cli` as a subprocess via `asyncio.to_thread(subprocess.run, ...)`

@@ -95,6 +95,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 - 24h auto-expiry on both View timeout and DB rows
 - Safe maintenance actions (`link_concept`, `delete_topic` for empty topics, `remark`, `fetch`, `list_topics`) execute immediately; destructive ones become proposals
 - Dedup prompt tightened: only merge concepts that are the **same thing with different wording**
+- **`_CONFIRMABLE_ACTIONS` whitelist** (`api/routes/chat.py`): `/api/chat/confirm` now validates the incoming action type against `{'add_concept', 'suggest_topic', 'add_topic', 'link_concept'}`. Any other action type returns HTTP 400. Prevents confirmation of arbitrary or malformed action types that should never reach this endpoint.
 
 ---
 
@@ -270,6 +271,14 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 **Key files:** `data/skills/core.md` (intent detection rules), `data/skills/quiz.md` (assess guard), `services/context.py` (staleness + dedup), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`), `config.py` (`QUIZ_STALENESS_TIMEOUT_MINUTES`), `db/chat.py` (`get_session_updated_at`).
 
+**`is_quiz_active()` — single source of truth for quiz state** (`pipeline.py`, lines ~235-248):
+Returns `True` if either of the two quiz session keys is set:
+- `quiz_anchor_concept_id` — set for a single-concept quiz (see §16)
+- `active_concept_ids` — set for multi-quiz flows (see §12)
+
+**Assess/multi_assess guard in `execute_action`** (`pipeline.py` and `scripts/agent.py`):
+Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, it short-circuits with `REPLY: <message>` instead of invoking the handler — preventing score mutations and log entries when the LLM fires an assess outside of a real quiz session. This is a hard code-level guard; it complements the LLM-side intent-detection instructions.
+
 ---
 
 ## 16. Quiz Anchor Concept ID
@@ -283,7 +292,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 **Fix — `quiz_anchor_concept_id` lifecycle key:**
 
-- **Set** by `_handle_quiz()` in `tools_assess.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Stored alongside `active_concept_id`.
+- **Set** by `_handle_quiz()` in `tools_assess.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Also pre-set by `/review` command (`bot/commands.py`) before `execute_llm_response` to ensure the anchor is present from the first turn.
 - **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
 - **Fallback chain** in `_handle_assess()` in `tools_assess.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
 - **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees.
@@ -294,7 +303,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 - `quiz.md`: assess docs changed to "Always use the concept_id from the 'Active Quiz Context' section" — removes ambiguous "unless conversation moved" language.
 - `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
 
-**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`.
+**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `bot/commands.py` (`/review` anchor pre-set), `scripts/agent.py` (assess guard), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`.
 
 ---
 

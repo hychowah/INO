@@ -68,6 +68,22 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 | `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional pending action. |
 | `POST` | `/api/chat/confirm` | Confirm or reject a pending action returned by a previous `/api/chat` call. |
 
+#### `POST /api/chat/confirm` — confirmable actions
+
+Only a fixed whitelist of actions may be confirmed via this endpoint:
+
+| Allowed action | Description |
+|----------------|-------------|
+| `add_concept` | Create a new concept |
+| `suggest_topic` | Suggest a topic (no DB write) |
+| `add_topic` | Create a new topic |
+| `link_concept` | Link a concept to topic(s) |
+
+Any other action returns HTTP **400**:
+```json
+{"detail": "Action '<action>' cannot be confirmed via this endpoint"}
+```
+
 ### Topics
 
 | Method | Path | Description |

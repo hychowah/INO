@@ -41,12 +41,13 @@ def test_db(tmp_path):
         import db.action_log
 
         original_knowledge = {}
+        original_chat = {}
         modules_to_patch = [
             db.topics, db.concepts, db.relations, db.reviews,
             db.chat, db.diagnostics, db.proposals, db.action_log,
         ]
 
-        # Store originals and patch
+        # Store originals and patch KNOWLEDGE_DB in modules that have it
         for mod in modules_to_patch:
             if hasattr(mod, 'KNOWLEDGE_DB'):
                 original_knowledge[mod] = mod.KNOWLEDGE_DB
@@ -54,6 +55,12 @@ def test_db(tmp_path):
         for mod in modules_to_patch:
             if hasattr(mod, 'KNOWLEDGE_DB'):
                 mod.KNOWLEDGE_DB = knowledge
+
+        # Also patch CHAT_DB in db.chat so session_state operations use the
+        # temp DB. db.chat imports CHAT_DB by value at import time, so patching
+        # db.core.CHAT_DB alone is not sufficient.
+        original_chat[db.chat] = db.chat.CHAT_DB
+        db.chat.CHAT_DB = chat
 
         # Init
         core.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,3 +71,5 @@ def test_db(tmp_path):
         # Restore
         for mod, orig in original_knowledge.items():
             mod.KNOWLEDGE_DB = orig
+        for mod, orig in original_chat.items():
+            mod.CHAT_DB = orig
