@@ -268,7 +268,7 @@ async def execute_action(action_data: dict) -> str:
                 f"[pipeline] Blocked '{action}' — no active quiz. "
                 f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
             )
-            return f"REPLY: {message}" if message else "REPLY: "
+            return f"REPLY: {message}" if message else "REPLY: (assessment skipped — no active quiz)"
 
     msg_type, result = tools.execute_action(action, params)
 

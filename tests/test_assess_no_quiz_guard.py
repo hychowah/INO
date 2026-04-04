@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 import db
-from services.tools import execute_action as tools_execute_action
+from services.tools import execute_action as quiz_action
 
 
 # ============================================================================
@@ -110,7 +110,7 @@ class TestAssessBlockedNoQuiz:
         db.set_session('active_concept_ids', None)
 
         from db import action_log
-        before = action_log.get_action_log(action='assess')
+        before = action_log.get_action_log(action_filter='assess')
 
         action_data = {
             'action': 'assess',
@@ -119,7 +119,7 @@ class TestAssessBlockedNoQuiz:
         }
         _run(_pipeline_execute(action_data))
 
-        after = action_log.get_action_log(action='assess')
+        after = action_log.get_action_log(action_filter='assess')
         assert len(after) == len(before), "Spurious assess must not create an action_log entry"
 
     def test_assess_blocked_no_review_logged(self, test_db):
@@ -159,7 +159,7 @@ class TestAssessAllowedWithQuiz:
         db.update_concept(cid, mastery_level=20)
 
         # Simulate quiz having been sent
-        tools_execute_action('quiz', {'concept_id': cid, 'message': 'Compare B and B+ tree'})
+        quiz_action('quiz', {'concept_id': cid, 'message': 'Compare B and B+ tree'})
         assert db.get_session('quiz_anchor_concept_id') == str(cid)
 
         action_data = {
@@ -188,7 +188,7 @@ class TestAssessAllowedWithQuiz:
         """After a successful assess, quiz_anchor_concept_id is cleared."""
         cid = db.add_concept("B-Tree", "Self-balancing search tree")
 
-        tools_execute_action('quiz', {'concept_id': cid, 'message': 'What is a B-tree?'})
+        quiz_action('quiz', {'concept_id': cid, 'message': 'What is a B-tree?'})
         assert db.get_session('quiz_anchor_concept_id') == str(cid)
 
         action_data = {
@@ -212,7 +212,7 @@ class TestAssessAllowedWithQuiz:
         db.update_concept(cid, mastery_level=30)
 
         # Send quiz
-        tools_execute_action('quiz', {'concept_id': cid, 'message': 'Why use B-trees?'})
+        quiz_action('quiz', {'concept_id': cid, 'message': 'Why use B-trees?'})
 
         # First assess (valid — quiz is active)
         first_action = {
@@ -288,7 +288,7 @@ class TestMultiAssessGuard:
         db.update_concept(c2, mastery_level=40)
 
         # Simulate multi_quiz having been sent
-        tools_execute_action('multi_quiz', {
+        quiz_action('multi_quiz', {
             'concept_ids': [c1, c2],
             'message': 'Compare B-tree and B+ tree',
         })
