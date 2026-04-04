@@ -229,6 +229,26 @@ def init_databases():
 
 
 # ============================================================================
+# Quiz State Helpers
+# ============================================================================
+
+def is_quiz_active() -> bool:
+    """Return True if any quiz session (single or multi-concept) is currently active.
+
+    Single-quiz:  quiz_anchor_concept_id is set by _handle_quiz and cleared by
+                  _QUIZ_CLEARING_ACTIONS after assess completes.
+    Multi-quiz:   active_concept_ids is set by _handle_multi_quiz and cleared by
+                  _handle_multi_assess at completion.
+
+    Add new quiz types here as the system grows — callers use this one function.
+    """
+    return bool(
+        db.get_session('quiz_anchor_concept_id')
+        or db.get_session('active_concept_ids')
+    )
+
+
+# ============================================================================
 # Action Execution (direct calls, no subprocess)
 # ============================================================================
 
@@ -256,19 +276,16 @@ async def execute_action(action_data: dict) -> str:
         return f"REPLY: {result}"
 
     # Guard: only allow assess/multi_assess when a quiz is actually active.
-    # After a quiz is answered, _QUIZ_CLEARING_ACTIONS clears both
-    # quiz_anchor_concept_id (single-quiz) and active_concept_ids (multi-quiz).
-    # Without this guard, the LLM may keep calling assess on follow-up
-    # questions, triggering spurious score changes and duplicate log entries.
-    if action in ('assess', 'multi_assess'):
-        has_single_quiz = db.get_session('quiz_anchor_concept_id')
-        has_multi_quiz = db.get_session('active_concept_ids')
-        if not has_single_quiz and not has_multi_quiz:
-            logger.warning(
-                f"[pipeline] Blocked '{action}' -- no active quiz. "
-                f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
-            )
-            return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+    # After a quiz is answered, _QUIZ_CLEARING_ACTIONS clears the session keys
+    # checked by is_quiz_active(). Without this guard the LLM may re-call assess
+    # on follow-up questions, triggering spurious score changes and duplicate log
+    # entries. See is_quiz_active() for what constitutes an "active quiz".
+    if action in ('assess', 'multi_assess') and not is_quiz_active():
+        logger.warning(
+            f"[pipeline] Blocked '{action}' -- no active quiz. "
+            f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
+        )
+        return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
 
     msg_type, result = tools.execute_action(action, params)
 
