@@ -3,10 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 import db
-from services import pipeline
-
 from api.auth import verify_token
 from api.schemas import PersonaRequest
+from services import pipeline
 
 router = APIRouter()
 

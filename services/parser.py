@@ -5,13 +5,13 @@ Consolidated from pipeline.py and agent.py — single source of truth
 for response format handling.
 """
 
-import re
 import json
-
+import re
 
 # ============================================================================
 # LLM Response Parsing
 # ============================================================================
+
 
 def parse_llm_response(response: str) -> tuple:
     """
@@ -22,12 +22,12 @@ def parse_llm_response(response: str) -> tuple:
     """
     response = response.strip()
 
-    for prefix in ('REPLY:', 'ASK:', 'REMINDER:', 'REVIEW:'):
+    for prefix in ("REPLY:", "ASK:", "REMINDER:", "REVIEW:"):
         if response.startswith(prefix):
-            return (prefix[:-1], response[len(prefix):].strip(), None)
+            return (prefix[:-1], response[len(prefix) :].strip(), None)
 
     # Try ```json code block
-    code_block_match = re.search(r'```json\s*\n?([\s\S]*?)\n?\s*```', response)
+    code_block_match = re.search(r"```json\s*\n?([\s\S]*?)\n?\s*```", response)
     if code_block_match:
         block_content = code_block_match.group(1).strip()
         json_obj = _extract_json_object(block_content)
@@ -37,7 +37,7 @@ def parse_llm_response(response: str) -> tuple:
     # Try bare JSON with "action" key
     bare_match = re.search(r'\{\s*"action"', response)
     if bare_match:
-        json_obj = _extract_json_object(response[bare_match.start():])
+        json_obj = _extract_json_object(response[bare_match.start() :])
         if json_obj:
             return ("ACTION", json_obj.get("message", ""), json_obj)
 
@@ -54,14 +54,14 @@ def _extract_json_object(text: str) -> dict | None:
     that broke the old brace-counting approach.
     See DEVNOTES.md §9.2 for details.
     """
-    start = text.find('{')
+    start = text.find("{")
     if start == -1:
         return None
     last_valid = None
     for i, ch in enumerate(text[start:]):
-        if ch == '}':
+        if ch == "}":
             try:
-                last_valid = json.loads(text[start:start + i + 1])
+                last_valid = json.loads(text[start : start + i + 1])
             except json.JSONDecodeError:
                 continue
     return last_valid
@@ -70,6 +70,7 @@ def _extract_json_object(text: str) -> dict | None:
 # ============================================================================
 # Fetch Extraction
 # ============================================================================
+
 
 def extract_fetch_params(response: str) -> dict | None:
     """Check if an LLM response is a fetch action. Returns params dict or None.
@@ -87,7 +88,7 @@ def extract_fetch_params(response: str) -> dict | None:
     # Try bare JSON with "fetch" action
     bare = re.search(r'\{\s*"action"\s*:\s*"fetch"', response, re.IGNORECASE)
     if bare:
-        data = _extract_json_object(response[bare.start():])
+        data = _extract_json_object(response[bare.start() :])
         if data and data.get("action", "").lower() == "fetch":
             return data.get("params", {})
 
@@ -97,6 +98,7 @@ def extract_fetch_params(response: str) -> dict | None:
 # ============================================================================
 # Output Extraction & Classification
 # ============================================================================
+
 
 def extract_llm_action(output: str) -> str:
     """Extract the actual action/response from LLM output.
@@ -116,18 +118,15 @@ def extract_llm_action(output: str) -> str:
 
     # Pattern 2: Bare JSON with "action" (last valid one)
     for m in reversed(list(re.finditer(r'\{\s*"action"\s*:', output))):
-        obj = _extract_json_str(output[m.start():])
+        obj = _extract_json_str(output[m.start() :])
         if obj is not None:
             return obj
 
     # Pattern 3: Prefix lines (last occurrence)
     for prefix in ("REVIEW:", "REPLY:", "ASK:"):
-        starts = [
-            m.start()
-            for m in re.finditer(rf"^{re.escape(prefix)}\s*", output, re.MULTILINE)
-        ]
+        starts = [m.start() for m in re.finditer(rf"^{re.escape(prefix)}\s*", output, re.MULTILINE)]
         if starts:
-            return output[starts[-1]:].strip()
+            return output[starts[-1] :].strip()
 
     # Pattern 4: After "## Your Response" marker
     marker = "## Your Response"
@@ -139,7 +138,7 @@ def extract_llm_action(output: str) -> str:
                 return tail
 
     # Fallback: last non-empty chunk
-    lines = [l for l in output.strip().split("\n") if l.strip()]
+    lines = [ln for ln in output.strip().split("\n") if ln.strip()]
     if lines:
         return "\n".join(lines[-20:])
     return output
@@ -158,7 +157,7 @@ def _extract_json_str(text: str) -> str | None:
     last_valid = None
     for i, ch in enumerate(text[start:]):
         if ch == "}":
-            candidate = text[start:start + i + 1]
+            candidate = text[start : start + i + 1]
             try:
                 json.loads(candidate)
                 last_valid = candidate
@@ -186,14 +185,14 @@ def process_output(output: str) -> tuple[str, str]:
         ("FETCH:", "fetch"),
     ]:
         if output.startswith(prefix):
-            return (mtype, output[len(prefix):].strip())
+            return (mtype, output[len(prefix) :].strip())
 
     # Safety net: never send raw JSON to the user �?extract the message field.
     # This catches cases where the JSON extractor failed upstream but the
     # output is still valid/parseable JSON (e.g. C++ braces in string values).
-    if '{' in output and '"action"' in output:
+    if "{" in output and '"action"' in output:
         obj = _extract_json_object(output)
-        if obj and isinstance(obj, dict) and 'message' in obj:
-            return ("reply", obj['message'])
+        if obj and isinstance(obj, dict) and "message" in obj:
+            return ("reply", obj["message"])
 
     return ("reply", output)

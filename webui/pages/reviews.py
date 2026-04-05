@@ -22,16 +22,22 @@ def page_reviews() -> str:
     table_rows = ""
     for r in rows:
         rv = dict(r)
-        q_colors = {0: 'var(--red)', 1: 'var(--red)', 2: 'var(--orange)',
-                    3: 'var(--yellow)', 4: 'var(--green)', 5: 'var(--green)'}
-        qc = q_colors.get(rv.get('quality', 0), 'var(--text2)')
+        q_colors = {
+            0: "var(--red)",
+            1: "var(--red)",
+            2: "var(--orange)",
+            3: "var(--yellow)",
+            4: "var(--green)",
+            5: "var(--green)",
+        }
+        qc = q_colors.get(rv.get("quality", 0), "var(--text2)")
         table_rows += f"""<tr>
-          <td>{rv.get('reviewed_at', '—')}</td>
-          <td><a href="/concept/{rv['concept_id']}">{rv['concept_title']}</a></td>
-          <td style="max-width:200px">{rv.get('question_asked', '—')}</td>
-          <td style="max-width:200px">{rv.get('user_response', '—')}</td>
-          <td style="color:{qc};font-weight:600;text-align:center">{rv.get('quality', '?')}/5</td>
-          <td style="font-size:12px;color:var(--text2)">{rv.get('llm_assessment', '')[:80]}</td>
+          <td>{rv.get("reviewed_at", "—")}</td>
+          <td><a href="/concept/{rv["concept_id"]}">{rv["concept_title"]}</a></td>
+          <td style="max-width:200px">{rv.get("question_asked", "—")}</td>
+          <td style="max-width:200px">{rv.get("user_response", "—")}</td>
+          <td style="color:{qc};font-weight:600;text-align:center">{rv.get("quality", "?")}/5</td>
+          <td style="font-size:12px;color:var(--text2)">{rv.get("llm_assessment", "")[:80]}</td>
         </tr>"""
 
     body = f"""
@@ -44,7 +50,10 @@ def page_reviews() -> str:
 
 
 def page_404() -> str:
-    return layout("404", '<div class="empty"><h2>404 — Page not found</h2><p><a href="/">Go home</a></p></div>')
+    return layout(
+        "404",
+        '<div class="empty"><h2>404 — Page not found</h2><p><a href="/">Go home</a></p></div>',
+    )
 
 
 def page_forecast() -> str:

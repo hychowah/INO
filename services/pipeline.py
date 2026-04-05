@@ -9,27 +9,19 @@ import json
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
 
 import config
 import db
+from db.preferences import get_persona, get_persona_content
 from services import context as ctx
 from services import tools
-
-from services.llm import get_provider, get_reasoning_provider, LLMError
+from services.llm import LLMError, get_provider, get_reasoning_provider
 from services.parser import (
-    parse_llm_response,
     extract_fetch_params,
     extract_llm_action,
-    process_output,
+    parse_llm_response,
 )
 from services.repair import repair_action
-from services.dedup import (
-    handle_dedup_check,
-    execute_dedup_merges,
-    format_dedup_suggestions,
-)
-from db.preferences import get_persona, get_persona_content
 
 logger = logging.getLogger("pipeline")
 
@@ -41,7 +33,7 @@ MAX_MAINTENANCE_ACTIONS = 5
 # Skill sets: which skill files to load per mode category.
 SKILL_SETS: dict[str, list[str]] = {
     "interactive": ["core", "quiz", "knowledge"],
-    "review":      ["core", "quiz"],
+    "review": ["core", "quiz"],
     "maintenance": ["core", "maintenance", "knowledge"],
     "quiz-packaging": ["core", "quiz"],
 }
@@ -49,30 +41,38 @@ SKILL_SETS: dict[str, list[str]] = {
 # Actions that clear active quiz context — the LLM moved on from the quiz.
 # quiz/multi_quiz are NOT here: they set new context that must persist for assess.
 # multi_assess clears in tools.py but is included for consistency.
-_QUIZ_CLEARING_ACTIONS = frozenset({
-    'assess', 'multi_assess',
-    'add_concept', 'suggest_topic', 'add_topic', 'remark',
-})
+_QUIZ_CLEARING_ACTIONS = frozenset(
+    {
+        "assess",
+        "multi_assess",
+        "add_concept",
+        "suggest_topic",
+        "add_topic",
+        "remark",
+    }
+)
 
 # Actions that maintenance can execute without user confirmation.
 # Everything else is collected as a proposal for the user to approve.
-SAFE_MAINTENANCE_ACTIONS = frozenset({
-    'link_concept',    # fix untagged concepts
-    'link_topics',     # fix orphan subtopics / reparent
-    'delete_topic',    # remove empty topics
-    'remark',          # add notes
-    'fetch',           # data retrieval
-    'list_topics',     # read-only
-})
+SAFE_MAINTENANCE_ACTIONS = frozenset(
+    {
+        "link_concept",  # fix untagged concepts
+        "link_topics",  # fix orphan subtopics / reparent
+        "delete_topic",  # remove empty topics
+        "remark",  # add notes
+        "fetch",  # data retrieval
+        "list_topics",  # read-only
+    }
+)
 
 
 def _mode_to_skill_set(mode: str) -> str:
     """Map a pipeline mode string to a skill set name."""
     return {
-        "command":        "interactive",
-        "reply":          "interactive",
-        "review-check":   "review",
-        "maintenance":    "maintenance",
+        "command": "interactive",
+        "reply": "interactive",
+        "review-check": "review",
+        "maintenance": "maintenance",
         "quiz-packaging": "quiz-packaging",
     }.get(mode, "interactive")
 
@@ -117,13 +117,14 @@ def _get_base_prompt(skill_set: str = "interactive") -> str:
     content = "\n\n".join(parts) + f"\n\n## User Preferences\n\n{prefs}"
 
     _base_prompt_cache[skill_set] = (content, prefs_mtime, current_mtimes)
-    logger.info(f"Base prompt built for skill_set '{skill_set}' "
-                f"({len(content)} chars, skills: {skill_names})")
+    logger.info(
+        f"Base prompt built for skill_set '{skill_set}' "
+        f"({len(content)} chars, skills: {skill_names})"
+    )
     return content
 
 
-def build_system_prompt(persona: str | None = None,
-                        mode: str = "command") -> str:
+def build_system_prompt(persona: str | None = None, mode: str = "command") -> str:
     """Compose system prompt: skill files + persona + preferences.md.
     Cached per (persona, skill_set) with file mtime checks for hot-reload."""
     global _system_prompt_cache
@@ -159,8 +160,10 @@ def build_system_prompt(persona: str | None = None,
         skill_mtimes[name] = p.stat().st_mtime if p.exists() else 0
 
     _system_prompt_cache[cache_key] = (full_prompt, persona_mtime, skill_mtimes)
-    logger.info(f"System prompt built for persona '{persona}', "
-                f"skill_set '{skill_set}' ({len(full_prompt)} chars)")
+    logger.info(
+        f"System prompt built for persona '{persona}', "
+        f"skill_set '{skill_set}' ({len(full_prompt)} chars)"
+    )
     return full_prompt
 
 
@@ -198,6 +201,7 @@ def reset_conversation_session():
     _conv_session_name = None
     _conv_session_last_used = None
 
+
 # Conversation session state (see DEVNOTES.md §2.3)
 _conv_session_name: str | None = None
 _conv_session_last_used: datetime | None = None
@@ -208,9 +212,12 @@ def _get_conv_session() -> tuple[str, bool]:
     Returns (session_name, is_new) — is_new=True means first call needs full context."""
     global _conv_session_name, _conv_session_last_used
     now = datetime.now()
-    timeout = getattr(config, 'SESSION_TIMEOUT_MINUTES', 5)
-    if (_conv_session_name is None or _conv_session_last_used is None
-            or (now - _conv_session_last_used).total_seconds() > timeout * 60):
+    timeout = getattr(config, "SESSION_TIMEOUT_MINUTES", 5)
+    if (
+        _conv_session_name is None
+        or _conv_session_last_used is None
+        or (now - _conv_session_last_used).total_seconds() > timeout * 60
+    ):
         _conv_session_name = f"learn_{now.strftime('%H%M%S')}"
         _conv_session_last_used = now
         logger.info(f"New conversation session: {_conv_session_name}")
@@ -223,6 +230,7 @@ def _get_conv_session() -> tuple[str, bool]:
 # Initialization
 # ============================================================================
 
+
 def init_databases():
     """Ensure learning databases are initialised. Direct call, no subprocess."""
     db.init_databases()
@@ -231,6 +239,7 @@ def init_databases():
 # ============================================================================
 # Quiz State Helpers
 # ============================================================================
+
 
 def is_quiz_active() -> bool:
     """Return True if any quiz session (single or multi-concept) is currently active.
@@ -242,15 +251,13 @@ def is_quiz_active() -> bool:
 
     Add new quiz types here as the system grows — callers use this one function.
     """
-    return bool(
-        db.get_session('quiz_anchor_concept_id')
-        or db.get_session('active_concept_ids')
-    )
+    return bool(db.get_session("quiz_anchor_concept_id") or db.get_session("active_concept_ids"))
 
 
 # ============================================================================
 # Action Execution (direct calls, no subprocess)
 # ============================================================================
+
 
 async def execute_action(action_data: dict) -> str:
     """Execute a parsed LLM action. Returns a prefixed output string.
@@ -263,7 +270,7 @@ async def execute_action(action_data: dict) -> str:
     # Defensive: if LLM put params at top level instead of in "params" dict,
     # recover them. See DEVNOTES.md §1.1 / §1.2 — this is a recurring LLM bug.
     if not params and action:
-        reserved = {'action', 'params', 'message'}
+        reserved = {"action", "params", "message"}
         flat_params = {k: v for k, v in action_data.items() if k not in reserved}
         if flat_params:
             params = flat_params
@@ -271,7 +278,7 @@ async def execute_action(action_data: dict) -> str:
 
     if action == "fetch":
         msg_type, result = tools.execute_action(action, params)
-        if msg_type == 'fetch':
+        if msg_type == "fetch":
             return f"FETCH: {json.dumps(result, default=str)}"
         return f"REPLY: {result}"
 
@@ -280,7 +287,7 @@ async def execute_action(action_data: dict) -> str:
     # checked by is_quiz_active(). Without this guard the LLM may re-call assess
     # on follow-up questions, triggering spurious score changes and duplicate log
     # entries. See is_quiz_active() for what constitutes an "active quiz".
-    if action in ('assess', 'multi_assess') and not is_quiz_active():
+    if action in ("assess", "multi_assess") and not is_quiz_active():
         logger.warning(
             f"[pipeline] Blocked '{action}' -- no active quiz. "
             f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
@@ -290,29 +297,29 @@ async def execute_action(action_data: dict) -> str:
     msg_type, result = tools.execute_action(action, params)
 
     # Repair sub-agent: if unknown action, try to fix via kimi session
-    if msg_type == 'error' and 'Unknown action' in str(result):
+    if msg_type == "error" and "Unknown action" in str(result):
         repaired = await repair_action(action_data)
         if repaired:
             r_action = repaired.get("action", "").lower().strip()
             r_params = repaired.get("params", {})
             r_message = repaired.get("message", message)
             if not r_params and r_action:
-                reserved = {'action', 'params', 'message'}
+                reserved = {"action", "params", "message"}
                 r_flat = {k: v for k, v in repaired.items() if k not in reserved}
                 if r_flat:
                     r_params = r_flat
             msg_type, result = tools.execute_action(r_action, r_params)
-            if msg_type != 'error':
+            if msg_type != "error":
                 message = r_message
 
     # Clear active quiz context when the LLM chose a non-quiz action
     # (quiz cycle complete, or intent shifted). See module-level constant.
-    if action in _QUIZ_CLEARING_ACTIONS and msg_type != 'error':
-        db.set_session('active_concept_id', None)
-        db.set_session('active_concept_ids', None)
-        db.set_session('quiz_anchor_concept_id', None)
+    if action in _QUIZ_CLEARING_ACTIONS and msg_type != "error":
+        db.set_session("active_concept_id", None)
+        db.set_session("active_concept_ids", None)
+        db.set_session("quiz_anchor_concept_id", None)
 
-    if msg_type == 'error':
+    if msg_type == "error":
         return f"REPLY: ⚠️ {result}"
 
     if message:
@@ -320,8 +327,7 @@ async def execute_action(action_data: dict) -> str:
     return f"REPLY: {result}"
 
 
-async def execute_llm_response(user_input: str, llm_response: str,
-                               mode: str = "command") -> str:
+async def execute_llm_response(user_input: str, llm_response: str, mode: str = "command") -> str:
     """Parse and execute an LLM response, save chat history."""
     prefix, message, action_data = parse_llm_response(llm_response)
 
@@ -336,7 +342,7 @@ async def execute_llm_response(user_input: str, llm_response: str,
         history_msg = result
         for pfx in ("REPLY: ", "FETCH: "):
             if history_msg.startswith(pfx):
-                history_msg = history_msg[len(pfx):]
+                history_msg = history_msg[len(pfx) :]
                 break
     elif prefix in ("REPLY", "ASK", "REMINDER", "REVIEW"):
         result = f"{prefix}: {message}"
@@ -345,23 +351,24 @@ async def execute_llm_response(user_input: str, llm_response: str,
         result = f"REPLY: {message}"
         history_msg = message
 
-    if user_input and not user_input.startswith('[BUTTON]'):
-        if user_input.startswith('[SCHEDULED_REVIEW]'):
+    if user_input and not user_input.startswith("[BUTTON]"):
+        if user_input.startswith("[SCHEDULED_REVIEW]"):
             # Save a sanitized marker instead of the raw synthetic prompt.
             # This prevents the LLM from seeing a fake "user" message while
             # still giving it context that a review quiz is pending.
             # Payload format: "... concept: <id>|<context_string>"
             try:
-                m = re.search(r':\s*(\d+)\|', user_input)
-                cid = m.group(1) if m else '?'
-                db.add_chat_message('user',
-                    f'[system: review quiz sent for concept #{cid} — awaiting response]')
+                m = re.search(r":\s*(\d+)\|", user_input)
+                cid = m.group(1) if m else "?"
+                db.add_chat_message(
+                    "user", f"[system: review quiz sent for concept #{cid} — awaiting response]"
+                )
             except Exception:
                 pass  # don't let marker extraction break the pipeline
         else:
-            db.add_chat_message('user', user_input)
+            db.add_chat_message("user", user_input)
     if history_msg:
-        db.add_chat_message('assistant', history_msg)
+        db.add_chat_message("assistant", history_msg)
 
     return result
 
@@ -370,20 +377,24 @@ async def execute_llm_response(user_input: str, llm_response: str,
 # LLM Calls
 # ============================================================================
 
-async def _call_llm(mode: str, text: str, author: str,
-                    extra_context: str = "",
-                    session: str | None = None,
-                    is_new_session: bool = True) -> str:
+
+async def _call_llm(
+    mode: str,
+    text: str,
+    author: str,
+    extra_context: str = "",
+    session: str | None = None,
+    is_new_session: bool = True,
+) -> str:
     """Build prompt with dynamic context, call the configured LLM provider.
     Returns the raw LLM response string."""
     provider = get_provider()
 
-    dynamic_context = ctx.build_prompt_context(text, mode,
-                                              is_new_session=is_new_session)
+    dynamic_context = ctx.build_prompt_context(text, mode, is_new_session=is_new_session)
 
     prompt = (
         f"{dynamic_context}\n\n"
-        f"IMPORTANT — the user said: \"{text}\"\n"
+        f'IMPORTANT — the user said: "{text}"\n'
         f"Process this request RIGHT NOW using the response format defined in the system prompt "
         f"(JSON action block, FETCH action, ASK:, or REPLY:). Do not describe your instructions."
     )
@@ -413,9 +424,9 @@ async def _call_llm(mode: str, text: str, author: str,
     return extracted
 
 
-async def _call_llm_followup(session: str, fetch_data: str,
-                             text: str, author: str,
-                             mode: str = "command") -> str:
+async def _call_llm_followup(
+    session: str, fetch_data: str, text: str, author: str, mode: str = "command"
+) -> str:
     """Lightweight follow-up call within a fetch loop session.
     See DEVNOTES.md §2.3."""
     provider = get_provider()
@@ -423,7 +434,7 @@ async def _call_llm_followup(session: str, fetch_data: str,
     prompt = (
         f"Here is the data you requested:\n\n"
         f"{fetch_data}\n\n"
-        f"Now process the original request: \"{text}\"\n"
+        f'Now process the original request: "{text}"\n'
         f"Respond with a JSON action, FETCH for more data, ASK:, or REPLY:."
     )
 
@@ -454,6 +465,7 @@ async def _call_llm_followup(session: str, fetch_data: str,
 # Fetch Loop
 # ============================================================================
 
+
 async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str = "default") -> str:
     """
     Main entry point for LLM calls. Implements the fetch loop:
@@ -483,8 +495,12 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
         try:
             if iteration == 0:
                 llm_response = await _call_llm(
-                    mode, text, author, extra_context=extra_context,
-                    session=session, is_new_session=is_new
+                    mode,
+                    text,
+                    author,
+                    extra_context=extra_context,
+                    session=session,
+                    is_new_session=is_new,
                 )
             else:
                 llm_response = await _call_llm_followup(
@@ -508,18 +524,18 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
         if fetch_params and iteration < MAX_FETCH_ITERATIONS:
             logger.info(f"Fetch loop iteration {iteration + 1}: {fetch_params}")
 
-            if 'concept_id' in fetch_params:
+            if "concept_id" in fetch_params:
                 # Don't set active_concept_id while a quiz is pending —
                 # the quiz anchor must remain untouched for assess.
                 # Also protect multi-quiz flows.  See DEVNOTES §16.
-                if (not db.get_session('quiz_anchor_concept_id')
-                        and not db.get_session('active_concept_ids')):
-                    db.set_session('active_concept_id',
-                                   str(fetch_params['concept_id']))
+                if not db.get_session("quiz_anchor_concept_id") and not db.get_session(
+                    "active_concept_ids"
+                ):
+                    db.set_session("active_concept_id", str(fetch_params["concept_id"]))
 
-            msg_type, fetch_data = tools.execute_action('fetch', fetch_params)
+            msg_type, fetch_data = tools.execute_action("fetch", fetch_params)
 
-            if msg_type == 'fetch':
+            if msg_type == "fetch":
                 formatted = ctx.format_fetch_result(fetch_data)
             else:
                 formatted = f"## Fetch Error\n{fetch_data}"
@@ -586,15 +602,11 @@ async def generate_quiz_question(concept_id: int) -> dict:
         result = json.loads(text)
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"P1 returned unparseable JSON: {raw[:300]}")
-        raise LLMError(
-            f"Reasoning model returned invalid JSON: {e}", retryable=True
-        )
+        raise LLMError(f"Reasoning model returned invalid JSON: {e}", retryable=True)
 
-    if not isinstance(result, dict) or 'question' not in result:
+    if not isinstance(result, dict) or "question" not in result:
         logger.error(f"P1 missing 'question' key: {result}")
-        raise LLMError(
-            "Reasoning model output missing 'question' field", retryable=True
-        )
+        raise LLMError("Reasoning model output missing 'question' field", retryable=True)
 
     logger.info(
         f"P1 generated question for concept #{concept_id}: "
@@ -610,9 +622,7 @@ async def generate_quiz_question(concept_id: int) -> dict:
     return result
 
 
-async def package_quiz_for_discord(
-    p1_result: dict, concept_id: int
-) -> str:
+async def package_quiz_for_discord(p1_result: dict, concept_id: int) -> str:
     """Prompt 2: Package a pre-generated question with persona and action format.
 
     Takes the structured output from generate_quiz_question() and sends it
@@ -654,6 +664,7 @@ async def package_quiz_for_discord(
 # Direct Mode Handlers (no subprocess)
 # ============================================================================
 
+
 def handle_review_check() -> list[str]:
     """Find due concepts and return REVIEW payload strings.
     Falls back to the nearest upcoming concept if nothing is overdue."""
@@ -665,20 +676,19 @@ def handle_review_check() -> list[str]:
         concept = db.get_next_review_concept()
         if not concept:
             return []
-    detail = db.get_concept_detail(concept['id'])
+    detail = db.get_concept_detail(concept["id"])
     if not detail:
         return []
 
-    topic_names = [t['title'] for t in detail.get('topics', [])]
-    recent_reviews = detail.get('recent_reviews', [])
-    remark_summary = detail.get('remark_summary', '')
+    topic_names = [t["title"] for t in detail.get("topics", [])]
+    recent_reviews = detail.get("recent_reviews", [])
+    remark_summary = detail.get("remark_summary", "")
 
     context_parts = [
         f"Concept: {detail['title']} (#{detail['id']})",
         f"Description: {detail.get('description', 'N/A')}",
         f"Topics: {', '.join(topic_names) if topic_names else 'untagged'}",
-        f"Score: {detail['mastery_level']}/100, "
-        f"Reviews: {detail['review_count']}",
+        f"Score: {detail['mastery_level']}/100, Reviews: {detail['review_count']}",
     ]
 
     if remark_summary:
@@ -729,7 +739,7 @@ async def call_maintenance_loop(
     proposed_actions = []
 
     # Set action source for audit trail
-    tools.set_action_source('maintenance')
+    tools.set_action_source("maintenance")
 
     text = (
         f"[MAINTENANCE] Triage these DB issues and fix what you can.\n\n"
@@ -761,17 +771,14 @@ async def call_maintenance_loop(
             # LLM is done — returned a REPLY/ASK summary
             final_msg = message or ""
             if actions_taken:
-                action_summary = "\n".join(
-                    f"{i+1}. {a}" for i, a in enumerate(actions_taken)
-                )
+                action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
                 final_msg = (
-                    f"**Actions taken ({len(actions_taken)}):**\n"
-                    f"{action_summary}\n\n{final_msg}"
+                    f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{final_msg}"
                 )
             return f"REPLY: {final_msg}", proposed_actions
 
-        action_name = action_data.get('action', 'unknown').lower().strip()
-        action_msg = action_data.get('message', '')
+        action_name = action_data.get("action", "unknown").lower().strip()
+        action_msg = action_data.get("message", "")
 
         # Check if this action is safe to auto-execute
         if action_name in SAFE_MAINTENANCE_ACTIONS:
@@ -781,7 +788,7 @@ async def call_maintenance_loop(
             result_clean = result
             for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
                 if result_clean.startswith(pfx):
-                    result_clean = result_clean[len(pfx):]
+                    result_clean = result_clean[len(pfx) :]
                     break
 
             is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
@@ -805,9 +812,7 @@ async def call_maintenance_loop(
             )
 
         # Build continuation prompt with results so far
-        action_log = "\n".join(
-            f"{i+1}. {a}" for i, a in enumerate(actions_taken)
-        )
+        action_log = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
         text = (
             f"[MAINTENANCE continuation] Actions taken so far:\n{action_log}\n\n"
             f"Original diagnostic report:\n{diagnostic_context[:1500]}\n\n"
@@ -818,7 +823,7 @@ async def call_maintenance_loop(
     # Exhausted all action slots — ask LLM for final summary
     text = (
         f"[MAINTENANCE final] You've used all {MAX_MAINTENANCE_ACTIONS} actions:\n"
-        + "\n".join(f"{i+1}. {a}" for i, a in enumerate(actions_taken))
+        + "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
         + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
     )
     # TODO: Phase 3 — forward user_id for multi-user scoping
@@ -827,13 +832,8 @@ async def call_maintenance_loop(
     )
     _prefix, message, _action_data = parse_llm_response(llm_response)
 
-    action_summary = "\n".join(
-        f"{i+1}. {a}" for i, a in enumerate(actions_taken)
-    )
-    final_msg = (
-        f"**Actions taken ({len(actions_taken)}):**\n"
-        f"{action_summary}\n\n{message or ''}"
-    )
+    action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+    final_msg = f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{message or ''}"
     return f"REPLY: {final_msg}", proposed_actions
 
 
@@ -842,24 +842,23 @@ async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
     Returns summary strings for each executed action."""
     # Ensure approved maintenance proposals keep the 'maintenance' source
     # so code-level guards (e.g. score-field stripping) still apply.
-    tools.set_action_source('maintenance')
+    tools.set_action_source("maintenance")
 
     summaries = []
     for action_data in actions:
-        action_name = action_data.get('action', 'unknown')
-        action_msg = action_data.get('message', '')
+        action_name = action_data.get("action", "unknown")
+        action_msg = action_data.get("message", "")
         result = await execute_action(action_data)
 
         result_clean = result
         for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
             if result_clean.startswith(pfx):
-                result_clean = result_clean[len(pfx):]
+                result_clean = result_clean[len(pfx) :]
                 break
 
         is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
         status = "❌" if is_error else "✅"
         summaries.append(f"{status} `{action_name}` — {action_msg[:80]}")
-        logger.info(f"Approved maintenance action: {action_name} → "
-                     f"{'error' if is_error else 'ok'}")
+        logger.info(f"Approved maintenance action: {action_name} → {'error' if is_error else 'ok'}")
 
     return summaries

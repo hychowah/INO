@@ -8,6 +8,7 @@ from pathlib import Path
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv(Path(__file__).parent / ".env", override=True)
 except ImportError:
     pass  # python-dotenv not installed — rely on actual env vars
@@ -114,11 +115,16 @@ KIMI_CLI_PATH = "kimi"
 #   DeepSeek: https://api.deepseek.com
 LLM_API_BASE_URL = os.environ.get("LEARN_LLM_BASE_URL")
 LLM_API_KEY = os.environ.get("LEARN_LLM_API_KEY")
-LLM_MODEL = os.environ.get("LEARN_LLM_MODEL")                  # e.g. "grok-3", "deepseek-chat"
-LLM_TEMPERATURE = float(os.environ["LEARN_LLM_TEMPERATURE"]) if os.environ.get("LEARN_LLM_TEMPERATURE") else None
-LLM_MAX_TOKENS = int(os.environ["LEARN_LLM_MAX_TOKENS"]) if os.environ.get("LEARN_LLM_MAX_TOKENS") else 4096
+LLM_MODEL = os.environ.get("LEARN_LLM_MODEL")  # e.g. "grok-3", "deepseek-chat"
+LLM_TEMPERATURE = (
+    float(os.environ["LEARN_LLM_TEMPERATURE"]) if os.environ.get("LEARN_LLM_TEMPERATURE") else None
+)
+LLM_MAX_TOKENS = (
+    int(os.environ["LEARN_LLM_MAX_TOKENS"]) if os.environ.get("LEARN_LLM_MAX_TOKENS") else 4096
+)
 LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "40000"))
-# Thinking mode for models that support it (e.g. kimi-k2.5): "enabled" | "disabled" | None (use model default)
+# Thinking mode for models that support it (e.g. kimi-k2.5): "enabled" | "disabled" | None
+# (use model default)
 LLM_THINKING = os.environ.get("LEARN_LLM_THINKING")  # e.g. "disabled"
 
 # --- Reasoning provider (optional, for scheduled quiz question generation) ---
@@ -134,6 +140,7 @@ REASONING_LLM_THINKING = os.environ.get("LEARN_REASONING_LLM_THINKING")  # e.g. 
 # ============================================================================
 # VALIDATION
 # ============================================================================
+
 
 def validate_config():
     """Validate configuration. Returns list of error strings."""
@@ -166,7 +173,8 @@ def print_config():
     else:
         print(f"  LLM Model      : {LLM_MODEL}")
         print(f"  LLM Base URL   : {LLM_API_BASE_URL}")
-        print(f"  LLM API Key    : {'***' + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else '(not set)'}")
+        _key = "***" + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else "(not set)"
+        print(f"  LLM API Key    : {_key}")
     if REASONING_LLM_MODEL:
         print(f"  Reasoning Model: {REASONING_LLM_MODEL}")
         print(f"  Reasoning URL  : {REASONING_LLM_BASE_URL}")

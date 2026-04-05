@@ -12,20 +12,26 @@ import signal
 import sys
 import threading
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 # Add project root (learning_agent/) to path so we can import db
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
-import db
+import db  # noqa: E402
 
 PORT = 8050
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Page renderers (extracted to webui/pages.py and webui/helpers.py)
-from webui.helpers import layout  # noqa: E402 — used in Handler error path
+# Backward-compat re-exports (consumed by tests/test_action_log.py)
+from webui.helpers import (  # noqa: E402,F401
+    _esc,
+    _relative_time,
+    layout,  # noqa: E402 — used in Handler error path
+)
 from webui.pages import (  # noqa: E402
+    page_404,
     page_actions,
     page_concept_detail,
     page_concepts,
@@ -35,23 +41,19 @@ from webui.pages import (  # noqa: E402
     page_reviews,
     page_topic_detail,
     page_topics,
-    page_404,
 )
-
-# Backward-compat re-exports (consumed by tests/test_action_log.py)
-from webui.helpers import _esc, _relative_time  # noqa: E402,F401
 
 # ============================================================================
 # HTTP Handler
 # ============================================================================
 
 MIME_TYPES = {
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
 }
 
 
@@ -117,16 +119,24 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/actions":
                 # Parse query params for filtering
                 qs = urllib.parse.parse_qs(parsed.query or "")
-                limit = min(200, int(qs.get('limit', [50])[0]))
-                offset = int(qs.get('offset', [0])[0])
-                action_f = qs.get('action', [None])[0] or None
-                source_f = qs.get('source', [None])[0] or None
+                limit = min(200, int(qs.get("limit", [50])[0]))
+                offset = int(qs.get("offset", [0])[0])
+                action_f = qs.get("action", [None])[0] or None
+                source_f = qs.get("source", [None])[0] or None
                 entries = db.get_action_log(
-                    limit=limit, offset=offset,
-                    action_filter=action_f, source_filter=source_f,
+                    limit=limit,
+                    offset=offset,
+                    action_filter=action_f,
+                    source_filter=source_f,
                 )
-                self._json_response({"entries": entries, "total": db.get_action_log_count(
-                    action_filter=action_f, source_filter=source_f)})
+                self._json_response(
+                    {
+                        "entries": entries,
+                        "total": db.get_action_log_count(
+                            action_filter=action_f, source_filter=source_f
+                        ),
+                    }
+                )
                 return
             else:
                 html = page_404()
@@ -135,8 +145,11 @@ class Handler(BaseHTTPRequestHandler):
 
         except Exception as e:
             self._html_response(
-                layout("Error", f'<div class="flash error">Error: {e}</div><p><a href="/">Go home</a></p>'),
-                status=500
+                layout(
+                    "Error",
+                    f'<div class="flash error">Error: {e}</div><p><a href="/">Go home</a></p>',
+                ),
+                status=500,
             )
 
     def do_POST(self):
@@ -159,8 +172,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # DELETE concept: POST /api/concept/<id>/delete
             parts = path.split("/")
-            if (len(parts) == 5 and parts[1] == "api"
-                    and parts[2] == "concept" and parts[4] == "delete"):
+            if (
+                len(parts) == 5
+                and parts[1] == "api"
+                and parts[2] == "concept"
+                and parts[4] == "delete"
+            ):
                 try:
                     cid = int(parts[3])
                 except ValueError:
@@ -188,12 +205,19 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         ext = file_path.suffix.lower()
-        content_type = MIME_TYPES.get(ext, mimetypes.guess_type(str(file_path))[0] or 'application/octet-stream')
+        content_type = MIME_TYPES.get(
+            ext, mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+        )
 
         try:
             data = file_path.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", f"{content_type}; charset=utf-8" if ext in ('.css', '.js', '.json') else content_type)
+            self.send_header(
+                "Content-Type",
+                f"{content_type}; charset=utf-8"
+                if ext in (".css", ".js", ".json")
+                else content_type,
+            )
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
@@ -222,6 +246,7 @@ class Handler(BaseHTTPRequestHandler):
 # Main
 # ============================================================================
 
+
 def main(skip_init: bool = False):
     if not skip_init:
         db.init_databases()
@@ -232,12 +257,13 @@ def main(skip_init: bool = False):
     # Fast shutdown on Windows: signal handler calls shutdown() from a thread
     # Only works when running in the main thread (not when bot spawns webui in a thread)
     if threading.current_thread() is threading.main_thread():
+
         def _signal_shutdown(sig, frame):
             print("\nShutting down...")
             threading.Thread(target=server.shutdown, daemon=True).start()
 
         signal.signal(signal.SIGINT, _signal_shutdown)
-        if hasattr(signal, 'SIGTERM'):
+        if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, _signal_shutdown)
 
     try:

@@ -12,10 +12,10 @@ by get_provider().
 
 from __future__ import annotations
 
-import os
-import logging
-import subprocess
 import asyncio
+import logging
+import os
+import subprocess
 import time
 from typing import Protocol, runtime_checkable
 
@@ -27,6 +27,7 @@ logger = logging.getLogger("llm")
 # ============================================================================
 # Shared types
 # ============================================================================
+
 
 class LLMError(Exception):
     """Raised when the LLM call fails."""
@@ -66,6 +67,7 @@ class LLMProvider(Protocol):
 # KimiCliProvider
 # ============================================================================
 
+
 class KimiCliProvider:
     """Wraps the kimi-cli binary (subprocess, stdin→stdout)."""
 
@@ -104,8 +106,10 @@ class KimiCliProvider:
             if self._personas_dir:
                 try:
                     from db.preferences import get_persona
+
                     persona_name = get_persona()
                     import os
+
                     persona_path = os.path.join(self._personas_dir, f"{persona_name}.md")
                     if os.path.exists(persona_path):
                         persona_line = f"2. {persona_path}\n"
@@ -189,8 +193,7 @@ class KimiCliProvider:
                 logger.warning(f"Kimi stderr: {filtered[:300]}")
             if not result.stdout.strip():
                 raise LLMError(
-                    f"kimi-cli exited {result.returncode}: "
-                    f"{filtered[:200] or '(no stderr)'}",
+                    f"kimi-cli exited {result.returncode}: {filtered[:200] or '(no stderr)'}",
                     retryable=True,
                 )
 
@@ -200,6 +203,7 @@ class KimiCliProvider:
 # ============================================================================
 # OpenAI-compatible API provider
 # ============================================================================
+
 
 class OpenAICompatibleProvider:
     """Async adapter for any OpenAI-compatible chat-completions endpoint
@@ -326,7 +330,7 @@ class OpenAICompatibleProvider:
         exc_name = type(exc).__name__
 
         try:
-            from openai import AuthenticationError, RateLimitError, APIConnectionError
+            from openai import APIConnectionError, AuthenticationError, RateLimitError
         except ImportError:
             raise LLMError(str(exc), retryable=True) from exc
 
@@ -352,12 +356,14 @@ class OpenAICompatibleProvider:
 # Helpers
 # ============================================================================
 
+
 def _filter_stderr(stderr: str) -> str:
     """Filter out kimi's decorative box-drawing output from stderr."""
     if not stderr:
         return ""
     filtered = [
-        line for line in stderr.strip().split("\n")
+        line
+        for line in stderr.strip().split("\n")
         if line.strip()
         and not line.startswith("┌")
         and not line.startswith("│")
@@ -423,8 +429,7 @@ def get_provider() -> LLMProvider:
 
     else:
         raise LLMError(
-            f"Unknown LLM_PROVIDER: {provider_name!r}. "
-            f"Valid: 'kimi', 'openai_compat'.",
+            f"Unknown LLM_PROVIDER: {provider_name!r}. Valid: 'kimi', 'openai_compat'.",
             retryable=False,
         )
 

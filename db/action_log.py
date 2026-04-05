@@ -5,7 +5,7 @@ Action log operations — audit trail for bot actions.
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from db.core import _conn, _connection, _now_iso
 
@@ -19,6 +19,7 @@ _MAX_RESULT_LEN = 500
 # ============================================================================
 # Write
 # ============================================================================
+
 
 def log_action(
     action: str,
@@ -43,10 +44,10 @@ def log_action(
 
     # Truncate
     if params_str and len(params_str) > _MAX_PARAMS_LEN:
-        params_str = params_str[:_MAX_PARAMS_LEN - 1] + "…"
+        params_str = params_str[: _MAX_PARAMS_LEN - 1] + "…"
     result_str = str(result) if result is not None else ""
     if len(result_str) > _MAX_RESULT_LEN:
-        result_str = result_str[:_MAX_RESULT_LEN - 1] + "…"
+        result_str = result_str[: _MAX_RESULT_LEN - 1] + "…"
 
     conn = _conn()
     cursor = conn.execute(
@@ -64,6 +65,7 @@ def log_action(
 # ============================================================================
 # Read
 # ============================================================================
+
 
 def get_action_log(
     limit: int = 50,
@@ -179,9 +181,7 @@ def get_action_summary(days: int = 7) -> Dict[str, Any]:
 def get_distinct_actions() -> List[str]:
     """Return distinct action names present in the log."""
     conn = _conn()
-    rows = conn.execute(
-        "SELECT DISTINCT action FROM action_log ORDER BY action"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT action FROM action_log ORDER BY action").fetchall()
     conn.close()
     return [r["action"] for r in rows]
 
@@ -189,9 +189,7 @@ def get_distinct_actions() -> List[str]:
 def get_distinct_sources() -> List[str]:
     """Return distinct source values present in the log."""
     conn = _conn()
-    rows = conn.execute(
-        "SELECT DISTINCT source FROM action_log ORDER BY source"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT source FROM action_log ORDER BY source").fetchall()
     conn.close()
     return [r["source"] for r in rows]
 
@@ -200,13 +198,12 @@ def get_distinct_sources() -> List[str]:
 # Cleanup
 # ============================================================================
 
+
 def cleanup_old_actions(days: int = 90) -> int:
     """Delete action log entries older than N days. Returns count deleted."""
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     with _connection() as conn:
-        cursor = conn.execute(
-            "DELETE FROM action_log WHERE created_at < ?", (cutoff,)
-        )
+        cursor = conn.execute("DELETE FROM action_log WHERE created_at < ?", (cutoff,))
         deleted = cursor.rowcount
     if deleted:
         logger.info(f"Cleaned up {deleted} action log entries older than {days} days")

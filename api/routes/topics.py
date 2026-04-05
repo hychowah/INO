@@ -3,10 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 import db
-from services.tools import set_action_source
-
 from api.auth import verify_token
-from api.schemas import CreateTopicRequest, UpdateTopicRequest, TopicLinkRequest
+from api.schemas import CreateTopicRequest, TopicLinkRequest, UpdateTopicRequest
+from services.tools import set_action_source
 
 router = APIRouter()
 
@@ -39,7 +38,7 @@ async def get_topic(topic_id: int):
 @router.post("/api/topics", status_code=201, dependencies=[Depends(verify_token)])
 async def create_topic(req: CreateTopicRequest):
     """Create a new learning topic."""
-    set_action_source('api')
+    set_action_source("api")
 
     topic_id = db.add_topic(
         title=req.title,
@@ -52,7 +51,7 @@ async def create_topic(req: CreateTopicRequest):
 @router.put("/api/topics/{topic_id}", dependencies=[Depends(verify_token)])
 async def update_topic(topic_id: int, req: UpdateTopicRequest):
     """Update topic fields."""
-    set_action_source('api')
+    set_action_source("api")
 
     existing = db.get_topic(topic_id)
     if not existing:
@@ -68,7 +67,7 @@ async def update_topic(topic_id: int, req: UpdateTopicRequest):
 @router.delete("/api/topics/{topic_id}", dependencies=[Depends(verify_token)])
 async def delete_topic(topic_id: int, force: bool = False):
     """Delete a topic. Returns 409 if it still has concepts or children unless force=True."""
-    set_action_source('api')
+    set_action_source("api")
 
     topic = db.get_topic(topic_id)
     if not topic:
@@ -80,14 +79,14 @@ async def delete_topic(topic_id: int, force: bool = False):
             raise HTTPException(
                 status_code=409,
                 detail=f"Topic still has {len(concepts)} concept(s). "
-                       f"Unlink them first, or use ?force=true.",
+                f"Unlink them first, or use ?force=true.",
             )
         children = db.get_topic_children(topic_id)
         if children:
             raise HTTPException(
                 status_code=409,
                 detail=f"Topic still has {len(children)} child topic(s). "
-                       f"Unlink them first, or use ?force=true.",
+                f"Unlink them first, or use ?force=true.",
             )
 
     db.delete_topic(topic_id)
@@ -97,13 +96,13 @@ async def delete_topic(topic_id: int, force: bool = False):
 @router.post("/api/topics/link", dependencies=[Depends(verify_token)])
 async def link_topics(req: TopicLinkRequest):
     """Create a parent→child relationship between two topics."""
-    set_action_source('api')
+    set_action_source("api")
 
     if req.parent_id == req.child_id:
         raise HTTPException(status_code=400, detail="Cannot link a topic to itself")
 
     children = db.get_topic_children(req.parent_id)
-    if any(c['id'] == req.child_id for c in children):
+    if any(c["id"] == req.child_id for c in children):
         return {"message": "Already linked."}
 
     success = db.link_topics(req.parent_id, req.child_id)
@@ -118,7 +117,7 @@ async def link_topics(req: TopicLinkRequest):
 @router.post("/api/topics/unlink", dependencies=[Depends(verify_token)])
 async def unlink_topics(req: TopicLinkRequest):
     """Remove a parent→child relationship between two topics."""
-    set_action_source('api')
+    set_action_source("api")
 
     db.unlink_topics(req.parent_id, req.child_id)
     return {"message": f"Unlinked topic {req.child_id} from topic {req.parent_id}."}

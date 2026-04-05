@@ -2,10 +2,10 @@
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -24,6 +24,7 @@ class ConfirmRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Concepts
 # ---------------------------------------------------------------------------
+
 
 class CreateConceptRequest(BaseModel):
     title: str = Field(..., max_length=200)
@@ -45,6 +46,7 @@ class RemarkRequest(BaseModel):
 # Topics
 # ---------------------------------------------------------------------------
 
+
 class CreateTopicRequest(BaseModel):
     title: str = Field(..., max_length=200)
     description: str | None = Field(default=None, max_length=2000)
@@ -65,6 +67,7 @@ class TopicLinkRequest(BaseModel):
 # Relations
 # ---------------------------------------------------------------------------
 
+
 class CreateRelationRequest(BaseModel):
     concept_id_a: int
     concept_id_b: int
@@ -79,6 +82,7 @@ class RemoveRelationRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Persona
 # ---------------------------------------------------------------------------
+
 
 class PersonaRequest(BaseModel):
     name: str

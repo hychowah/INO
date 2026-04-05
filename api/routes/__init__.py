@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 def register_routes(app: FastAPI) -> None:
     """Include every route module into *app*."""
-    from api.routes import chat, topics, concepts, relations, reviews, graph, misc
+    from api.routes import chat, concepts, graph, misc, relations, reviews, topics
 
     app.include_router(chat.router)
     app.include_router(topics.router)

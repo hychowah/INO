@@ -8,8 +8,8 @@ Run from the learning_agent directory:
     python tests/test_maintenance.py --similarity # show similarity matrix from live DB
 """
 
-import asyncio
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -18,8 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
-from services import pipeline
 from services import context as ctx
+from services import pipeline
 
 
 def setup_logging(verbose: bool = False):
@@ -55,20 +55,20 @@ def run_similarity_test():
             if j <= i:
                 print("     .", end="")
             else:
-                sim = db._title_similarity(a['title'], b['title'])
+                sim = db._title_similarity(a["title"], b["title"])
                 marker = " *" if sim >= 0.5 else "  "
                 print(f"  {sim:.2f}{marker}", end="")
                 if sim >= 0.5:
                     flagged.append((a, b, sim))
         print()
 
-    print(f"\n  * = similarity >= 0.5 (would be caught by dedup agent)")
+    print("\n  * = similarity >= 0.5 (would be caught by dedup agent)")
     if flagged:
         print(f"\n  Flagged pairs ({len(flagged)}):")
         for a, b, sim in flagged:
-            print(f"    {sim:.2f}  #{a['id']} \"{a['title']}\" ↔ #{b['id']} \"{b['title']}\"")
+            print(f'    {sim:.2f}  #{a["id"]} "{a["title"]}" ↔ #{b["id"]} "{b["title"]}"')
     else:
-        print(f"\n  No similar pairs found.")
+        print("\n  No similar pairs found.")
     print()
     return True
 
@@ -85,7 +85,7 @@ def run_maintenance_test():
     if "No issues found" in maint_context:
         print("\n  Result: HEALTHY — no issues to triage")
     else:
-        issue_lines = [l for l in maint_context.split("\n") if l.startswith("- [")]
+        issue_lines = [ln for ln in maint_context.split("\n") if ln.startswith("- [")]
         print(f"\n  Result: {len(issue_lines)} issue(s) found")
     print()
 
@@ -100,11 +100,11 @@ async def run_dedup_test(dry_run: bool = False):
     concepts = db.get_all_concepts_summary()
     print(f"\nAll concepts ({len(concepts)}):")
     for c in concepts:
-        desc = f" — {c['description'][:60]}" if c.get('description') else ""
-        topics = f" [{c['topic_names']}]" if c.get('topic_names') else " [untagged]"
+        desc = f" — {c['description'][:60]}" if c.get("description") else ""
+        topics = f" [{c['topic_names']}]" if c.get("topic_names") else " [untagged]"
         print(f"  #{c['id']}: {c['title']}{desc}{topics}")
 
-    print(f"\nCalling LLM dedup agent...")
+    print("\nCalling LLM dedup agent...")
     groups = await pipeline.handle_dedup_check()
 
     if not groups:
@@ -113,7 +113,7 @@ async def run_dedup_test(dry_run: bool = False):
 
     print(f"\n  Found {len(groups)} duplicate group(s):")
     for g in groups:
-        merge_str = ", ".join(f"#{m}" for m in g['merge'])
+        merge_str = ", ".join(f"#{m}" for m in g["merge"])
         print(f"    KEEP #{g['keep']} ← merge {merge_str}  ({g.get('reason', '')})")
 
     if dry_run:
@@ -131,10 +131,12 @@ async def main():
     parser = argparse.ArgumentParser(description="Test maintenance & dedup agents")
     parser.add_argument("--maint", action="store_true", help="Run maintenance only")
     parser.add_argument("--dedup", action="store_true", help="Run dedup only")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Dedup: identify dupes but don't merge")
-    parser.add_argument("--similarity", action="store_true",
-                        help="Show similarity matrix from live DB concepts")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Dedup: identify dupes but don't merge"
+    )
+    parser.add_argument(
+        "--similarity", action="store_true", help="Show similarity matrix from live DB concepts"
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args()
 

@@ -31,12 +31,10 @@ def _get_client():
     try:
         from qdrant_client import QdrantClient
     except ImportError:
-        raise RuntimeError(
-            "qdrant-client not installed. "
-            "Run: pip install qdrant-client"
-        )
+        raise RuntimeError("qdrant-client not installed. Run: pip install qdrant-client")
 
     from config import VECTOR_STORE_PATH
+
     path = str(VECTOR_STORE_PATH)
     logger.info(f"Initializing Qdrant (embedded) at: {path}")
     _client = QdrantClient(path=path)
@@ -82,9 +80,11 @@ def _make_text(title: str, description: Optional[str]) -> str:
 # Concept operations
 # ============================================================================
 
+
 def upsert_concept(concept_id: int, title: str, description: Optional[str] = None):
     """Embed and upsert a concept into the vector store."""
     from qdrant_client.models import PointStruct
+
     from services.embeddings import embed_text
 
     text = _make_text(title, description)
@@ -116,8 +116,9 @@ def delete_concept(concept_id: int):
     logger.debug(f"Deleted concept #{concept_id} from vector store")
 
 
-def search_similar_concepts(query: str, limit: int = 10,
-                            score_threshold: float = 0.3) -> List[Dict]:
+def search_similar_concepts(
+    query: str, limit: int = 10, score_threshold: float = 0.3
+) -> List[Dict]:
     """Semantic search for concepts matching a query string.
 
     Returns list of dicts: [{id, title, score}, ...] ordered by similarity.
@@ -144,15 +145,18 @@ def search_similar_concepts(query: str, limit: int = 10,
     ]
 
 
-def find_nearest_concepts(concept_id: int, limit: int = 5,
-                          score_threshold: float = 0.4,
-                          exclude_ids: Optional[List[int]] = None) -> List[Dict]:
+def find_nearest_concepts(
+    concept_id: int,
+    limit: int = 5,
+    score_threshold: float = 0.4,
+    exclude_ids: Optional[List[int]] = None,
+) -> List[Dict]:
     """Find the N nearest concepts to a given concept (by vector similarity).
 
     Used for relationship discovery and multi-concept quiz clustering.
     Returns list of dicts: [{id, title, score}, ...] sorted by similarity.
     """
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
+    from qdrant_client.models import FieldCondition, MatchValue
 
     client = _get_client()
 
@@ -172,9 +176,7 @@ def find_nearest_concepts(concept_id: int, limit: int = 5,
     must_not = []
     all_exclude = [concept_id] + (exclude_ids or [])
     for eid in all_exclude:
-        must_not.append(
-            FieldCondition(key="id", match=MatchValue(value=eid))
-        )
+        must_not.append(FieldCondition(key="id", match=MatchValue(value=eid)))
 
     # Qdrant doesn't filter by point ID via FieldCondition easily,
     # so we request extra results and filter post-hoc
@@ -217,6 +219,7 @@ def concept_similarity(id_a: int, id_b: int) -> float:
         return 0.0
 
     import numpy as np
+
     vec_a = np.array(points[0].vector)
     vec_b = np.array(points[1].vector)
 
@@ -231,9 +234,11 @@ def concept_similarity(id_a: int, id_b: int) -> float:
 # Topic operations
 # ============================================================================
 
+
 def upsert_topic(topic_id: int, title: str, description: Optional[str] = None):
     """Embed and upsert a topic into the vector store."""
     from qdrant_client.models import PointStruct
+
     from services.embeddings import embed_text
 
     text = _make_text(title, description)
@@ -265,8 +270,7 @@ def delete_topic(topic_id: int):
     logger.debug(f"Deleted topic #{topic_id} from vector store")
 
 
-def search_similar_topics(query: str, limit: int = 10,
-                          score_threshold: float = 0.3) -> List[Dict]:
+def search_similar_topics(query: str, limit: int = 10, score_threshold: float = 0.3) -> List[Dict]:
     """Semantic search for topics matching a query string.
 
     Returns list of dicts: [{id, title, score}, ...] ordered by similarity.
@@ -297,6 +301,7 @@ def search_similar_topics(query: str, limit: int = 10,
 # Bulk operations (migration / repair)
 # ============================================================================
 
+
 def reindex_all():
     """Rebuild the entire vector store from SQLite data.
 
@@ -305,8 +310,9 @@ def reindex_all():
     repair tool if the vector store drifts out of sync.
     """
     from qdrant_client.models import Distance, PointStruct, VectorParams
-    from services.embeddings import embed_batch, get_embedding_dim
+
     from db.core import _conn
+    from services.embeddings import embed_batch, get_embedding_dim
 
     client = _get_client()
     dim = get_embedding_dim()
@@ -353,9 +359,7 @@ def reindex_all():
     )
 
     conn = _conn()
-    topic_rows = conn.execute(
-        "SELECT id, title, description FROM topics ORDER BY id"
-    ).fetchall()
+    topic_rows = conn.execute("SELECT id, title, description FROM topics ORDER BY id").fetchall()
     conn.close()
 
     if topic_rows:

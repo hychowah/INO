@@ -10,12 +10,14 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db.preferences import (
-    PERSONAS_DIR, DEFAULT_PERSONA,
-    get_available_personas, get_persona, set_persona,
-    get_persona_content,
-)
 import db
+from db.preferences import (
+    DEFAULT_PERSONA,
+    PERSONAS_DIR,
+    get_available_personas,
+    get_persona_content,
+    set_persona,
+)
 
 
 def test_persona_files_exist():
@@ -33,7 +35,7 @@ def test_persona_files_under_token_budget():
     for path in PERSONAS_DIR.glob("*.md"):
         content = path.read_text(encoding="utf-8")
         assert len(content) < TOKEN_BUDGET, (
-            f"{path.name} is {len(content)} chars ({len(content)//4} est. tokens) "
+            f"{path.name} is {len(content)} chars ({len(content) // 4} est. tokens) "
             f"— exceeds budget of {TOKEN_BUDGET} chars"
         )
         est_tokens = len(content) // 4
@@ -147,7 +149,7 @@ def main():
             print(f"  ❌ ERROR: {type(e).__name__}: {e}")
             failed += 1
 
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"Results: {passed} passed, {failed} failed")
     if failed:
         sys.exit(1)

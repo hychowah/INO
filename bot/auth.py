@@ -11,6 +11,7 @@ logger = logging.getLogger("bot")
 
 def authorized_only():
     """Decorator to restrict commands to the authorized user."""
+
     async def predicate(ctx):
         uid = ctx.author.id if hasattr(ctx, "author") else ctx.user.id
         if uid != config.AUTHORIZED_USER_ID:
@@ -18,4 +19,5 @@ def authorized_only():
             logger.warning(f"Unauthorized access attempt by {uid}")
             return False
         return True
+
     return commands.check(predicate)

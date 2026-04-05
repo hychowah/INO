@@ -19,11 +19,17 @@ def page_graph() -> str:
     total_concepts = len(concepts)
     max_nodes = config.MAX_GRAPH_NODES
     if len(concepts) > max_nodes:
-        concepts = sorted(concepts, key=lambda c: c.get('mastery_level') or 0, reverse=True)[:max_nodes]
+        concepts = sorted(concepts, key=lambda c: c.get("mastery_level") or 0, reverse=True)[
+            :max_nodes
+        ]
 
-    concept_ids = {c['id'] for c in concepts}
-    relations = [e for e in relations if e['concept_id_low'] in concept_ids and e['concept_id_high'] in concept_ids]
-    ct_edges = [e for e in ct_edges if e['concept_id'] in concept_ids]
+    concept_ids = {c["id"] for c in concepts}
+    relations = [
+        e
+        for e in relations
+        if e["concept_id_low"] in concept_ids and e["concept_id_high"] in concept_ids
+    ]
+    ct_edges = [e for e in ct_edges if e["concept_id"] in concept_ids]
 
     graph_data = {
         "concept_nodes": concepts,
@@ -79,6 +85,10 @@ window.__GRAPH_DATA = {json.dumps(graph_data, default=str)};
         cap_notice = f'<div class="graph-cap-notice">Showing top {max_nodes} of {total_concepts} concepts by mastery. Use filters to explore more.</div>'
         body = cap_notice + body
 
-    return layout("Graph", body, active="graph",
-                  extra_scripts='<script src="https://d3js.org/d3.v7.min.js"></script>\n<script src="/static/graph.js?v=3"></script>',
-                  body_class="graph-page")
+    return layout(
+        "Graph",
+        body,
+        active="graph",
+        extra_scripts='<script src="https://d3js.org/d3.v7.min.js"></script>\n<script src="/static/graph.js?v=3"></script>',
+        body_class="graph-page",
+    )

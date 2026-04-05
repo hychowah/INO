@@ -6,13 +6,13 @@ See DEVNOTES.md §4 for design rationale.
 """
 
 import logging
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 import discord
 
 import db
 from services.dedup import execute_dedup_merges
-from services.formatting import truncate_for_discord, truncate_with_suffix, format_quiz_metadata
+from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
 
 logger = logging.getLogger("views")
 
@@ -45,8 +45,8 @@ class DedupConfirmView(discord.ui.View):
         # Each group takes 2 components; with 2 bulk buttons, max ~11 groups
         max_groups = min(len(groups), 10)
         for i in range(max_groups):
-            keep_concept = db.get_concept(groups[i]['keep'])
-            label = keep_concept['title'][:30] if keep_concept else f"Group {i+1}"
+            keep_concept = db.get_concept(groups[i]["keep"])
+            label = keep_concept["title"][:30] if keep_concept else f"Group {i + 1}"
             self.add_item(ApproveGroupButton(self, i, label))
             self.add_item(RejectGroupButton(self, i, label))
 
@@ -103,8 +103,8 @@ class DedupConfirmView(discord.ui.View):
         """Build a summary of current decisions for the message."""
         lines = []
         for i, g in enumerate(self.groups):
-            keep_concept = db.get_concept(g['keep'])
-            keep_title = keep_concept['title'] if keep_concept else f"#{g['keep']}"
+            keep_concept = db.get_concept(g["keep"])
+            keep_title = keep_concept["title"] if keep_concept else f"#{g['keep']}"
             decision = self.decisions.get(i)
             if decision is True:
                 status = "✅ Approved"
@@ -112,7 +112,7 @@ class DedupConfirmView(discord.ui.View):
                 status = "❌ Rejected"
             else:
                 status = "⏳ Pending"
-            lines.append(f"**{i+1}.** {keep_title} — {status}")
+            lines.append(f"**{i + 1}.** {keep_title} — {status}")
         return "\n".join(lines)
 
 
@@ -168,8 +168,7 @@ class ApproveGroupButton(discord.ui.Button):
         self.disabled = True
         # Also disable the corresponding reject button
         for item in self.parent_view.children:
-            if (isinstance(item, RejectGroupButton)
-                    and item.group_idx == self.group_idx):
+            if isinstance(item, RejectGroupButton) and item.group_idx == self.group_idx:
                 item.disabled = True
                 break
 
@@ -198,8 +197,7 @@ class RejectGroupButton(discord.ui.Button):
         self.disabled = True
         # Also disable the corresponding approve button
         for item in self.parent_view.children:
-            if (isinstance(item, ApproveGroupButton)
-                    and item.group_idx == self.group_idx):
+            if isinstance(item, ApproveGroupButton) and item.group_idx == self.group_idx:
                 item.disabled = True
                 break
 
@@ -215,12 +213,17 @@ class RejectGroupButton(discord.ui.Button):
 # Maintenance confirmation view
 # ============================================================================
 
+
 class MaintenanceConfirmView(discord.ui.View):
     """View for confirming destructive maintenance actions.
     Shows proposed actions with approve/reject buttons."""
 
-    def __init__(self, proposal_id: int, actions: list[dict],
-                 execute_fn: Callable[[list[dict]], Awaitable[list[str]]]):
+    def __init__(
+        self,
+        proposal_id: int,
+        actions: list[dict],
+        execute_fn: Callable[[list[dict]], Awaitable[list[str]]],
+    ):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.proposal_id = proposal_id
         self.actions = actions
@@ -232,7 +235,7 @@ class MaintenanceConfirmView(discord.ui.View):
 
         max_actions = min(len(actions), 10)
         for i in range(max_actions):
-            action_label = actions[i].get('action', 'unknown')[:20]
+            action_label = actions[i].get("action", "unknown")[:20]
             self.add_item(MaintenanceApproveButton(self, i, action_label))
             self.add_item(MaintenanceRejectButton(self, i, action_label))
 
@@ -278,8 +281,7 @@ class MaintenanceConfirmView(discord.ui.View):
 
 class MaintenanceApproveAllButton(discord.ui.Button):
     def __init__(self, parent_view: MaintenanceConfirmView):
-        super().__init__(label="Approve All", style=discord.ButtonStyle.success,
-                         emoji="✅", row=0)
+        super().__init__(label="Approve All", style=discord.ButtonStyle.success, emoji="✅", row=0)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
@@ -291,8 +293,7 @@ class MaintenanceApproveAllButton(discord.ui.Button):
 
 class MaintenanceRejectAllButton(discord.ui.Button):
     def __init__(self, parent_view: MaintenanceConfirmView):
-        super().__init__(label="Reject All", style=discord.ButtonStyle.danger,
-                         emoji="❌", row=0)
+        super().__init__(label="Reject All", style=discord.ButtonStyle.danger, emoji="❌", row=0)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
@@ -305,8 +306,12 @@ class MaintenanceRejectAllButton(discord.ui.Button):
 class MaintenanceApproveButton(discord.ui.Button):
     def __init__(self, parent_view: MaintenanceConfirmView, idx: int, label: str):
         row = min(4, (idx // 2) + 1)
-        super().__init__(label=f"✅ {idx + 1}", style=discord.ButtonStyle.success,
-                         custom_id=f"maint_approve_{idx}", row=row)
+        super().__init__(
+            label=f"✅ {idx + 1}",
+            style=discord.ButtonStyle.success,
+            custom_id=f"maint_approve_{idx}",
+            row=row,
+        )
         self.parent_view = parent_view
         self.idx = idx
 
@@ -324,8 +329,12 @@ class MaintenanceApproveButton(discord.ui.Button):
 class MaintenanceRejectButton(discord.ui.Button):
     def __init__(self, parent_view: MaintenanceConfirmView, idx: int, label: str):
         row = min(4, (idx // 2) + 1)
-        super().__init__(label=f"❌ {idx + 1}", style=discord.ButtonStyle.danger,
-                         custom_id=f"maint_reject_{idx}", row=row)
+        super().__init__(
+            label=f"❌ {idx + 1}",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"maint_reject_{idx}",
+            row=row,
+        )
         self.parent_view = parent_view
         self.idx = idx
 
@@ -343,6 +352,7 @@ class MaintenanceRejectButton(discord.ui.Button):
 # ============================================================================
 # Add-concept confirmation view
 # ============================================================================
+
 
 class AddConceptConfirmView(discord.ui.View):
     """Simple Accept / Decline buttons shown when the LLM wants to add a
@@ -367,23 +377,25 @@ class AddConceptConfirmView(discord.ui.View):
         self._disable_all()
 
         from services.tools import execute_action
-        action = self.action_data.get('action', 'add_concept')
-        params = self.action_data.get('params', {})
+
+        action = self.action_data.get("action", "add_concept")
+        params = self.action_data.get("params", {})
         msg_type, result = execute_action(action, params)
 
-        if msg_type == 'error':
+        if msg_type == "error":
             note = f"\n\n⚠️ Could not add concept: {result}"
         else:
             note = f"\n\n✅ {result}"
             # Persist confirmation to chat history so the LLM sees the
             # concept_id on subsequent turns (fixes topic_id/concept_id confusion)
-            db.add_chat_message('user', '[confirmed: add concept]')
-            db.add_chat_message('assistant', f"✅ {result}")
+            db.add_chat_message("user", "[confirmed: add concept]")
+            db.add_chat_message("assistant", f"✅ {result}")
 
         try:
             original = interaction.message.content or ""
             await interaction.response.edit_message(
-                content=truncate_with_suffix(original, note), view=self)
+                content=truncate_with_suffix(original, note), view=self
+            )
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -398,12 +410,13 @@ class AddConceptConfirmView(discord.ui.View):
         self._disable_all()
 
         # Record decline so the LLM doesn't re-suggest the same concept
-        db.add_chat_message('user', '[declined: add concept]')
+        db.add_chat_message("user", "[declined: add concept]")
 
         try:
             original = interaction.message.content or ""
             await interaction.response.edit_message(
-                content=truncate_for_discord(original), view=self)
+                content=truncate_for_discord(original), view=self
+            )
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -424,6 +437,7 @@ class AddConceptConfirmView(discord.ui.View):
 # ============================================================================
 # Suggest-topic confirmation view
 # ============================================================================
+
 
 class SuggestTopicConfirmView(discord.ui.View):
     """Accept / Decline buttons shown when the LLM uses suggest_topic for a
@@ -448,12 +462,13 @@ class SuggestTopicConfirmView(discord.ui.View):
         self._disable_all()
 
         from services.tools import execute_suggest_topic_accept
+
         success, summary, topic_id = execute_suggest_topic_accept(self.action_data)
 
-        title = self.action_data.get('params', {}).get('title', 'topic')
+        title = self.action_data.get("params", {}).get("title", "topic")
         if success:
-            db.add_chat_message('user', f'[confirmed: add topic "{title}"]')
-            db.add_chat_message('assistant', summary)
+            db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
+            db.add_chat_message("assistant", summary)
             note = f"\n\n{summary}"
         else:
             note = f"\n\n⚠️ {summary}"
@@ -461,7 +476,8 @@ class SuggestTopicConfirmView(discord.ui.View):
         try:
             original = interaction.message.content or ""
             await interaction.response.edit_message(
-                content=truncate_with_suffix(original, note), view=self)
+                content=truncate_with_suffix(original, note), view=self
+            )
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -475,13 +491,14 @@ class SuggestTopicConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        title = self.action_data.get('params', {}).get('title', 'topic')
-        db.add_chat_message('user', f'[declined: add topic "{title}"]')
+        title = self.action_data.get("params", {}).get("title", "topic")
+        db.add_chat_message("user", f'[declined: add topic "{title}"]')
 
         try:
             original = interaction.message.content or ""
             await interaction.response.edit_message(
-                content=truncate_for_discord(original), view=self)
+                content=truncate_for_discord(original), view=self
+            )
         except discord.errors.NotFound:
             pass
         if self.on_resolved:
@@ -503,6 +520,7 @@ class SuggestTopicConfirmView(discord.ui.View):
 # Quiz navigation view (post-assessment buttons)
 # ============================================================================
 
+
 class QuizNavigationView(discord.ui.View):
     """Buttons shown after a quiz assessment: continue, explain, or stop.
 
@@ -515,8 +533,7 @@ class QuizNavigationView(discord.ui.View):
     (response, pending_action, assess_meta, quiz_meta)
     """
 
-    def __init__(self, concept_id: int, quality: int,
-                 message_handler: Callable[..., Awaitable]):
+    def __init__(self, concept_id: int, quality: int, message_handler: Callable[..., Awaitable]):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.concept_id = concept_id
         self.quality = quality
@@ -548,8 +565,11 @@ class QuizNavigationView(discord.ui.View):
 class _QuizAgainButton(discord.ui.Button):
     """Quiz the same concept again."""
 
-    def __init__(self, parent_view: QuizNavigationView,
-                 style: discord.ButtonStyle = discord.ButtonStyle.secondary):
+    def __init__(
+        self,
+        parent_view: QuizNavigationView,
+        style: discord.ButtonStyle = discord.ButtonStyle.secondary,
+    ):
         super().__init__(label="Quiz again", emoji="🔄", style=style, row=0)
         self.parent_view = parent_view
 
@@ -561,13 +581,14 @@ class _QuizAgainButton(discord.ui.Button):
         await interaction.response.edit_message(view=self.parent_view)
 
         concept = db.get_concept(self.parent_view.concept_id)
-        title = concept['title'] if concept else f'#{self.parent_view.concept_id}'
+        title = concept["title"] if concept else f"#{self.parent_view.concept_id}"
         text = f"[BUTTON] Quiz me again on concept #{self.parent_view.concept_id} ({title})"
 
         try:
             async with interaction.channel.typing():
                 response, _, _, quiz_meta = await self.parent_view.message_handler(
-                    text, str(interaction.user))
+                    text, str(interaction.user)
+                )
             await _send_quiz_response(
                 interaction,
                 response,
@@ -586,8 +607,11 @@ class _QuizAgainButton(discord.ui.Button):
 class _QuizNextDueButton(discord.ui.Button):
     """Quiz the next concept that's due for review."""
 
-    def __init__(self, parent_view: QuizNavigationView,
-                 style: discord.ButtonStyle = discord.ButtonStyle.primary):
+    def __init__(
+        self,
+        parent_view: QuizNavigationView,
+        style: discord.ButtonStyle = discord.ButtonStyle.primary,
+    ):
         super().__init__(label="Next due", emoji="⏭️", style=style, row=0)
         self.parent_view = parent_view
 
@@ -602,7 +626,8 @@ class _QuizNextDueButton(discord.ui.Button):
         try:
             async with interaction.channel.typing():
                 response, _, _, quiz_meta = await self.parent_view.message_handler(
-                    text, str(interaction.user))
+                    text, str(interaction.user)
+                )
             await _send_quiz_response(
                 interaction,
                 response,
@@ -621,8 +646,11 @@ class _QuizNextDueButton(discord.ui.Button):
 class _QuizExplainButton(discord.ui.Button):
     """Explain the concept (shown only when quality <= 2)."""
 
-    def __init__(self, parent_view: QuizNavigationView,
-                 style: discord.ButtonStyle = discord.ButtonStyle.primary):
+    def __init__(
+        self,
+        parent_view: QuizNavigationView,
+        style: discord.ButtonStyle = discord.ButtonStyle.primary,
+    ):
         super().__init__(label="Explain", emoji="💡", style=style, row=0)
         self.parent_view = parent_view
 
@@ -634,17 +662,21 @@ class _QuizExplainButton(discord.ui.Button):
         await interaction.response.edit_message(view=self.parent_view)
 
         concept = db.get_concept(self.parent_view.concept_id)
-        title = concept['title'] if concept else f'#{self.parent_view.concept_id}'
-        text = (f"[BUTTON] Explain concept #{self.parent_view.concept_id} ({title}) "
-                f"in detail — I got the quiz wrong and need help understanding it")
+        title = concept["title"] if concept else f"#{self.parent_view.concept_id}"
+        text = (
+            f"[BUTTON] Explain concept #{self.parent_view.concept_id} ({title}) "
+            f"in detail — I got the quiz wrong and need help understanding it"
+        )
 
         try:
             async with interaction.channel.typing():
                 response, _, _, _ = await self.parent_view.message_handler(
-                    text, str(interaction.user))
+                    text, str(interaction.user)
+                )
             # Explain is not an assess, so send plain (no nav buttons)
             await interaction.followup.send(
-                truncate_for_discord(response or "(no explanation generated)"))
+                truncate_for_discord(response or "(no explanation generated)")
+            )
         except Exception as e:
             logger.error(f"QuizExplain callback error: {e}", exc_info=True)
             try:
@@ -658,8 +690,7 @@ class _QuizDoneButton(discord.ui.Button):
     """End the quiz session."""
 
     def __init__(self, parent_view: QuizNavigationView):
-        super().__init__(label="Done", emoji="✋",
-                         style=discord.ButtonStyle.secondary, row=0)
+        super().__init__(label="Done", emoji="✋", style=discord.ButtonStyle.secondary, row=0)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
@@ -671,7 +702,8 @@ class _QuizDoneButton(discord.ui.Button):
         try:
             await interaction.response.edit_message(
                 content=truncate_with_suffix(original, "\n\n✋ Quiz session ended."),
-                view=self.parent_view)
+                view=self.parent_view,
+            )
         except discord.errors.NotFound:
             pass
         self.parent_view.stop()
@@ -681,6 +713,7 @@ class _QuizDoneButton(discord.ui.Button):
 # Quiz question view (pre-answer skip button)
 # ============================================================================
 
+
 class QuizQuestionView(discord.ui.View):
     """Optional button shown with quiz questions: allows skipping if eligible.
 
@@ -689,9 +722,9 @@ class QuizQuestionView(discord.ui.View):
     QuizNavigationView for post-skip navigation.
     """
 
-    def __init__(self, concept_id: int,
-                 message_handler: Callable[..., Awaitable],
-                 show_skip: bool = True):
+    def __init__(
+        self, concept_id: int, message_handler: Callable[..., Awaitable], show_skip: bool = True
+    ):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.concept_id = concept_id
         self.message_handler = message_handler
@@ -711,15 +744,14 @@ class QuizQuestionView(discord.ui.View):
 
 def should_show_quiz_skip_button(concept: dict | None) -> bool:
     """Return whether a concept is eligible for the quiz skip button."""
-    return bool(concept and concept.get('review_count', 0) >= 2)
+    return bool(concept and concept.get("review_count", 0) >= 2)
 
 
 class _QuizSkipButton(discord.ui.Button):
     """Skip the quiz — user claims confident recall."""
 
     def __init__(self, parent_view: QuizQuestionView):
-        super().__init__(label="I know this", emoji="⏭️",
-                         style=discord.ButtonStyle.secondary, row=0)
+        super().__init__(label="I know this", emoji="⏭️", style=discord.ButtonStyle.secondary, row=0)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
@@ -730,13 +762,14 @@ class _QuizSkipButton(discord.ui.Button):
         await interaction.response.edit_message(view=self.parent_view)
 
         from services.tools import skip_quiz
+
         try:
             result = skip_quiz(
                 self.parent_view.concept_id,
                 user_id=str(interaction.user),
             )
 
-            if 'error' in result:
+            if "error" in result:
                 await interaction.followup.send(f"⚠️ {result['error']}")
                 self.parent_view.stop()
                 return
@@ -746,7 +779,7 @@ class _QuizSkipButton(discord.ui.Button):
                 f"next review in {result['interval_days']}d"
             )
             nav_view = QuizNavigationView(
-                concept_id=result['concept_id'],
+                concept_id=result["concept_id"],
                 quality=5,
                 message_handler=self.parent_view.message_handler,
             )
@@ -760,11 +793,13 @@ class _QuizSkipButton(discord.ui.Button):
         self.parent_view.stop()
 
 
-async def _send_quiz_response(interaction: discord.Interaction,
-                              response: str,
-                              message_handler: Callable[..., Awaitable],
-                              *,
-                              quiz_meta: dict | None = None) -> None:
+async def _send_quiz_response(
+    interaction: discord.Interaction,
+    response: str,
+    message_handler: Callable[..., Awaitable],
+    *,
+    quiz_meta: dict | None = None,
+) -> None:
     """Send the LLM response from a quiz button click.
 
     Prefer explicit quiz metadata from the handler. Fall back to session state
@@ -774,8 +809,8 @@ async def _send_quiz_response(interaction: discord.Interaction,
         response = "✅ No concepts due right now!"
 
     if quiz_meta is not None:
-        quiz_cid = quiz_meta.get('concept_id')
-        if quiz_cid is not None and quiz_meta.get('show_skip'):
+        quiz_cid = quiz_meta.get("concept_id")
+        if quiz_cid is not None and quiz_meta.get("show_skip"):
             concept = db.get_concept(int(quiz_cid))
             if should_show_quiz_skip_button(concept):
                 meta = format_quiz_metadata(concept)
@@ -786,7 +821,8 @@ async def _send_quiz_response(interaction: discord.Interaction,
                     show_skip=True,
                 )
                 await interaction.followup.send(
-                    truncate_for_discord(response + meta_suffix), view=view)
+                    truncate_for_discord(response + meta_suffix), view=view
+                )
                 return
             # show_skip=True but not yet eligible — reuse already-fetched concept
             meta = format_quiz_metadata(concept)
@@ -804,7 +840,7 @@ async def _send_quiz_response(interaction: discord.Interaction,
         await interaction.followup.send(truncate_for_discord(response + meta_suffix))
         return
 
-    quiz_cid = db.get_session('quiz_anchor_concept_id')
+    quiz_cid = db.get_session("quiz_anchor_concept_id")
     if quiz_cid:
         concept = db.get_concept(int(quiz_cid))
         if should_show_quiz_skip_button(concept):
@@ -815,8 +851,7 @@ async def _send_quiz_response(interaction: discord.Interaction,
                 message_handler=message_handler,
                 show_skip=True,
             )
-            await interaction.followup.send(
-                truncate_for_discord(response + meta_suffix), view=view)
+            await interaction.followup.send(truncate_for_discord(response + meta_suffix), view=view)
             return
         # session anchor exists but skip not eligible yet — still add metadata
         meta = format_quiz_metadata(concept)

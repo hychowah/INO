@@ -22,12 +22,12 @@ def _get_model():
         return _model
 
     from config import EMBEDDING_MODEL
+
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError:
         raise RuntimeError(
-            "sentence-transformers not installed. "
-            "Run: pip install sentence-transformers"
+            "sentence-transformers not installed. Run: pip install sentence-transformers"
         )
 
     logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")

@@ -10,32 +10,32 @@ Modes: command, reply, review-check, maintenance, fetch, context-only
 """
 
 import argparse
-import sys
 import json
-import re
+import sys
 from pathlib import Path
 
 # Ensure UTF-8 output (Windows fix)
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 import db
-from services import tools
 from services import context as ctx
+from services import tools
 from services.parser import parse_llm_response
 
 # Set action source for audit trail
-tools.set_action_source('cli')
+tools.set_action_source("cli")
 
 
 # ============================================================================
 # Action Execution
 # ============================================================================
+
 
 def execute_action(action_data: dict) -> str:
     """Execute a parsed LLM action. Returns a prefixed output string."""
@@ -46,20 +46,24 @@ def execute_action(action_data: dict) -> str:
     # The fetch action returns data for the fetch loop — not a user message
     if action == "fetch":
         msg_type, result = tools.execute_action(action, params)
-        if msg_type == 'fetch':
+        if msg_type == "fetch":
             return f"FETCH: {json.dumps(result, default=str)}"
         return f"REPLY: {result}"
 
     # Guard: mirror pipeline.execute_action — block assess/multi_assess when no
     # quiz is active. Prevents duplicate score writes during CLI/webui testing.
-    if action in ('assess', 'multi_assess'):
-        if not db.get_session('quiz_anchor_concept_id') and not db.get_session('active_concept_ids'):
-            return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+    if action in ("assess", "multi_assess"):
+        if not db.get_session("quiz_anchor_concept_id") and not db.get_session(
+            "active_concept_ids"
+        ):
+            return (
+                f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+            )
 
     # All other actions
     msg_type, result = tools.execute_action(action, params)
 
-    if msg_type == 'error':
+    if msg_type == "error":
         return f"REPLY: ⚠️ {result}"
 
     # Prefer the LLM's message if it provided one
@@ -71,6 +75,7 @@ def execute_action(action_data: dict) -> str:
 # ============================================================================
 # Modes
 # ============================================================================
+
 
 def mode_context_only(user_input: str, mode: str):
     """Output lightweight context (for debugging / standalone use)."""
@@ -87,7 +92,7 @@ def mode_fetch(fetch_params: str):
         print(json.dumps({"error": f"Invalid fetch params: {fetch_params}"}))
         return
 
-    msg_type, result = tools.execute_action('fetch', params)
+    msg_type, result = tools.execute_action("fetch", params)
     print(json.dumps(result, default=str))
 
 
@@ -113,7 +118,7 @@ def mode_command(user_input: str):
             history_msg = result
             for pfx in ("REPLY: ", "FETCH: "):
                 if history_msg.startswith(pfx):
-                    history_msg = history_msg[len(pfx):]
+                    history_msg = history_msg[len(pfx) :]
                     break
         elif prefix in ("REPLY", "ASK", "REMINDER", "REVIEW"):
             print(f"{prefix}: {message}")
@@ -124,16 +129,16 @@ def mode_command(user_input: str):
 
         # Save to chat history
         if user_input:
-            db.add_chat_message('user', user_input)
+            db.add_chat_message("user", user_input)
         if history_msg:
-            db.add_chat_message('assistant', history_msg)
+            db.add_chat_message("assistant", history_msg)
     else:
         # No LLM response — check if we can handle this locally
         lower = user_input.lower().strip() if user_input else ""
 
-        if not lower or lower in ('list', 'topics', 'show topics', 'show my topics'):
+        if not lower or lower in ("list", "topics", "show topics", "show my topics"):
             # Handle list locally
-            msg_type, result = tools.execute_action('list_topics', {})
+            msg_type, result = tools.execute_action("list_topics", {})
             print(f"REPLY: {result}")
         else:
             # Need LLM — output prompt signal
@@ -157,7 +162,7 @@ def mode_reply(user_input: str):
             history_msg = result
             for pfx in ("REPLY: ", "FETCH: "):
                 if history_msg.startswith(pfx):
-                    history_msg = history_msg[len(pfx):]
+                    history_msg = history_msg[len(pfx) :]
                     break
         elif prefix in ("REPLY", "ASK", "REMINDER", "REVIEW"):
             print(f"{prefix}: {message}")
@@ -167,9 +172,9 @@ def mode_reply(user_input: str):
             history_msg = message
 
         if user_input:
-            db.add_chat_message('user', user_input)
+            db.add_chat_message("user", user_input)
         if history_msg:
-            db.add_chat_message('assistant', history_msg)
+            db.add_chat_message("assistant", history_msg)
     else:
         # In reply mode without LLM response, always need LLM
         print("PROMPT: LLM_NEEDED")
@@ -185,20 +190,19 @@ def mode_review_check():
         return  # Nothing due, empty output
 
     concept = due[0]
-    detail = db.get_concept_detail(concept['id'])
+    detail = db.get_concept_detail(concept["id"])
     if not detail:
         return
 
-    topic_names = [t['title'] for t in detail.get('topics', [])]
-    recent_reviews = detail.get('recent_reviews', [])
-    remark_summary = detail.get('remark_summary', '')
+    topic_names = [t["title"] for t in detail.get("topics", [])]
+    recent_reviews = detail.get("recent_reviews", [])
+    remark_summary = detail.get("remark_summary", "")
 
     context_parts = [
         f"Concept: {detail['title']} (#{detail['id']})",
         f"Description: {detail.get('description', 'N/A')}",
         f"Topics: {', '.join(topic_names) if topic_names else 'untagged'}",
-        f"Score: {detail['mastery_level']}/100, "
-        f"Reviews: {detail['review_count']}",
+        f"Score: {detail['mastery_level']}/100, Reviews: {detail['review_count']}",
     ]
 
     if remark_summary:
@@ -236,15 +240,22 @@ def mode_maintenance():
 # Main
 # ============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="Learning Agent CLI")
-    parser.add_argument("--mode", choices=["command", "reply", "review-check", "maintenance"],
-                        default="command", help="Execution mode")
+    parser.add_argument(
+        "--mode",
+        choices=["command", "reply", "review-check", "maintenance"],
+        default="command",
+        help="Execution mode",
+    )
     parser.add_argument("--input", default="", help="User input text")
-    parser.add_argument("--context-only", action="store_true",
-                        help="Only output dynamic context (step 1 of pipeline)")
-    parser.add_argument("--fetch", default=None,
-                        help="Execute a fetch query (JSON params string)")
+    parser.add_argument(
+        "--context-only",
+        action="store_true",
+        help="Only output dynamic context (step 1 of pipeline)",
+    )
+    parser.add_argument("--fetch", default=None, help="Execute a fetch query (JSON params string)")
 
     args = parser.parse_args()
 

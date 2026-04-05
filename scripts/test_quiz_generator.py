@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 
 # Ensure UTF-8 output
-if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -55,13 +55,14 @@ def show_context(concept_id: int):
     print("PROMPT 1 CONTEXT (pre-loaded data)")
     print("=" * 60)
     print(result)
-    print(f"\n({len(result)} chars, ~{len(result)//4} tokens)")
+    print(f"\n({len(result)} chars, ~{len(result) // 4} tokens)")
     return result
 
 
 async def run_p1(concept_id: int):
     """Run Prompt 1 (reasoning model) and show output."""
     from services.pipeline import generate_quiz_question
+
     print("\n" + "=" * 60)
     print("PROMPT 1 OUTPUT (reasoning model)")
     print("=" * 60)
@@ -77,6 +78,7 @@ async def run_p1(concept_id: int):
 async def run_p2(p1_result: dict, concept_id: int):
     """Run Prompt 2 (packaging) and show output."""
     from services.pipeline import package_quiz_for_discord
+
     print("\n" + "=" * 60)
     print("PROMPT 2 OUTPUT (packaging model)")
     print("=" * 60)
@@ -91,9 +93,13 @@ async def run_p2(p1_result: dict, concept_id: int):
 
 def main():
     parser = argparse.ArgumentParser(description="Test quiz question generator")
-    parser.add_argument("concept_id", nargs="?", type=int, help="Concept ID to generate question for")
+    parser.add_argument(
+        "concept_id", nargs="?", type=int, help="Concept ID to generate question for"
+    )
     parser.add_argument("--p2", action="store_true", help="Also run Prompt 2 (packaging)")
-    parser.add_argument("--context-only", action="store_true", help="Only show context, don't call LLM")
+    parser.add_argument(
+        "--context-only", action="store_true", help="Only show context, don't call LLM"
+    )
     parser.add_argument("--list-due", action="store_true", help="List concepts due for review")
     args = parser.parse_args()
 

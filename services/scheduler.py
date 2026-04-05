@@ -22,8 +22,8 @@ import db
 from bot.messages import send_review_question
 from services import pipeline
 from services.dedup import format_dedup_suggestions
-from services.views import DedupConfirmView
 from services.formatting import truncate_for_discord
+from services.views import DedupConfirmView
 
 logger = logging.getLogger("scheduler")
 
@@ -36,49 +36,50 @@ _authorized_user_id = None
 # Pending review helpers
 # ============================================================================
 
+
 def _get_pending_review() -> dict | None:
     """Read pending review blob from session state. Returns dict or None."""
-    raw = db.get_session('pending_review')
+    raw = db.get_session("pending_review")
     if not raw:
         return None
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         logger.warning("Corrupt pending_review in session state — clearing")
-        db.set_session('pending_review', None)
+        db.set_session("pending_review", None)
         return None
 
 
-def _set_pending_review(concept_id: int, concept_title: str,
-                        question: str) -> None:
+def _set_pending_review(concept_id: int, concept_title: str, question: str) -> None:
     """Write a new pending review blob. Called AFTER DM is confirmed sent."""
     blob = {
-        'concept_id': concept_id,
-        'concept_title': concept_title,
-        'question': question,
-        'sent_at': datetime.now().isoformat(),
-        'reminder_count': 0,
+        "concept_id": concept_id,
+        "concept_title": concept_title,
+        "question": question,
+        "sent_at": datetime.now().isoformat(),
+        "reminder_count": 0,
     }
-    db.set_session('pending_review', json.dumps(blob))
+    db.set_session("pending_review", json.dumps(blob))
     logger.debug(f"Set pending review: concept #{concept_id}")
 
 
 def _update_pending_reminder(pending: dict) -> None:
     """Increment reminder count + reset sent_at after sending a reminder."""
-    pending['reminder_count'] = pending.get('reminder_count', 0) + 1
-    pending['sent_at'] = datetime.now().isoformat()
-    db.set_session('pending_review', json.dumps(pending))
+    pending["reminder_count"] = pending.get("reminder_count", 0) + 1
+    pending["sent_at"] = datetime.now().isoformat()
+    db.set_session("pending_review", json.dumps(pending))
 
 
 def _clear_pending_review() -> None:
     """Clear pending review state (max reminders exhausted or concept deleted)."""
-    db.set_session('pending_review', None)
+    db.set_session("pending_review", None)
     logger.debug("Cleared pending review state")
 
 
 # ============================================================================
 # Review check & send
 # ============================================================================
+
 
 async def _check_reviews():
     """Check for due concepts and send review quizzes via DM.
@@ -94,6 +95,7 @@ async def _check_reviews():
     """
     # Suppress during active session to avoid interrupting conversation
     from services.state import last_activity_at
+
     if last_activity_at:
         cutoff = datetime.now() - timedelta(minutes=config.SESSION_TIMEOUT_MINUTES)
         if last_activity_at > cutoff:
@@ -103,15 +105,14 @@ async def _check_reviews():
     logger.debug("Running review-check...")
 
     # Suppress if /review command is actively generating a quiz
-    if db.get_session('review_in_progress'):
+    if db.get_session("review_in_progress"):
         logger.debug("Skipping review check — /review command in progress")
         return
 
     # --- Handle pending (unanswered) review ---
     pending = _get_pending_review()
     if pending:
-        cid = pending.get('concept_id')
-        title = pending.get('concept_title', 'Unknown')
+        cid = pending.get("concept_id")
 
         # Guard: concept might have been deleted while pending
         if cid and not db.get_concept(cid):
@@ -120,7 +121,7 @@ async def _check_reviews():
             # Fall through to normal flow below
         else:
             # Check cooldown since last send/reminder
-            sent_at_str = pending.get('sent_at', '')
+            sent_at_str = pending.get("sent_at", "")
             try:
                 sent_at = datetime.fromisoformat(sent_at_str)
             except (ValueError, TypeError):
@@ -131,14 +132,14 @@ async def _check_reviews():
 
             if elapsed < cooldown:
                 logger.debug(
-                    f"Pending review #{cid} — {elapsed.total_seconds()/3600:.1f}h "
+                    f"Pending review #{cid} — {elapsed.total_seconds() / 3600:.1f}h "
                     f"< {config.REVIEW_NAG_COOLDOWN_HOURS}h cooldown, skipping"
                 )
                 return
 
             # Cooldown expired — check reminder count
-            reminder_count = pending.get('reminder_count', 0)
-            max_reminders = getattr(config, 'REVIEW_REMINDER_MAX', 3)
+            reminder_count = pending.get("reminder_count", 0)
+            max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
 
             if reminder_count >= max_reminders:
                 logger.info(
@@ -175,10 +176,10 @@ async def _send_review_reminder(pending: dict):
     if not _bot or not _authorized_user_id:
         return
 
-    cid = pending.get('concept_id')
-    title = pending.get('concept_title', 'Unknown')
-    reminder_count = pending.get('reminder_count', 0) + 1
-    max_reminders = getattr(config, 'REVIEW_REMINDER_MAX', 3)
+    cid = pending.get("concept_id")
+    title = pending.get("concept_title", "Unknown")
+    reminder_count = pending.get("reminder_count", 0) + 1
+    max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
     remaining = max_reminders - reminder_count
 
     try:
@@ -203,8 +204,8 @@ async def _send_review_reminder(pending: dict):
 
         # Re-set active_concept_id so the assess pipeline knows which
         # concept the user's eventual reply is about
-        db.set_session('active_concept_id', str(cid))
-        db.set_session('quiz_anchor_concept_id', str(cid))
+        db.set_session("active_concept_id", str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
 
         # Update pending state (increment counter, reset timer)
         _update_pending_reminder(pending)
@@ -243,29 +244,28 @@ async def _send_review_quiz(payload: str):
         try:
             # Set action source for audit trail
             from services.tools import set_action_source
-            set_action_source('scheduler')
+
+            set_action_source("scheduler")
 
             # Set active concept for subsequent assess action
             if cid:
-                db.set_session('active_concept_id', str(cid))
-                db.set_session('quiz_anchor_concept_id', str(cid))
+                db.set_session("active_concept_id", str(cid))
+                db.set_session("quiz_anchor_concept_id", str(cid))
 
             review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
 
             # --- Two-prompt pipeline (with fallback) ---
             from services.llm import LLMError
+
             try:
                 if cid:
                     p1_result = await pipeline.generate_quiz_question(cid)
-                    llm_response = await pipeline.package_quiz_for_discord(
-                        p1_result, cid
-                    )
+                    llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
                 else:
                     raise LLMError("No concept_id in payload", retryable=True)
             except LLMError as e:
                 logger.warning(
-                    f"Two-prompt pipeline failed ({e}), "
-                    f"falling back to single-prompt flow"
+                    f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
                 )
                 llm_response = await pipeline.call_with_fetch_loop(
                     mode="reply",
@@ -274,15 +274,14 @@ async def _send_review_quiz(payload: str):
                 )
 
             # Parse action JSON and extract human-readable message
-            final_result = await pipeline.execute_llm_response(
-                review_text, llm_response, "reply"
-            )
+            final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
             _msg_type, message = pipeline.process_output(final_result)
 
             if message and message.strip():
                 # Store the actual question text for accurate review logging
-                db.set_session('last_quiz_question', message.strip())
+                db.set_session("last_quiz_question", message.strip())
                 from bot.handler import _handle_user_message
+
                 await send_review_question(user.send, message, cid, _handle_user_message)
                 logger.info("Sent review DM")
 
@@ -292,15 +291,16 @@ async def _send_review_quiz(payload: str):
                 # quiz in the meantime.
                 if cid:
                     concept = db.get_concept(cid)
-                    concept_title = concept['title'] if concept else 'Unknown'
+                    concept_title = concept["title"] if concept else "Unknown"
                     _set_pending_review(cid, concept_title, message[:500])
             else:
                 logger.debug("Empty result for review quiz")
 
         except ImportError as ie:
             logger.error(f"Import error: {ie}")
-            await user.send(truncate_for_discord(
-                f"📚 **Learning Review** — Time to review:\n{payload}"))
+            await user.send(
+                truncate_for_discord(f"📚 **Learning Review** — Time to review:\n{payload}")
+            )
 
     except discord.Forbidden:
         logger.error("Cannot send DM (forbidden)")
@@ -319,7 +319,7 @@ async def _check_maintenance():
             logger.debug("Maintenance: no issues found")
             return
 
-        logger.info(f"Maintenance issues found, sending to LLM for triage")
+        logger.info("Maintenance issues found, sending to LLM for triage")
         await _send_maintenance_report(diagnostic_context)
 
     except Exception as e:
@@ -362,16 +362,17 @@ async def _send_maintenance_report(diagnostic_context: str):
 
             # If there are proposed destructive actions, send with buttons
             if proposed_actions:
-                proposal_id = db.save_proposal('maintenance', proposed_actions)
+                proposal_id = db.save_proposal("maintenance", proposed_actions)
                 view = MaintenanceConfirmView(
-                    proposal_id, proposed_actions,
+                    proposal_id,
+                    proposed_actions,
                     pipeline.execute_maintenance_actions,
                 )
                 # Format proposed actions for the DM
                 action_lines = []
                 for i, a in enumerate(proposed_actions, 1):
-                    name = a.get('action', 'unknown')
-                    desc = a.get('message', '')[:80]
+                    name = a.get("action", "unknown")
+                    desc = a.get("message", "")[:80]
                     action_lines.append(f"**{i}.** `{name}` — {desc}")
 
                 proposal_text = (
@@ -398,7 +399,7 @@ async def _check_dedup():
     """Run the dedup sub-agent to find potential duplicates.
     Now proposal-only: stores suggestions in DB and DMs user with buttons."""
     # Skip if there's already a pending dedup proposal
-    existing = db.get_pending_proposal('dedup')
+    existing = db.get_pending_proposal("dedup")
     if existing:
         logger.debug("[DEDUP] Skipping — pending proposal exists")
         return
@@ -411,7 +412,7 @@ async def _check_dedup():
             return
 
         # Save proposal to DB (survives restarts)
-        proposal_id = db.save_proposal('dedup', groups)
+        proposal_id = db.save_proposal("dedup", groups)
 
         # Send suggestion DM with buttons
         if _bot and _authorized_user_id:
@@ -442,7 +443,9 @@ async def _send_dedup_suggestions(proposal_id: int, groups: list[dict]):
 
         # Store message ID for reference
         db.update_proposal_message_id(proposal_id, msg.id)
-        logger.info(f"[DEDUP] Sent dedup suggestions ({len(groups)} groups) as proposal #{proposal_id}")
+        logger.info(
+            f"[DEDUP] Sent dedup suggestions ({len(groups)} groups) as proposal #{proposal_id}"
+        )
 
     except Exception as e:
         logger.error(f"Error sending dedup suggestions: {e}", exc_info=True)
@@ -452,8 +455,10 @@ async def _loop():
     """Main loop: check for reviews every N minutes, maintenance daily."""
     await _bot.wait_until_ready()
     interval = config.REVIEW_CHECK_INTERVAL_MINUTES
-    maint_interval = getattr(config, 'MAINTENANCE_INTERVAL_HOURS', 24)
-    logger.info(f"Scheduler ready. Reviews every {interval}min, maintenance every {maint_interval}h.")
+    maint_interval = getattr(config, "MAINTENANCE_INTERVAL_HOURS", 24)
+    logger.info(
+        f"Scheduler ready. Reviews every {interval}min, maintenance every {maint_interval}h."
+    )
 
     review_cycle = 0
     maint_counter = 0  # counts review cycles; trigger maintenance when enough accumulate

@@ -91,7 +91,7 @@ def _run_migrations():
     # --- Migration 3: Normalize datetime formats (strip timezone offsets) ---
     if current < 3:
         conn = sqlite3.connect(KNOWLEDGE_DB)
-        for col in ('next_review_at', 'last_reviewed_at', 'created_at', 'updated_at'):
+        for col in ("next_review_at", "last_reviewed_at", "created_at", "updated_at"):
             rows = conn.execute(
                 f"SELECT id, {col} FROM concepts WHERE {col} IS NOT NULL AND {col} LIKE '%+%'"
             ).fetchall()
@@ -106,8 +106,7 @@ def _run_migrations():
                 normalized = _core._normalize_dt_str(val)
                 if normalized and normalized != val:
                     conn.execute(
-                        f"UPDATE concepts SET {col} = ? WHERE id = ?",
-                        (normalized, row_id)
+                        f"UPDATE concepts SET {col} = ? WHERE id = ?", (normalized, row_id)
                     )
         conn.commit()
         conn.close()
@@ -123,8 +122,7 @@ def _run_migrations():
             for row_id, score in rows:
                 new_interval = max(1, round(math.exp((score or 0) * 0.05)))
                 conn.execute(
-                    "UPDATE concepts SET interval_days = ? WHERE id = ?",
-                    (new_interval, row_id)
+                    "UPDATE concepts SET interval_days = ? WHERE id = ?", (new_interval, row_id)
                 )
             rows = conn.execute(
                 "SELECT id, last_reviewed_at, interval_days FROM concepts "
@@ -132,11 +130,10 @@ def _run_migrations():
             ).fetchall()
             for row_id, last_rev, interval in rows:
                 try:
-                    last_dt = datetime.strptime(last_rev, '%Y-%m-%d %H:%M:%S')
-                    new_next = (last_dt + timedelta(days=interval)).strftime('%Y-%m-%d %H:%M:%S')
+                    last_dt = datetime.strptime(last_rev, "%Y-%m-%d %H:%M:%S")
+                    new_next = (last_dt + timedelta(days=interval)).strftime("%Y-%m-%d %H:%M:%S")
                     conn.execute(
-                        "UPDATE concepts SET next_review_at = ? WHERE id = ?",
-                        (new_next, row_id)
+                        "UPDATE concepts SET next_review_at = ? WHERE id = ?", (new_next, row_id)
                     )
                 except (ValueError, TypeError):
                     pass
@@ -148,12 +145,12 @@ def _run_migrations():
     if current < 5:
         # knowledge.db tables
         conn = sqlite3.connect(KNOWLEDGE_DB)
-        for table in ('topics', 'concepts', 'review_log', 'concept_remarks'):
+        for table in ("topics", "concepts", "review_log", "concept_remarks"):
             # Guard: table may have been renamed/dropped by a later migration
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
             ).fetchone()
-            if exists and not _core._has_column(table, 'user_id'):
+            if exists and not _core._has_column(table, "user_id"):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT DEFAULT 'default'")
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON {table}(user_id)")
         conn.commit()
@@ -161,9 +158,11 @@ def _run_migrations():
 
         # chat_history.db tables
         chat_conn = sqlite3.connect(CHAT_DB)
-        if not _core._has_column('conversations', 'user_id', db_path=CHAT_DB):
+        if not _core._has_column("conversations", "user_id", db_path=CHAT_DB):
             chat_conn.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT 'default'")
-            chat_conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)")
+            chat_conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)"
+            )
         chat_conn.commit()
         chat_conn.close()
         print("[LEARN DB] Migration 5: Added user_id columns for multi-user prep")
@@ -252,9 +251,9 @@ def _run_migrations():
     # --- Migration 10: remark_summary cache column on concepts ---
     if current < 10:
         conn = sqlite3.connect(KNOWLEDGE_DB)
-        if not _core._has_column('concepts', 'remark_summary'):
+        if not _core._has_column("concepts", "remark_summary"):
             conn.execute("ALTER TABLE concepts ADD COLUMN remark_summary TEXT")
-        if not _core._has_column('concepts', 'remark_updated_at'):
+        if not _core._has_column("concepts", "remark_updated_at"):
             conn.execute("ALTER TABLE concepts ADD COLUMN remark_updated_at DATETIME")
 
         # Populate cache from existing concept_remarks (newest-first, limit 5 per concept)
@@ -262,7 +261,7 @@ def _run_migrations():
         for (cid,) in concept_ids:
             rows = conn.execute(
                 "SELECT content FROM concept_remarks WHERE concept_id = ? ORDER BY id DESC LIMIT 5",
-                (cid,)
+                (cid,),
             ).fetchall()
             if rows:
                 summary = "\n---\n".join(r[0] for r in rows)
@@ -274,7 +273,7 @@ def _run_migrations():
                 ).fetchone()[0]
                 conn.execute(
                     "UPDATE concepts SET remark_summary = ?, remark_updated_at = ? WHERE id = ?",
-                    (summary, max_ts, cid)
+                    (summary, max_ts, cid),
                 )
         conn.commit()
         conn.close()
@@ -283,7 +282,7 @@ def _run_migrations():
     # --- Migration 11: last_quiz_generator_output cache column ---
     if current < 11:
         conn = sqlite3.connect(KNOWLEDGE_DB)
-        if not _core._has_column('concepts', 'last_quiz_generator_output'):
+        if not _core._has_column("concepts", "last_quiz_generator_output"):
             conn.execute("ALTER TABLE concepts ADD COLUMN last_quiz_generator_output TEXT")
         conn.commit()
         conn.close()

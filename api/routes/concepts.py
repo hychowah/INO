@@ -3,14 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import db
-from services.tools import set_action_source
-
 from api.auth import verify_token
 from api.schemas import (
     CreateConceptRequest,
-    UpdateConceptRequest,
     RemarkRequest,
+    UpdateConceptRequest,
 )
+from services.tools import set_action_source
 
 router = APIRouter()
 
@@ -36,17 +35,17 @@ async def list_concepts(
         all_items = db.search_concepts(query=search, limit=per_page * page)
         total = len(all_items)
         offset = (page - 1) * per_page
-        items = all_items[offset:offset + per_page]
+        items = all_items[offset : offset + per_page]
     elif topic_id is not None:
         all_items = db.get_concepts_for_topic(topic_id)
         total = len(all_items)
         offset = (page - 1) * per_page
-        items = all_items[offset:offset + per_page]
+        items = all_items[offset : offset + per_page]
     else:
         all_items = db.get_all_concepts_with_topics()
         total = len(all_items)
         offset = (page - 1) * per_page
-        items = all_items[offset:offset + per_page]
+        items = all_items[offset : offset + per_page]
 
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 
@@ -54,7 +53,7 @@ async def list_concepts(
 @router.post("/api/concepts", status_code=201, dependencies=[Depends(verify_token)])
 async def create_concept(req: CreateConceptRequest):
     """Create a new concept under one or more topics."""
-    set_action_source('api')
+    set_action_source("api")
 
     existing = db.find_concept_by_title(req.title)
     if existing:
@@ -68,7 +67,7 @@ async def create_concept(req: CreateConceptRequest):
         for title in req.topic_titles:
             found = db.find_topic_by_title(title)
             if found:
-                topic_ids.append(found['id'])
+                topic_ids.append(found["id"])
             else:
                 new_id = db.add_topic(title=title)
                 topic_ids.append(new_id)
@@ -84,7 +83,7 @@ async def create_concept(req: CreateConceptRequest):
 @router.put("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
 async def update_concept(concept_id: int, req: UpdateConceptRequest):
     """Update concept fields (title, description)."""
-    set_action_source('api')
+    set_action_source("api")
 
     existing = db.get_concept(concept_id)
     if not existing:
@@ -100,17 +99,19 @@ async def update_concept(concept_id: int, req: UpdateConceptRequest):
 @router.delete("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
 async def delete_concept(concept_id: int):
     """Delete a concept and all its relations, remarks, and review logs."""
-    set_action_source('api')
+    set_action_source("api")
 
     if not db.delete_concept(concept_id):
         raise HTTPException(status_code=404, detail="Concept not found")
     return {"message": f"Concept {concept_id} deleted."}
 
 
-@router.post("/api/concepts/{concept_id}/remarks", status_code=201, dependencies=[Depends(verify_token)])
+@router.post(
+    "/api/concepts/{concept_id}/remarks", status_code=201, dependencies=[Depends(verify_token)]
+)
 async def add_remark(concept_id: int, req: RemarkRequest):
     """Add a remark (note) to a concept."""
-    set_action_source('api')
+    set_action_source("api")
 
     existing = db.get_concept(concept_id)
     if not existing:

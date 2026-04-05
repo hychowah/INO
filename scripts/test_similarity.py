@@ -179,6 +179,7 @@ TEST_SETS = [
 # Similarity helpers
 # ============================================================================
 
+
 def cosine_similarity(a: list, b: list) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
@@ -192,6 +193,7 @@ def load_embed_fn():
     """Load the real embedding function from services.embeddings."""
     try:
         from services.embeddings import embed_text
+
         # Trigger model load now so timing is clear
         print("Loading model... (first call downloads ~420MB if not cached)")
         embed_text("warmup")
@@ -212,6 +214,7 @@ THRESHOLDS = {
     "DEDUP (0.92)": 0.92,
     "RELATION (0.50)": 0.50,
 }
+
 
 def _bar(score: float, width: int = 30) -> str:
     filled = round(score * width)
@@ -237,9 +240,9 @@ def run_group(group: dict, embed_fn) -> list:
     desc = group["description"]
     items = group["items"]
 
-    print(f"{'═'*70}")
+    print(f"{'═' * 70}")
     print(f"  GROUP: {name.upper()}  —  {desc}")
-    print(f"{'═'*70}")
+    print(f"{'═' * 70}")
 
     results = []
     for label_a, text_a, label_b, text_b in items:
@@ -261,11 +264,11 @@ def run_group(group: dict, embed_fn) -> list:
 
 
 def print_summary(all_results: list):
-    print(f"{'═'*70}")
+    print(f"{'═' * 70}")
     print("  SUMMARY")
-    print(f"{'═'*70}")
+    print(f"{'═' * 70}")
     print(f"  {'Label A':<28}  {'Label B':<28}  {'Score':>7}  Classification")
-    print(f"  {'-'*28}  {'-'*28}  {'-'*7}  {'-'*14}")
+    print(f"  {'-' * 28}  {'-' * 28}  {'-' * 7}  {'-' * 14}")
     for label_a, label_b, score in sorted(all_results, key=lambda r: -r[2]):
         short_a = textwrap.shorten(label_a, 28, placeholder="…")
         short_b = textwrap.shorten(label_b, 28, placeholder="…")
@@ -281,6 +284,7 @@ def print_summary(all_results: list):
 # ============================================================================
 # Entry point
 # ============================================================================
+
 
 def main():
     parser = argparse.ArgumentParser(description="Test vector similarity between concept pairs")

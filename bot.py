@@ -4,9 +4,9 @@ Thin entry point — run with: python bot.py
 All bot logic lives in the bot/ package.
 """
 
-import sys
 import io
 import logging
+import sys
 
 # Fix Windows console encoding before anything else
 if sys.platform == "win32":
@@ -28,11 +28,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger("bot")
 
-import discord
-import config
+import discord  # noqa: E402
+
+import config  # noqa: E402
 
 # Import the bot package — registers all commands and event handlers
-from bot import bot  # noqa: F401
+from bot import bot  # noqa: E402,F401
 
 
 def main():

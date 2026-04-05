@@ -5,23 +5,24 @@ Covers all CRUD endpoints: concepts, topics, relations, reviews, actions, graph.
 Uses the shared test_db fixture for DB isolation and httpx AsyncClient for requests.
 """
 
-import pytest
 from unittest.mock import patch
-from httpx import AsyncClient, ASGITransport
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 import config
 import db
 from api import app
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture(autouse=True)
 def _no_auth():
     """Disable auth for all tests by default."""
-    with patch.object(config, 'API_SECRET_KEY', ''):
+    with patch.object(config, "API_SECRET_KEY", ""):
         yield
 
 
@@ -37,6 +38,7 @@ async def client(test_db):
 # Helpers
 # ============================================================================
 
+
 def _make_topic(title="Test Topic", description=None, parent_ids=None):
     return db.add_topic(title=title, description=description, parent_ids=parent_ids)
 
@@ -50,8 +52,8 @@ def _make_concept(title="Test Concept", description=None, topic_id=None):
 # Topic CRUD
 # ============================================================================
 
-class TestTopicCRUD:
 
+class TestTopicCRUD:
     @pytest.mark.anyio
     async def test_get_topics_empty(self, client):
         resp = await client.get("/api/topics")
@@ -65,14 +67,14 @@ class TestTopicCRUD:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
-        assert any(t['title'] == 'Physics' for t in data)
+        assert any(t["title"] == "Physics" for t in data)
 
     @pytest.mark.anyio
     async def test_get_topic_detail(self, client):
         tid = _make_topic("Chemistry")
         resp = await client.get(f"/api/topics/{tid}")
         assert resp.status_code == 200
-        assert resp.json()['title'] == 'Chemistry'
+        assert resp.json()["title"] == "Chemistry"
 
     @pytest.mark.anyio
     async def test_get_topic_404(self, client):
@@ -84,27 +86,30 @@ class TestTopicCRUD:
         resp = await client.post("/api/topics", json={"title": "Biology"})
         assert resp.status_code == 201
         data = resp.json()
-        assert data['title'] == 'Biology'
-        assert 'id' in data
+        assert data["title"] == "Biology"
+        assert "id" in data
 
     @pytest.mark.anyio
     async def test_create_topic_with_parent(self, client):
         parent_id = _make_topic("Science")
-        resp = await client.post("/api/topics", json={
-            "title": "Genetics",
-            "parent_ids": [parent_id],
-        })
+        resp = await client.post(
+            "/api/topics",
+            json={
+                "title": "Genetics",
+                "parent_ids": [parent_id],
+            },
+        )
         assert resp.status_code == 201
         # Verify parent link
         detail = await client.get(f"/api/topics/{resp.json()['id']}")
-        assert any(p['id'] == parent_id for p in detail.json()['parents'])
+        assert any(p["id"] == parent_id for p in detail.json()["parents"])
 
     @pytest.mark.anyio
     async def test_update_topic(self, client):
         tid = _make_topic("Old Title")
         resp = await client.put(f"/api/topics/{tid}", json={"title": "New Title"})
         assert resp.status_code == 200
-        assert resp.json()['title'] == 'New Title'
+        assert resp.json()["title"] == "New Title"
 
     @pytest.mark.anyio
     async def test_update_topic_404(self, client):
@@ -133,7 +138,7 @@ class TestTopicCRUD:
         db.link_concept(cid, [tid])
         resp = await client.delete(f"/api/topics/{tid}")
         assert resp.status_code == 409
-        assert 'concept(s)' in resp.json()['detail']
+        assert "concept(s)" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_delete_topic_with_concepts_force(self, client):
@@ -148,70 +153,90 @@ class TestTopicCRUD:
     async def test_link_topics(self, client):
         p = _make_topic("Parent")
         c = _make_topic("Child")
-        resp = await client.post("/api/topics/link", json={
-            "parent_id": p, "child_id": c,
-        })
+        resp = await client.post(
+            "/api/topics/link",
+            json={
+                "parent_id": p,
+                "child_id": c,
+            },
+        )
         assert resp.status_code == 200
-        assert "Linked" in resp.json()['message']
+        assert "Linked" in resp.json()["message"]
 
     @pytest.mark.anyio
     async def test_link_topics_self_link(self, client):
         tid = _make_topic("Solo")
-        resp = await client.post("/api/topics/link", json={
-            "parent_id": tid, "child_id": tid,
-        })
+        resp = await client.post(
+            "/api/topics/link",
+            json={
+                "parent_id": tid,
+                "child_id": tid,
+            },
+        )
         assert resp.status_code == 400
-        assert "itself" in resp.json()['detail']
+        assert "itself" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_link_topics_cycle(self, client):
         a = _make_topic("A")
         b = _make_topic("B")
         db.link_topics(a, b)
-        resp = await client.post("/api/topics/link", json={
-            "parent_id": b, "child_id": a,
-        })
+        resp = await client.post(
+            "/api/topics/link",
+            json={
+                "parent_id": b,
+                "child_id": a,
+            },
+        )
         assert resp.status_code == 400
-        assert "Cycle" in resp.json()['detail']
+        assert "Cycle" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_link_topics_idempotent(self, client):
         p = _make_topic("P")
         c = _make_topic("C")
         db.link_topics(p, c)
-        resp = await client.post("/api/topics/link", json={
-            "parent_id": p, "child_id": c,
-        })
+        resp = await client.post(
+            "/api/topics/link",
+            json={
+                "parent_id": p,
+                "child_id": c,
+            },
+        )
         # Should return 200 "Already linked" not an error
         assert resp.status_code == 200
-        assert "Already" in resp.json()['message']
+        assert "Already" in resp.json()["message"]
 
     @pytest.mark.anyio
     async def test_unlink_topics(self, client):
         p = _make_topic("P2")
         c = _make_topic("C2")
         db.link_topics(p, c)
-        resp = await client.post("/api/topics/unlink", json={
-            "parent_id": p, "child_id": c,
-        })
+        resp = await client.post(
+            "/api/topics/unlink",
+            json={
+                "parent_id": p,
+                "child_id": c,
+            },
+        )
         assert resp.status_code == 200
-        assert "Unlinked" in resp.json()['message']
+        assert "Unlinked" in resp.json()["message"]
 
 
 # ============================================================================
 # Concept CRUD
 # ============================================================================
 
-class TestConceptCRUD:
 
+class TestConceptCRUD:
     @pytest.mark.anyio
     async def test_list_concepts_empty(self, client):
         resp = await client.get("/api/concepts")
         assert resp.status_code == 200
         data = resp.json()
-        assert data['items'] == []
-        assert data['total'] == 0
-        assert data['page'] == 1
+        assert data["items"] == []
+        assert data["total"] == 0
+        assert data["page"] == 1
 
     @pytest.mark.anyio
     async def test_list_concepts_with_data(self, client):
@@ -220,8 +245,8 @@ class TestConceptCRUD:
         _make_concept("Concept B", topic_id=tid)
         resp = await client.get("/api/concepts")
         data = resp.json()
-        assert data['total'] == 2
-        assert len(data['items']) == 2
+        assert data["total"] == 2
+        assert len(data["items"]) == 2
 
     @pytest.mark.anyio
     async def test_list_concepts_filter_by_topic(self, client):
@@ -231,8 +256,8 @@ class TestConceptCRUD:
         _make_concept("In T2", topic_id=t2)
         resp = await client.get(f"/api/concepts?topic_id={t1}")
         data = resp.json()
-        assert data['total'] == 1
-        assert data['items'][0]['title'] == 'In T1'
+        assert data["total"] == 1
+        assert data["items"][0]["title"] == "In T1"
 
     @pytest.mark.anyio
     async def test_list_concepts_search(self, client):
@@ -242,10 +267,10 @@ class TestConceptCRUD:
         _make_concept("Thermodynamics", topic_id=tid)
         resp = await client.get("/api/concepts?search=Mechanics")
         data = resp.json()
-        assert data['total'] >= 2
-        titles = [i['title'] for i in data['items']]
-        assert 'Quantum Mechanics' in titles
-        assert 'Classical Mechanics' in titles
+        assert data["total"] >= 2
+        titles = [i["title"] for i in data["items"]]
+        assert "Quantum Mechanics" in titles
+        assert "Classical Mechanics" in titles
 
     @pytest.mark.anyio
     async def test_list_concepts_pagination(self, client):
@@ -254,14 +279,14 @@ class TestConceptCRUD:
             _make_concept(f"Concept {i}", topic_id=tid)
         resp = await client.get("/api/concepts?page=1&per_page=2")
         data = resp.json()
-        assert data['total'] == 5
-        assert len(data['items']) == 2
-        assert data['page'] == 1
-        assert data['per_page'] == 2
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+        assert data["page"] == 1
+        assert data["per_page"] == 2
 
         resp2 = await client.get("/api/concepts?page=3&per_page=2")
         data2 = resp2.json()
-        assert len(data2['items']) == 1  # 5th item on page 3
+        assert len(data2["items"]) == 1  # 5th item on page 3
 
     @pytest.mark.anyio
     async def test_get_concept_detail(self, client):
@@ -269,7 +294,7 @@ class TestConceptCRUD:
         cid = _make_concept("Detail Test", topic_id=tid)
         resp = await client.get(f"/api/concepts/{cid}")
         assert resp.status_code == 200
-        assert resp.json()['title'] == 'Detail Test'
+        assert resp.json()["title"] == "Detail Test"
 
     @pytest.mark.anyio
     async def test_get_concept_404(self, client):
@@ -279,48 +304,57 @@ class TestConceptCRUD:
     @pytest.mark.anyio
     async def test_create_concept_with_topic_ids(self, client):
         tid = _make_topic("Host Topic")
-        resp = await client.post("/api/concepts", json={
-            "title": "New Concept",
-            "description": "Desc",
-            "topic_ids": [tid],
-        })
+        resp = await client.post(
+            "/api/concepts",
+            json={
+                "title": "New Concept",
+                "description": "Desc",
+                "topic_ids": [tid],
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
-        assert data['title'] == 'New Concept'
-        assert 'id' in data
+        assert data["title"] == "New Concept"
+        assert "id" in data
 
         # Verify it's linked
         detail = await client.get(f"/api/concepts/{data['id']}")
-        assert tid in detail.json().get('topic_ids', [])
+        assert tid in detail.json().get("topic_ids", [])
 
     @pytest.mark.anyio
     async def test_create_concept_with_topic_titles(self, client):
-        resp = await client.post("/api/concepts", json={
-            "title": "Auto-Topic Concept",
-            "topic_titles": ["Brand New Topic"],
-        })
+        resp = await client.post(
+            "/api/concepts",
+            json={
+                "title": "Auto-Topic Concept",
+                "topic_titles": ["Brand New Topic"],
+            },
+        )
         assert resp.status_code == 201
         # The topic should have been auto-created
-        concept = db.get_concept(resp.json()['id'])
-        assert len(concept['topic_ids']) == 1
+        concept = db.get_concept(resp.json()["id"])
+        assert len(concept["topic_ids"]) == 1
 
     @pytest.mark.anyio
     async def test_create_concept_topic_titles_reuses_existing(self, client):
         existing_tid = _make_topic("Existing Topic")
-        resp = await client.post("/api/concepts", json={
-            "title": "Reuse Topic Concept",
-            "topic_titles": ["Existing Topic"],
-        })
+        resp = await client.post(
+            "/api/concepts",
+            json={
+                "title": "Reuse Topic Concept",
+                "topic_titles": ["Existing Topic"],
+            },
+        )
         assert resp.status_code == 201
-        concept = db.get_concept(resp.json()['id'])
-        assert existing_tid in concept['topic_ids']
+        concept = db.get_concept(resp.json()["id"])
+        assert existing_tid in concept["topic_ids"]
 
     @pytest.mark.anyio
     async def test_create_concept_duplicate_409(self, client):
         _make_concept("Unique Title")
         resp = await client.post("/api/concepts", json={"title": "Unique Title"})
         assert resp.status_code == 409
-        assert "already exists" in resp.json()['detail']
+        assert "already exists" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_create_concept_missing_title_422(self, client):
@@ -332,7 +366,7 @@ class TestConceptCRUD:
         cid = _make_concept("Old Name")
         resp = await client.put(f"/api/concepts/{cid}", json={"title": "New Name"})
         assert resp.status_code == 200
-        assert resp.json()['title'] == 'New Name'
+        assert resp.json()["title"] == "New Name"
 
     @pytest.mark.anyio
     async def test_update_concept_404(self, client):
@@ -356,20 +390,26 @@ class TestConceptCRUD:
     @pytest.mark.anyio
     async def test_add_remark(self, client):
         cid = _make_concept("Remark Target")
-        resp = await client.post(f"/api/concepts/{cid}/remarks", json={
-            "content": "Remember this pattern",
-        })
+        resp = await client.post(
+            f"/api/concepts/{cid}/remarks",
+            json={
+                "content": "Remember this pattern",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
-        assert data['concept_id'] == cid
-        assert data['content'] == "Remember this pattern"
-        assert data['remark_summary'] == "Remember this pattern"
+        assert data["concept_id"] == cid
+        assert data["content"] == "Remember this pattern"
+        assert data["remark_summary"] == "Remember this pattern"
 
     @pytest.mark.anyio
     async def test_add_remark_404(self, client):
-        resp = await client.post("/api/concepts/9999/remarks", json={
-            "content": "Ghost",
-        })
+        resp = await client.post(
+            "/api/concepts/9999/remarks",
+            json={
+                "content": "Ghost",
+            },
+        )
         assert resp.status_code == 404
 
     @pytest.mark.anyio
@@ -383,8 +423,8 @@ class TestConceptCRUD:
 # Relations
 # ============================================================================
 
-class TestRelations:
 
+class TestRelations:
     @pytest.mark.anyio
     async def test_get_relations_empty(self, client):
         cid = _make_concept("Lonely")
@@ -401,7 +441,7 @@ class TestRelations:
         assert resp.status_code == 200
         rels = resp.json()
         assert len(rels) == 1
-        assert rels[0]['other_concept_id'] == b
+        assert rels[0]["other_concept_id"] == b
 
     @pytest.mark.anyio
     async def test_get_relations_404(self, client):
@@ -412,47 +452,59 @@ class TestRelations:
     async def test_create_relation(self, client):
         a = _make_concept("Rel A")
         b = _make_concept("Rel B")
-        resp = await client.post("/api/relations", json={
-            "concept_id_a": a,
-            "concept_id_b": b,
-            "relation_type": "contrasts_with",
-        })
+        resp = await client.post(
+            "/api/relations",
+            json={
+                "concept_id_a": a,
+                "concept_id_b": b,
+                "relation_type": "contrasts_with",
+            },
+        )
         assert resp.status_code == 201
-        assert 'id' in resp.json()
+        assert "id" in resp.json()
 
     @pytest.mark.anyio
     async def test_create_relation_invalid_type(self, client):
         a = _make_concept("Bad Rel A")
         b = _make_concept("Bad Rel B")
-        resp = await client.post("/api/relations", json={
-            "concept_id_a": a,
-            "concept_id_b": b,
-            "relation_type": "invalid_type",
-        })
+        resp = await client.post(
+            "/api/relations",
+            json={
+                "concept_id_a": a,
+                "concept_id_b": b,
+                "relation_type": "invalid_type",
+            },
+        )
         assert resp.status_code == 400
-        assert "Invalid relation_type" in resp.json()['detail']
+        assert "Invalid relation_type" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_create_relation_duplicate(self, client):
         a = _make_concept("Dup A")
         b = _make_concept("Dup B")
         db.add_relation(a, b, "builds_on")
-        resp = await client.post("/api/relations", json={
-            "concept_id_a": a,
-            "concept_id_b": b,
-            "relation_type": "builds_on",
-        })
+        resp = await client.post(
+            "/api/relations",
+            json={
+                "concept_id_a": a,
+                "concept_id_b": b,
+                "relation_type": "builds_on",
+            },
+        )
         assert resp.status_code == 400
-        assert "rejected" in resp.json()['detail']
+        assert "rejected" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_create_relation_self_referential(self, client):
         a = _make_concept("Self Ref")
-        resp = await client.post("/api/relations", json={
-            "concept_id_a": a,
-            "concept_id_b": a,
-            "relation_type": "builds_on",
-        })
+        resp = await client.post(
+            "/api/relations",
+            json={
+                "concept_id_a": a,
+                "concept_id_b": a,
+                "relation_type": "builds_on",
+            },
+        )
         assert resp.status_code == 400
 
     @pytest.mark.anyio
@@ -460,10 +512,13 @@ class TestRelations:
         a = _make_concept("Rem A")
         b = _make_concept("Rem B")
         db.add_relation(a, b, "builds_on")
-        resp = await client.post("/api/relations/remove", json={
-            "concept_id_a": a,
-            "concept_id_b": b,
-        })
+        resp = await client.post(
+            "/api/relations/remove",
+            json={
+                "concept_id_a": a,
+                "concept_id_b": b,
+            },
+        )
         assert resp.status_code == 200
         # Verify gone
         rels = db.get_relations(a)
@@ -474,13 +529,13 @@ class TestRelations:
 # Reviews & Logs
 # ============================================================================
 
-class TestReviewsAndLogs:
 
+class TestReviewsAndLogs:
     @pytest.mark.anyio
     async def test_get_reviews_requires_concept_id(self, client):
         resp = await client.get("/api/reviews")
         assert resp.status_code == 400
-        assert "concept_id" in resp.json()['detail']
+        assert "concept_id" in resp.json()["detail"]
 
     @pytest.mark.anyio
     async def test_get_reviews_with_concept_id(self, client):
@@ -490,7 +545,7 @@ class TestReviewsAndLogs:
         assert resp.status_code == 200
         reviews = resp.json()
         assert len(reviews) == 1
-        assert reviews[0]['question_asked'] == "What is X?"
+        assert reviews[0]["question_asked"] == "What is X?"
 
     @pytest.mark.anyio
     async def test_get_next_review_no_concepts(self, client):
@@ -505,15 +560,15 @@ class TestReviewsAndLogs:
         assert resp.status_code == 200
         data = resp.json()
         assert data is not None
-        assert data['id'] == cid
+        assert data["id"] == cid
 
     @pytest.mark.anyio
     async def test_get_actions_empty(self, client):
         resp = await client.get("/api/actions")
         assert resp.status_code == 200
         data = resp.json()
-        assert data['items'] == []
-        assert data['total'] == 0
+        assert data["items"] == []
+        assert data["total"] == 0
 
     @pytest.mark.anyio
     async def test_get_actions_with_entries(self, client):
@@ -521,8 +576,8 @@ class TestReviewsAndLogs:
         db.log_action("quiz", {"concept_id": 2}, "success", "done", source="discord")
         resp = await client.get("/api/actions")
         data = resp.json()
-        assert data['total'] == 2
-        assert len(data['items']) == 2
+        assert data["total"] == 2
+        assert len(data["items"]) == 2
 
     @pytest.mark.anyio
     async def test_get_actions_filter_by_action(self, client):
@@ -530,8 +585,8 @@ class TestReviewsAndLogs:
         db.log_action("quiz", {}, "success", "done")
         resp = await client.get("/api/actions?action=assess")
         data = resp.json()
-        assert data['total'] == 1
-        assert data['items'][0]['action'] == 'assess'
+        assert data["total"] == 1
+        assert data["items"][0]["action"] == "assess"
 
     @pytest.mark.anyio
     async def test_get_actions_filter_by_source(self, client):
@@ -539,8 +594,8 @@ class TestReviewsAndLogs:
         db.log_action("quiz", {}, "success", "done", source="discord")
         resp = await client.get("/api/actions?source=api")
         data = resp.json()
-        assert data['total'] == 1
-        assert data['items'][0]['source'] == 'api'
+        assert data["total"] == 1
+        assert data["items"][0]["source"] == "api"
 
     @pytest.mark.anyio
     async def test_get_actions_pagination(self, client):
@@ -548,30 +603,30 @@ class TestReviewsAndLogs:
             db.log_action(f"action_{i}", {}, "success", "done")
         resp = await client.get("/api/actions?page=1&per_page=2")
         data = resp.json()
-        assert data['total'] == 5
-        assert len(data['items']) == 2
-        assert data['page'] == 1
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+        assert data["page"] == 1
 
         resp2 = await client.get("/api/actions?page=3&per_page=2")
         data2 = resp2.json()
-        assert len(data2['items']) == 1
+        assert len(data2["items"]) == 1
 
 
 # ============================================================================
 # Graph
 # ============================================================================
 
-class TestGraph:
 
+class TestGraph:
     @pytest.mark.anyio
     async def test_graph_empty(self, client):
         resp = await client.get("/api/graph")
         assert resp.status_code == 200
         data = resp.json()
-        assert data['concept_nodes'] == []
-        assert data['topic_nodes'] == []
-        assert data['concept_edges'] == []
-        assert data['topic_edges'] == []
+        assert data["concept_nodes"] == []
+        assert data["topic_nodes"] == []
+        assert data["concept_edges"] == []
+        assert data["topic_edges"] == []
 
     @pytest.mark.anyio
     async def test_graph_with_data(self, client):
@@ -582,32 +637,35 @@ class TestGraph:
 
         resp = await client.get("/api/graph")
         data = resp.json()
-        assert len(data['concept_nodes']) == 2
-        assert len(data['topic_nodes']) >= 1
-        assert len(data['concept_edges']) == 1
+        assert len(data["concept_nodes"]) == 2
+        assert len(data["topic_nodes"]) >= 1
+        assert len(data["concept_edges"]) == 1
 
 
 # ============================================================================
 # Auth
 # ============================================================================
 
-class TestAuth:
 
+class TestAuth:
     @pytest.mark.anyio
     async def test_401_with_wrong_token(self, test_db):
         """Verify auth rejection when a secret key is configured."""
-        with patch.object(config, 'API_SECRET_KEY', 'real-secret'):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                resp = await ac.get("/api/topics", headers={
-                    "Authorization": "Bearer wrong-token",
-                })
+                resp = await ac.get(
+                    "/api/topics",
+                    headers={
+                        "Authorization": "Bearer wrong-token",
+                    },
+                )
                 assert resp.status_code == 401
 
     @pytest.mark.anyio
     async def test_401_missing_token(self, test_db):
         """Verify auth rejection when no token is provided."""
-        with patch.object(config, 'API_SECRET_KEY', 'real-secret'):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/topics")
@@ -616,7 +674,7 @@ class TestAuth:
     @pytest.mark.anyio
     async def test_health_no_auth_required(self, test_db):
         """Health check should work even with auth enabled."""
-        with patch.object(config, 'API_SECRET_KEY', 'real-secret'):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/health")

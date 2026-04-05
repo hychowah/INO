@@ -69,9 +69,9 @@ def format_quiz_metadata(concept: dict | None) -> str:
     """
     if not concept:
         return ""
-    title = concept.get('title') or '?'
-    mastery = concept.get('mastery_level', 0) if concept.get('mastery_level') is not None else 0
-    count = concept.get('review_count', 0) if concept.get('review_count') is not None else 0
+    title = concept.get("title") or "?"
+    mastery = concept.get("mastery_level", 0) if concept.get("mastery_level") is not None else 0
+    count = concept.get("review_count", 0) if concept.get("review_count") is not None else 0
     line = f"📖 **{title}** · Score: {mastery}/100 · Review #{count + 1}"
     if count < 2:
         remaining = 2 - count

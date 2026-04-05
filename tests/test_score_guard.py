@@ -21,10 +21,10 @@ import db
 from db import core as db_core
 from services import tools
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture(autouse=True)
 def _temp_db(tmp_path, monkeypatch):
@@ -48,84 +48,99 @@ def concept_id():
 # Maintenance source — score fields BLOCKED
 # ============================================================================
 
+
 class TestMaintenanceBlocked:
     """Maintenance source must not be able to change score/scheduling fields."""
 
     SCORE_FIELDS = {
-        'mastery_level': 80,
-        'ease_factor': 3.0,
-        'interval_days': 30,
-        'next_review_at': '2026-06-01 00:00:00',
-        'last_reviewed_at': '2026-03-16 00:00:00',
-        'review_count': 10,
+        "mastery_level": 80,
+        "ease_factor": 3.0,
+        "interval_days": 30,
+        "next_review_at": "2026-06-01 00:00:00",
+        "last_reviewed_at": "2026-03-16 00:00:00",
+        "review_count": 10,
     }
 
     def test_mastery_level_blocked(self, concept_id):
-        tools.set_action_source('maintenance')
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'mastery_level': 80,
-        })
+        tools.set_action_source("maintenance")
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "mastery_level": 80,
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['mastery_level'] == 0, \
+        assert concept["mastery_level"] == 0, (
             "Maintenance should not be able to change mastery_level"
+        )
 
     def test_all_score_fields_blocked(self, concept_id):
-        tools.set_action_source('maintenance')
-        params = {'concept_id': concept_id, **self.SCORE_FIELDS}
-        tools.execute_action('update_concept', params)
+        tools.set_action_source("maintenance")
+        params = {"concept_id": concept_id, **self.SCORE_FIELDS}
+        tools.execute_action("update_concept", params)
 
         concept = db.get_concept(concept_id)
-        assert concept['mastery_level'] == 0
-        assert concept['interval_days'] == 1  # default
-        assert concept['review_count'] == 0
+        assert concept["mastery_level"] == 0
+        assert concept["interval_days"] == 1  # default
+        assert concept["review_count"] == 0
 
     def test_title_description_still_allowed(self, concept_id):
-        tools.set_action_source('maintenance')
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'title': 'Renamed Concept',
-            'description': 'Updated description',
-        })
+        tools.set_action_source("maintenance")
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "title": "Renamed Concept",
+                "description": "Updated description",
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['title'] == 'Renamed Concept'
-        assert concept['description'] == 'Updated description'
+        assert concept["title"] == "Renamed Concept"
+        assert concept["description"] == "Updated description"
 
     def test_mixed_fields_only_safe_applied(self, concept_id):
         """Score fields stripped, non-score fields applied."""
-        tools.set_action_source('maintenance')
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'title': 'New Title',
-            'mastery_level': 90,
-            'interval_days': 60,
-        })
+        tools.set_action_source("maintenance")
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "title": "New Title",
+                "mastery_level": 90,
+                "interval_days": 60,
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['title'] == 'New Title'
-        assert concept['mastery_level'] == 0
-        assert concept['interval_days'] == 1
+        assert concept["title"] == "New Title"
+        assert concept["mastery_level"] == 0
+        assert concept["interval_days"] == 1
 
     def test_remark_still_allowed(self, concept_id):
-        tools.set_action_source('maintenance')
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'mastery_level': 50,
-            'remark': 'User struggles with chemistry aspect',
-        })
+        tools.set_action_source("maintenance")
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "mastery_level": 50,
+                "remark": "User struggles with chemistry aspect",
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['mastery_level'] == 0  # blocked
+        assert concept["mastery_level"] == 0  # blocked
         # Remark should still be added (both history and summary)
         detail = db.get_concept_detail(concept_id)
-        remarks = detail.get('remarks', [])
-        assert any('chemistry' in r['content'] for r in remarks)
+        remarks = detail.get("remarks", [])
+        assert any("chemistry" in r["content"] for r in remarks)
         # Summary cache should also be populated
-        assert detail.get('remark_summary') is not None
-        assert 'chemistry' in detail['remark_summary']
+        assert detail.get("remark_summary") is not None
+        assert "chemistry" in detail["remark_summary"]
 
 
 # ============================================================================
 # Non-maintenance sources — score fields ALLOWED
 # ============================================================================
+
 
 class TestNonMaintenanceAllowed:
     """Normal sources (discord, api, cli) should still update score fields."""
@@ -133,22 +148,28 @@ class TestNonMaintenanceAllowed:
     @pytest.mark.parametrize("source", ["discord", "api", "cli", "scheduler"])
     def test_mastery_level_allowed(self, concept_id, source):
         tools.set_action_source(source)
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'mastery_level': 75,
-        })
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "mastery_level": 75,
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['mastery_level'] == 75
+        assert concept["mastery_level"] == 75
 
     def test_all_score_fields_allowed_from_discord(self, concept_id):
-        tools.set_action_source('discord')
-        tools.execute_action('update_concept', {
-            'concept_id': concept_id,
-            'mastery_level': 60,
-            'interval_days': 14,
-            'review_count': 5,
-        })
+        tools.set_action_source("discord")
+        tools.execute_action(
+            "update_concept",
+            {
+                "concept_id": concept_id,
+                "mastery_level": 60,
+                "interval_days": 14,
+                "review_count": 5,
+            },
+        )
         concept = db.get_concept(concept_id)
-        assert concept['mastery_level'] == 60
-        assert concept['interval_days'] == 14
-        assert concept['review_count'] == 5
+        assert concept["mastery_level"] == 60
+        assert concept["interval_days"] == 14
+        assert concept["review_count"] == 5

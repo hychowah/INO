@@ -8,8 +8,8 @@ import logging
 from datetime import datetime
 
 from services import tools
+from services.llm import LLMError, get_provider
 from services.parser import _extract_json_object
-from services.llm import get_provider, LLMError
 
 logger = logging.getLogger("repair")
 
@@ -24,9 +24,11 @@ def _get_repair_session() -> str:
     """Return a repair session name, rotating every REPAIR_SESSION_TTL_MINUTES."""
     global _repair_session_name, _repair_session_created_at, _repair_session_seeded
     now = datetime.now()
-    if (_repair_session_name is None or _repair_session_created_at is None
-            or (now - _repair_session_created_at).total_seconds()
-            > REPAIR_SESSION_TTL_MINUTES * 60):
+    if (
+        _repair_session_name is None
+        or _repair_session_created_at is None
+        or (now - _repair_session_created_at).total_seconds() > REPAIR_SESSION_TTL_MINUTES * 60
+    ):
         _repair_session_name = f"learn_repair_{now.strftime('%H%M')}"
         _repair_session_created_at = now
         _repair_session_seeded = False
@@ -50,8 +52,8 @@ async def repair_action(action_data: dict) -> dict | None:
             f"{valid_actions}\n\n"
             f"When given malformed JSON, return ONLY the corrected JSON with:\n"
             f"- action name fixed to the closest valid action from the list above\n"
-            f"- params wrapped in a \"params\" object if at top level\n"
-            f"- \"message\" field preserved\n"
+            f'- params wrapped in a "params" object if at top level\n'
+            f'- "message" field preserved\n'
             f"No explanation, just the JSON.\n\n"
             f"Fix this: {malformed}"
         )
@@ -59,8 +61,10 @@ async def repair_action(action_data: dict) -> dict | None:
     else:
         prompt = f"Fix this: {malformed}"
 
-    logger.info(f"Repair sub-agent fired for action '{action_data.get('action')}' "
-                f"(session={session}, prompt={len(prompt)} chars)")
+    logger.info(
+        f"Repair sub-agent fired for action '{action_data.get('action')}' "
+        f"(session={session}, prompt={len(prompt)} chars)"
+    )
 
     try:
         raw = await provider.send(

@@ -9,6 +9,7 @@ Covers:
 """
 
 import json
+
 from services.parser import (
     _extract_json_object,
     _extract_json_str,
@@ -17,10 +18,10 @@ from services.parser import (
     process_output,
 )
 
-
 # ============================================================================
 # _extract_json_object — basic cases
 # ============================================================================
+
 
 class TestExtractJsonObject:
     def test_simple_object(self):
@@ -59,6 +60,7 @@ class TestExtractJsonObject:
 # _extract_json_object — braces in string values (the bug)
 # ============================================================================
 
+
 class TestExtractJsonObjectBracesInStrings:
     """The core bug: braces inside JSON string values (C++, LaTeX, etc.)
     caused the old brace-counting approach to fail."""
@@ -68,7 +70,7 @@ class TestExtractJsonObjectBracesInStrings:
         obj = {
             "action": "add_concept",
             "params": {"title": "C++ Templates"},
-            "message": "Here is code: int f() { return 1; } done"
+            "message": "Here is code: int f() { return 1; } done",
         }
         text = json.dumps(obj)
         result = _extract_json_object(text)
@@ -77,10 +79,7 @@ class TestExtractJsonObjectBracesInStrings:
         assert "{ return 1; }" in result["message"]
 
     def test_multiple_cpp_blocks(self):
-        obj = {
-            "action": "quiz",
-            "message": "Compare: void a() { x++; } vs void b() { y--; }"
-        }
+        obj = {"action": "quiz", "message": "Compare: void a() { x++; } vs void b() { y--; }"}
         text = json.dumps(obj)
         result = _extract_json_object(text)
         assert result is not None
@@ -89,7 +88,7 @@ class TestExtractJsonObjectBracesInStrings:
     def test_latex_braces(self):
         obj = {
             "action": "add_concept",
-            "message": "The formula is \\frac{a}{b} + \\sum_{i=0}^{n} x_i"
+            "message": "The formula is \\frac{a}{b} + \\sum_{i=0}^{n} x_i",
         }
         text = json.dumps(obj)
         result = _extract_json_object(text)
@@ -97,10 +96,7 @@ class TestExtractJsonObjectBracesInStrings:
         assert result["action"] == "add_concept"
 
     def test_regex_braces(self):
-        obj = {
-            "action": "quiz",
-            "message": "What does [a-z]{3,5} match?"
-        }
+        obj = {"action": "quiz", "message": "What does [a-z]{3,5} match?"}
         text = json.dumps(obj)
         result = _extract_json_object(text)
         assert result is not None
@@ -110,7 +106,7 @@ class TestExtractJsonObjectBracesInStrings:
         obj = {
             "action": "add_concept",
             "params": {"description": 'Use format {"key": "value"} for config'},
-            "message": "Added concept."
+            "message": "Added concept.",
         }
         text = json.dumps(obj)
         result = _extract_json_object(text)
@@ -118,10 +114,7 @@ class TestExtractJsonObjectBracesInStrings:
         assert result["message"] == "Added concept."
 
     def test_python_dict_in_message(self):
-        obj = {
-            "action": "quiz",
-            "message": "What does {'a': 1, 'b': 2} represent?"
-        }
+        obj = {"action": "quiz", "message": "What does {'a': 1, 'b': 2} represent?"}
         text = json.dumps(obj)
         result = _extract_json_object(text)
         assert result is not None
@@ -129,7 +122,9 @@ class TestExtractJsonObjectBracesInStrings:
     def test_deeply_nested_code_blocks(self):
         obj = {
             "action": "add_concept",
-            "message": "```cpp\ntemplate<typename T>\nstruct Foo {\n    T bar() { return T{}; }\n};\n```"
+            "message": (
+                "```cpp\ntemplate<typename T>\nstruct Foo {\n    T bar() { return T{}; }\n};\n```"
+            ),
         }
         text = json.dumps(obj)
         result = _extract_json_object(text)
@@ -142,6 +137,7 @@ class TestExtractJsonObjectBracesInStrings:
 # _extract_json_object — last-valid-parse (not first-valid)
 # ============================================================================
 
+
 class TestExtractJsonObjectLastValid:
     """Verify we get the COMPLETE object, not a partial one."""
 
@@ -150,7 +146,7 @@ class TestExtractJsonObjectLastValid:
         obj = {
             "action": "add_concept",
             "params": {"title": "Test"},
-            "message": "Full explanation here"
+            "message": "Full explanation here",
         }
         text = json.dumps(obj)
         result = _extract_json_object(text)
@@ -168,6 +164,7 @@ class TestExtractJsonObjectLastValid:
 # ============================================================================
 # _extract_json_str
 # ============================================================================
+
 
 class TestExtractJsonStr:
     def test_simple(self):
@@ -198,6 +195,7 @@ class TestExtractJsonStr:
 # extract_fetch_params (refactored to use _extract_json_object)
 # ============================================================================
 
+
 class TestExtractFetchParams:
     def test_code_block_fetch(self):
         response = '```json\n{"action": "fetch", "params": {"topic_id": 3}}\n```'
@@ -227,6 +225,7 @@ class TestExtractFetchParams:
 # parse_llm_response — end-to-end
 # ============================================================================
 
+
 class TestParseLlmResponse:
     def test_reply_prefix(self):
         prefix, msg, data = parse_llm_response("REPLY: hello world")
@@ -235,7 +234,9 @@ class TestParseLlmResponse:
         assert data is None
 
     def test_json_code_block(self):
-        response = '```json\n{"action": "quiz", "params": {"concept_id": 5}, "message": "Question?"}\n```'
+        response = (
+            '```json\n{"action": "quiz", "params": {"concept_id": 5}, "message": "Question?"}\n```'
+        )
         prefix, msg, data = parse_llm_response(response)
         assert prefix == "ACTION"
         assert data["action"] == "quiz"
@@ -252,7 +253,11 @@ class TestParseLlmResponse:
         obj = {
             "action": "add_concept",
             "params": {"title": "C++ Templates", "topic_ids": [37]},
-            "message": "Good call — C++ Templates added.\nQuick intuition: template<typename T> T max(T a, T b) { return a > b ? a : b; }\nNow back to decorators — what does [f](int x) capture? 🧠"
+            "message": (
+                "Good call — C++ Templates added.\nQuick intuition: "
+                "template<typename T> T max(T a, T b) { return a > b ? a : b; }\n"
+                "Now back to decorators — what does [f](int x) capture? 🧠"
+            ),
         }
         response = json.dumps(obj)
         prefix, msg, data = parse_llm_response(response)
@@ -271,6 +276,7 @@ class TestParseLlmResponse:
 # ============================================================================
 # process_output — safety net
 # ============================================================================
+
 
 class TestProcessOutput:
     def test_reply_prefix(self):
@@ -294,10 +300,7 @@ class TestProcessOutput:
 
     def test_safety_net_with_cpp_braces(self):
         """Safety net must handle JSON with code-braces in message."""
-        obj = {
-            "action": "quiz",
-            "message": "What does void f() { return; } do?"
-        }
+        obj = {"action": "quiz", "message": "What does void f() { return; } do?"}
         raw = json.dumps(obj)
         msg_type, msg = process_output(raw)
         assert msg_type == "reply"

@@ -2,18 +2,19 @@
 Kimi-CLI subprocess wrapper for the learning agent bot.
 """
 
-import os
-import logging
-import subprocess
 import asyncio
+import logging
+import os
+import subprocess
 
 import config
 
 logger = logging.getLogger("kimi")
 
 
-async def run_kimi(command: str, *, stdin_text: str = None,
-                   timeout: int = None) -> subprocess.CompletedProcess:
+async def run_kimi(
+    command: str, *, stdin_text: str = None, timeout: int = None
+) -> subprocess.CompletedProcess:
     """
     Run a kimi-cli command asynchronously (non-blocking via thread pool).
 
@@ -41,7 +42,7 @@ async def run_kimi(command: str, *, stdin_text: str = None,
         capture_output=True,
         text=True,
         timeout=timeout,
-        cwd=str(config.BASE_DIR.parent),   # PA root
+        cwd=str(config.BASE_DIR.parent),  # PA root
         encoding="utf-8",
         errors="replace",
         env=env,
@@ -68,7 +69,8 @@ def _filter_stderr(stderr: str) -> str:
     if not stderr:
         return ""
     filtered = [
-        line for line in stderr.strip().split("\n")
+        line
+        for line in stderr.strip().split("\n")
         if line.strip()
         and not line.startswith("┌")
         and not line.startswith("│")

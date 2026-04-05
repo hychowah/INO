@@ -15,17 +15,22 @@ Relation types (controlled vocabulary):
 """
 
 import sqlite3
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
 from db.core import _conn, _now_iso
 
 # Maximum number of relationships allowed per concept
 MAX_RELATIONS_PER_CONCEPT = 5
 
-VALID_RELATION_TYPES = frozenset({
-    'builds_on', 'contrasts_with', 'commonly_confused',
-    'applied_together', 'same_phenomenon',
-})
+VALID_RELATION_TYPES = frozenset(
+    {
+        "builds_on",
+        "contrasts_with",
+        "commonly_confused",
+        "applied_together",
+        "same_phenomenon",
+    }
+)
 
 
 def _normalize_pair(a: int, b: int) -> tuple[int, int]:
@@ -35,9 +40,12 @@ def _normalize_pair(a: int, b: int) -> tuple[int, int]:
     return (min(a, b), max(a, b))
 
 
-def add_relation(concept_id_a: int, concept_id_b: int,
-                 relation_type: str = 'builds_on',
-                 note: Optional[str] = None) -> Optional[int]:
+def add_relation(
+    concept_id_a: int,
+    concept_id_b: int,
+    relation_type: str = "builds_on",
+    note: Optional[str] = None,
+) -> Optional[int]:
     """Create a relationship between two concepts.
 
     Normalizes the direction (smaller ID stored as low), validates the
@@ -59,7 +67,7 @@ def add_relation(concept_id_a: int, concept_id_b: int,
         count_low = conn.execute(
             "SELECT COUNT(*) FROM concept_relations "
             "WHERE concept_id_low = ? OR concept_id_high = ?",
-            (low, low)
+            (low, low),
         ).fetchone()[0]
         if count_low >= MAX_RELATIONS_PER_CONCEPT:
             return None
@@ -67,7 +75,7 @@ def add_relation(concept_id_a: int, concept_id_b: int,
         count_high = conn.execute(
             "SELECT COUNT(*) FROM concept_relations "
             "WHERE concept_id_low = ? OR concept_id_high = ?",
-            (high, high)
+            (high, high),
         ).fetchone()[0]
         if count_high >= MAX_RELATIONS_PER_CONCEPT:
             return None
@@ -76,7 +84,7 @@ def add_relation(concept_id_a: int, concept_id_b: int,
             "INSERT OR IGNORE INTO concept_relations "
             "(concept_id_low, concept_id_high, relation_type, note, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (low, high, relation_type, note, _now_iso())
+            (low, high, relation_type, note, _now_iso()),
         )
         conn.commit()
         if cursor.rowcount == 0:
@@ -95,7 +103,8 @@ def get_relations(concept_id: int) -> List[Dict]:
         id, other_concept_id, other_title, other_mastery, relation_type, note
     """
     conn = _conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT cr.id, cr.relation_type, cr.note,
                CASE WHEN cr.concept_id_low = ? THEN cr.concept_id_high
                     ELSE cr.concept_id_low END AS other_id,
@@ -107,17 +116,19 @@ def get_relations(concept_id: int) -> List[Dict]:
                                        ELSE cr.concept_id_low END
         WHERE cr.concept_id_low = ? OR cr.concept_id_high = ?
         ORDER BY cr.created_at DESC
-    """, (concept_id, concept_id, concept_id, concept_id)).fetchall()
+    """,
+        (concept_id, concept_id, concept_id, concept_id),
+    ).fetchall()
     conn.close()
 
     return [
         {
-            'id': r['id'],
-            'other_concept_id': r['other_id'],
-            'other_title': r['other_title'],
-            'other_mastery': r['other_mastery'],
-            'relation_type': r['relation_type'],
-            'note': r['note'],
+            "id": r["id"],
+            "other_concept_id": r["other_id"],
+            "other_title": r["other_title"],
+            "other_mastery": r["other_mastery"],
+            "relation_type": r["relation_type"],
+            "note": r["note"],
         }
         for r in rows
     ]
@@ -133,7 +144,7 @@ def remove_relation(concept_id_a: int, concept_id_b: int) -> bool:
     conn = _conn()
     cursor = conn.execute(
         "DELETE FROM concept_relations WHERE concept_id_low = ? AND concept_id_high = ?",
-        (low, high)
+        (low, high),
     )
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -141,8 +152,9 @@ def remove_relation(concept_id_a: int, concept_id_b: int) -> bool:
     return deleted
 
 
-def add_relations_from_assess(concept_id: int, related_ids: List[int],
-                              relation_type: str = 'builds_on') -> int:
+def add_relations_from_assess(
+    concept_id: int, related_ids: List[int], relation_type: str = "builds_on"
+) -> int:
     """Batch-add relationships from a quiz assessment.
 
     Silently skips: self-references, invalid IDs, concepts at cap, duplicates.
@@ -159,9 +171,7 @@ def add_relations_from_assess(concept_id: int, related_ids: List[int],
                 continue
 
             # Verify the related concept exists
-            exists = conn.execute(
-                "SELECT 1 FROM concepts WHERE id = ?", (rid,)
-            ).fetchone()
+            exists = conn.execute("SELECT 1 FROM concepts WHERE id = ?", (rid,)).fetchone()
             if not exists:
                 continue
 
@@ -172,7 +182,7 @@ def add_relations_from_assess(concept_id: int, related_ids: List[int],
                 count = conn.execute(
                     "SELECT COUNT(*) FROM concept_relations "
                     "WHERE concept_id_low = ? OR concept_id_high = ?",
-                    (cid, cid)
+                    (cid, cid),
                 ).fetchone()[0]
                 if count >= MAX_RELATIONS_PER_CONCEPT:
                     break
@@ -183,7 +193,7 @@ def add_relations_from_assess(concept_id: int, related_ids: List[int],
                         "INSERT OR IGNORE INTO concept_relations "
                         "(concept_id_low, concept_id_high, relation_type, created_at) "
                         "VALUES (?, ?, ?, ?)",
-                        (low, high, relation_type, _now_iso())
+                        (low, high, relation_type, _now_iso()),
                     )
                     # Check if it was actually a new insert (not a duplicate)
                     if conn.total_changes:
@@ -224,7 +234,8 @@ def search_related(concept_id: int, depth: int = 2) -> List[Dict]:
         return []
 
     conn = _conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         WITH RECURSIVE neighborhood AS (
             -- Start node
             SELECT ? AS concept_id, 0 AS hops
@@ -247,7 +258,9 @@ def search_related(concept_id: int, depth: int = 2) -> List[Dict]:
         WHERE n.concept_id != ?
         GROUP BY c.id
         ORDER BY hop_count, c.title
-    """, (concept_id, depth, concept_id)).fetchall()
+    """,
+        (concept_id, depth, concept_id),
+    ).fetchall()
     conn.close()
 
     return [dict(r) for r in rows]

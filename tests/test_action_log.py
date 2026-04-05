@@ -1,11 +1,8 @@
 """Tests for db.action_log and the tools.py logging hook."""
 
-import json
 import sys
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -13,13 +10,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
-from db import core as db_core
 from db import action_log
-
+from db import core as db_core
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture(autouse=True)
 def _temp_db(tmp_path, monkeypatch):
@@ -35,6 +32,7 @@ def _temp_db(tmp_path, monkeypatch):
 # ============================================================================
 # log_action
 # ============================================================================
+
 
 class TestLogAction:
     def test_basic_insert(self):
@@ -80,12 +78,17 @@ class TestLogAction:
 # get_action_log — filtering
 # ============================================================================
 
+
 class TestGetActionLog:
     def _populate(self):
         action_log.log_action("add_concept", {"title": "A"}, "success", "ok", source="discord")
-        action_log.log_action("assess", {"concept_id": 1, "quality": 4}, "success", "ok", source="scheduler")
+        action_log.log_action(
+            "assess", {"concept_id": 1, "quality": 4}, "success", "ok", source="scheduler"
+        )
         action_log.log_action("add_topic", {"title": "B"}, "success", "ok", source="maintenance")
-        action_log.log_action("update_concept", {"concept_id": 2}, "error", "failed", source="discord")
+        action_log.log_action(
+            "update_concept", {"concept_id": 2}, "error", "failed", source="discord"
+        )
 
     def test_returns_all(self):
         self._populate()
@@ -138,15 +141,14 @@ class TestGetActionLog:
 
     def test_combined_filters(self):
         self._populate()
-        entries = action_log.get_action_log(
-            action_filter="add_concept", source_filter="discord"
-        )
+        entries = action_log.get_action_log(action_filter="add_concept", source_filter="discord")
         assert len(entries) == 1
 
 
 # ============================================================================
 # get_action_log_count
 # ============================================================================
+
 
 class TestGetActionLogCount:
     def test_total(self):
@@ -163,6 +165,7 @@ class TestGetActionLogCount:
 # ============================================================================
 # get_action_summary
 # ============================================================================
+
 
 class TestGetActionSummary:
     def test_basic_summary(self):
@@ -187,6 +190,7 @@ class TestGetActionSummary:
 # get_distinct_actions / get_distinct_sources
 # ============================================================================
 
+
 class TestDistinctValues:
     def test_distinct_actions(self):
         action_log.log_action("add_concept", {}, "success", "ok")
@@ -209,6 +213,7 @@ class TestDistinctValues:
 # ============================================================================
 # cleanup_old_actions
 # ============================================================================
+
 
 class TestCleanup:
     def test_deletes_old_entries(self):
@@ -239,9 +244,11 @@ class TestCleanup:
 # tools.py skip set behavior
 # ============================================================================
 
+
 class TestToolsSkipSet:
     def test_skip_actions_not_logged(self):
         from services.tools import _SKIP_LOG_ACTIONS
+
         assert "fetch" in _SKIP_LOG_ACTIONS
         assert "list_topics" in _SKIP_LOG_ACTIONS
         assert "none" in _SKIP_LOG_ACTIONS
@@ -249,6 +256,7 @@ class TestToolsSkipSet:
 
     def test_mutation_actions_not_in_skip(self):
         from services.tools import _SKIP_LOG_ACTIONS
+
         assert "add_concept" not in _SKIP_LOG_ACTIONS
         assert "assess" not in _SKIP_LOG_ACTIONS
         assert "quiz" not in _SKIP_LOG_ACTIONS
@@ -259,38 +267,46 @@ class TestToolsSkipSet:
 # webui._relative_time
 # ============================================================================
 
+
 class TestRelativeTime:
     def test_just_now(self):
         from webui.server import _relative_time
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         assert _relative_time(now) == "just now"
 
     def test_minutes(self):
         from webui.server import _relative_time
+
         t = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         assert "5 min ago" == _relative_time(t)
 
     def test_hours(self):
         from webui.server import _relative_time
+
         t = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
         assert "3 hrs ago" == _relative_time(t)
 
     def test_yesterday(self):
         from webui.server import _relative_time
+
         t = (datetime.now() - timedelta(days=1, hours=1)).strftime("%Y-%m-%d %H:%M:%S")
         assert _relative_time(t) == "yesterday"
 
     def test_days(self):
         from webui.server import _relative_time
+
         t = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
         assert "10 days ago" == _relative_time(t)
 
     def test_old_date(self):
         from webui.server import _relative_time
+
         assert _relative_time("2020-01-15 10:30:00").startswith("2020")
 
     def test_invalid(self):
         from webui.server import _relative_time
+
         assert _relative_time(None) == "—"
         assert _relative_time("not a date") == "not a date"
 
@@ -299,11 +315,14 @@ class TestRelativeTime:
 # webui._esc
 # ============================================================================
 
+
 class TestEsc:
     def test_escapes_html(self):
         from webui.server import _esc
-        assert _esc('<script>"hello"&') == '&lt;script&gt;&quot;hello&quot;&amp;'
+
+        assert _esc('<script>"hello"&') == "&lt;script&gt;&quot;hello&quot;&amp;"
 
     def test_empty(self):
         from webui.server import _esc
+
         assert _esc("") == ""

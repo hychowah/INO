@@ -5,8 +5,6 @@ Uses the session_state table in chat_history.db for storage.
 No new migration needed — session_state already exists.
 """
 
-from pathlib import Path
-
 import config
 from db.chat import get_session, set_session
 
@@ -35,9 +33,7 @@ def set_persona(name: str) -> None:
     """Set the active persona. Raises ValueError if preset doesn't exist."""
     available = get_available_personas()
     if name not in available:
-        raise ValueError(
-            f"Unknown persona {name!r}. Available: {', '.join(available)}"
-        )
+        raise ValueError(f"Unknown persona {name!r}. Available: {', '.join(available)}")
     set_session("persona", name)
 
 

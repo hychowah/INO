@@ -43,6 +43,7 @@ SCHEMA_VERSION = 11
 # Initialization & Migrations
 # ============================================================================
 
+
 def init_databases():
     """Initialize all databases with schema, then run migrations."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,12 +59,13 @@ def _init_vector_store():
     """Initialize the Qdrant vector store (best-effort — non-fatal on failure)."""
     try:
         from db.vectors import init_vector_store
+
         init_vector_store()
     except Exception as e:
         import logging
+
         logging.getLogger("learn.db").warning(
-            f"Vector store init skipped: {e}. "
-            "Semantic search will fall back to FTS5."
+            f"Vector store init skipped: {e}. Semantic search will fall back to FTS5."
         )
 
 
@@ -212,6 +214,7 @@ def _has_column(table: str, column: str, db_path=None) -> bool:
 def _run_migrations():
     """Run all pending migrations. Delegated to db.migrations module."""
     from db.migrations import _run_migrations as _do_migrations
+
     _do_migrations()
 
 
@@ -220,7 +223,7 @@ def _run_migrations():
 # ============================================================================
 
 # Regex to strip timezone offset like +08:00 / -05:30 / Z from ISO strings
-_TZ_RE = re.compile(r'([+-]\d{2}:\d{2}|Z)$')
+_TZ_RE = re.compile(r"([+-]\d{2}:\d{2}|Z)$")
 
 
 def _parse_datetime(dt) -> Optional[datetime]:
@@ -241,12 +244,12 @@ def _parse_datetime(dt) -> Optional[datetime]:
         except ValueError:
             pass
         for fmt in (
-            '%Y-%m-%d %H:%M:%S',
-            '%Y-%m-%d %H:%M:%S.%f',
-            '%Y-%m-%dT%H:%M:%S',
-            '%Y-%m-%dT%H:%M',
-            '%Y-%m-%d %H:%M',
-            '%Y-%m-%d',
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
         ):
             try:
                 return datetime.strptime(dt, fmt)
@@ -261,13 +264,13 @@ def _normalize_dt_str(dt_str: Optional[str]) -> Optional[str]:
         return dt_str
     parsed = _parse_datetime(dt_str)
     if parsed:
-        return parsed.strftime('%Y-%m-%d %H:%M:%S')
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
     return dt_str
 
 
 def _now_iso() -> str:
     """Return current time as ISO string."""
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _conn(db_path=None):

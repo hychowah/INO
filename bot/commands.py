@@ -2,22 +2,23 @@
 
 import logging
 
-import discord
 import db
-from services import pipeline
-from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
-from services.formatting import format_quiz_metadata
-from services.parser import parse_llm_response
-
-import config
-
 from bot.app import bot
 from bot.auth import authorized_only
-from bot.messages import send_long, send_long_with_view, send_review_question
 from bot.handler import (
-    _handle_user_message,
     _ensure_db,
+    _handle_user_message,
     _pending_confirmations,
+)
+from bot.messages import send_long, send_long_with_view, send_review_question
+from services import pipeline
+from services.formatting import format_quiz_metadata
+from services.parser import parse_llm_response
+from services.views import (
+    AddConceptConfirmView,
+    QuizNavigationView,
+    QuizQuestionView,
+    SuggestTopicConfirmView,
 )
 
 logger = logging.getLogger("bot")
@@ -41,11 +42,12 @@ async def learn_command(ctx, *, text: str = ""):
     try:
         async with ctx.channel.typing():
             response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
-                text or "hello", str(ctx.author))
+                text or "hello", str(ctx.author)
+            )
 
         if pending_action:
-            action_name = pending_action.get('action', '')
-            if action_name == 'suggest_topic':
+            action_name = pending_action.get("action", "")
+            if action_name == "suggest_topic":
                 view = SuggestTopicConfirmView(pending_action)
             else:
                 view = AddConceptConfirmView(pending_action)
@@ -58,8 +60,8 @@ async def learn_command(ctx, *, text: str = ""):
             view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
         elif assess_meta:
             view = QuizNavigationView(
-                concept_id=assess_meta['concept_id'],
-                quality=assess_meta['quality'],
+                concept_id=assess_meta["concept_id"],
+                quality=assess_meta["quality"],
                 message_handler=_handle_user_message,
             )
             if is_interaction:
@@ -68,13 +70,13 @@ async def learn_command(ctx, *, text: str = ""):
                 send_fn = ctx.send
             await send_long_with_view(send_fn, response, view=view)
         elif quiz_meta:
-            concept = db.get_concept(quiz_meta['concept_id'])
+            concept = db.get_concept(quiz_meta["concept_id"])
             meta = format_quiz_metadata(concept)
             meta_suffix = f"\n\n{meta}" if meta else ""
             view = None
-            if quiz_meta.get('show_skip'):
+            if quiz_meta.get("show_skip"):
                 view = QuizQuestionView(
-                    concept_id=quiz_meta['concept_id'],
+                    concept_id=quiz_meta["concept_id"],
                     message_handler=_handle_user_message,
                     show_skip=True,
                 )
@@ -126,7 +128,9 @@ async def persona_command(ctx, *, name: str = ""):
     if not name.strip():
         icons = {"mentor": "🎓", "coach": "🏋️", "buddy": "🤝"}
         descriptions = {
-            "mentor": "Calm, wise senior colleague — guides via questions, dry wit, measured enthusiasm",
+            "mentor": (
+                "Calm, wise senior colleague — guides via questions, dry wit, measured enthusiasm"
+            ),
             "coach": "Direct, results-oriented trainer — blunt feedback, action items, structured",
             "buddy": "Enthusiastic friend — casual, playful, analogies, celebrates wins loudly",
         }
@@ -137,7 +141,7 @@ async def persona_command(ctx, *, name: str = ""):
             desc = descriptions.get(p, "")
             marker = " ← active" if p == current else ""
             lines.append(f"{icon} **{p.title()}** — {desc}{marker}")
-        lines.append(f"\nSwitch with: `/persona <name>`")
+        lines.append("\nSwitch with: `/persona <name>`")
         await send_long(ctx, "\n".join(lines))
         return
 
@@ -149,9 +153,7 @@ async def persona_command(ctx, *, name: str = ""):
     try:
         db.set_persona(target)
     except ValueError:
-        await ctx.send(
-            f"Unknown persona `{target}`. Available: {', '.join(available)}"
-        )
+        await ctx.send(f"Unknown persona `{target}`. Available: {', '.join(available)}")
         return
 
     pipeline.invalidate_prompt_cache()
@@ -159,7 +161,9 @@ async def persona_command(ctx, *, name: str = ""):
 
     icons = {"mentor": "🎓", "coach": "🏋️", "buddy": "🤝"}
     icon = icons.get(target, "🎭")
-    await ctx.send(f"{icon} Switched to **{target.title()}** persona. Next message will use the new style.")
+    await ctx.send(
+        f"{icon} Switched to **{target.title()}** persona. Next message will use the new style."
+    )
 
 
 @bot.hybrid_command(name="due", description="Show concepts due for review")
@@ -170,14 +174,16 @@ async def due_command(ctx):
     stats = db.get_review_stats()
     due = db.get_due_concepts(limit=10)
 
-    lines = [f"📊 **{stats['due_now']}** due | **{stats['total_concepts']}** concepts | "
-             f"avg score **{stats['avg_mastery']}/100** | "
-             f"**{stats['reviews_last_7d']}** reviews this week\n"]
+    lines = [
+        f"📊 **{stats['due_now']}** due | **{stats['total_concepts']}** concepts | "
+        f"avg score **{stats['avg_mastery']}/100** | "
+        f"**{stats['reviews_last_7d']}** reviews this week\n"
+    ]
 
     if due:
         lines.append("**Due for review:**")
         for c in due:
-            remark = c.get('latest_remark', '')
+            remark = c.get("latest_remark", "")
             remark_str = f"\n  └ _{remark[:80]}_" if remark else ""
             lines.append(
                 f"• [concept:{c['id']}] **{c['title']}** — score {c['mastery_level']}/100, "
@@ -195,6 +201,7 @@ async def topics_command(ctx):
     """Show the topic tree with mastery stats, no LLM call."""
     _ensure_db()
     from services.tools import _handle_list_topics
+
     msg_type, result = _handle_list_topics({})
     await send_long(ctx, result)
 
@@ -234,7 +241,7 @@ async def maintain_command(ctx):
                 msg = result
                 for pfx in ("REPLY: ", "REPLY:"):
                     if msg.startswith(pfx):
-                        msg = msg[len(pfx):]
+                        msg = msg[len(pfx) :]
                 if msg.strip():
                     parts.append(f"🔧 **Maintenance**\n{msg.strip()}")
         else:
@@ -244,14 +251,14 @@ async def maintain_command(ctx):
         parts.append(f"🔧 **Maintenance** — error: `{e}`")
 
     try:
-        existing = db.get_pending_proposal('dedup')
+        existing = db.get_pending_proposal("dedup")
         if existing:
             parts.append("🔄 **Dedup** — pending proposal already exists, check your DMs")
         else:
             async with ctx.channel.typing():
                 groups = await pipeline.handle_dedup_check()
             if groups:
-                proposal_id = db.save_proposal('dedup', groups)
+                proposal_id = db.save_proposal("dedup", groups)
                 suggestion_text = format_dedup_suggestions(groups)
                 view = DedupConfirmView(proposal_id, groups)
                 parts.append(suggestion_text)
@@ -267,14 +274,15 @@ async def maintain_command(ctx):
 
     views_to_send = []
     if groups:
-        views_to_send.append(('dedup', view))
+        views_to_send.append(("dedup", view))
     if proposed_actions:
-        maint_proposal_id = db.save_proposal('maintenance', proposed_actions)
+        maint_proposal_id = db.save_proposal("maintenance", proposed_actions)
         maint_view = MaintenanceConfirmView(
-            maint_proposal_id, proposed_actions,
+            maint_proposal_id,
+            proposed_actions,
             pipeline.execute_maintenance_actions,
         )
-        views_to_send.append(('maintenance', maint_view))
+        views_to_send.append(("maintenance", maint_view))
 
     if views_to_send:
         await send_long(ctx, main_text)
@@ -327,25 +335,23 @@ async def review_command(ctx):
             cid = None
 
         if cid:
-            db.set_session('active_concept_id', str(cid))
-            db.set_session('quiz_anchor_concept_id', str(cid))
+            db.set_session("active_concept_id", str(cid))
+            db.set_session("quiz_anchor_concept_id", str(cid))
 
-        db.set_session('review_in_progress', str(cid) if cid else '1')
+        db.set_session("review_in_progress", str(cid) if cid else "1")
 
         async with ctx.channel.typing():
             from services.llm import LLMError
+
             try:
                 if cid:
                     p1_result = await pipeline.generate_quiz_question(cid)
-                    llm_response = await pipeline.package_quiz_for_discord(
-                        p1_result, cid
-                    )
+                    llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
                 else:
                     raise LLMError("No concept_id in payload", retryable=True)
             except LLMError as e:
                 logger.warning(
-                    f"Two-prompt pipeline failed ({e}), "
-                    f"falling back to single-prompt flow"
+                    f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
                 )
                 llm_response = await pipeline.call_with_fetch_loop(
                     mode="reply",
@@ -353,32 +359,32 @@ async def review_command(ctx):
                     author=str(ctx.author),
                 )
 
-            final_result = await pipeline.execute_llm_response(
-                review_text, llm_response, "reply"
-            )
+            final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
             _msg_type, response = pipeline.process_output(final_result)
             assess_meta = None
 
             if _msg_type == "reply":
                 prefix, _msg, action_data = parse_llm_response(llm_response)
-                if (action_data
-                        and action_data.get('action', '').lower().strip() == 'assess'
-                        and action_data.get('params', {}).get('quality') is not None):
+                if (
+                    action_data
+                    and action_data.get("action", "").lower().strip() == "assess"
+                    and action_data.get("params", {}).get("quality") is not None
+                ):
                     assess_meta = {
-                        'concept_id': action_data['params'].get('concept_id', cid),
-                        'quality': action_data['params']['quality'],
+                        "concept_id": action_data["params"].get("concept_id", cid),
+                        "quality": action_data["params"]["quality"],
                     }
 
         if not response or not response.strip():
             response = "Could not generate a review quiz. Try again?"
         else:
-            db.set_session('last_quiz_question', response.strip())
+            db.set_session("last_quiz_question", response.strip())
 
         if assess_meta:
             response = f"📚 **Learning Review**\n{response}"
             view = QuizNavigationView(
-                concept_id=assess_meta['concept_id'],
-                quality=assess_meta['quality'],
+                concept_id=assess_meta["concept_id"],
+                quality=assess_meta["quality"],
                 message_handler=_handle_user_message,
             )
             if is_interaction:
@@ -402,4 +408,4 @@ async def review_command(ctx):
         else:
             await ctx.send(msg)
     finally:
-        db.set_session('review_in_progress', None)
+        db.set_session("review_in_progress", None)

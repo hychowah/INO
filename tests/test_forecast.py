@@ -1,14 +1,15 @@
 """Tests for db.get_due_forecast and db.get_forecast_bucket_concepts."""
 
-import pytest
 from datetime import datetime, timedelta
 
-import db
+import pytest
 
+import db
 
 # ============================================================================
 # Helpers
 # ============================================================================
+
 
 def _add_concept(title: str, mastery: float = 50.0, days_until_due: int | None = None):
     """Add a concept and optionally set mastery and next_review_at."""
@@ -31,6 +32,7 @@ def _add_concept(title: str, mastery: float = 50.0, days_until_due: int | None =
 # ============================================================================
 # get_due_forecast — basic structure
 # ============================================================================
+
 
 class TestGetDueForecastStructure:
     def test_returns_correct_keys(self, test_db):
@@ -69,6 +71,7 @@ class TestGetDueForecastStructure:
 # get_due_forecast — empty DB
 # ============================================================================
 
+
 class TestGetDueForecastEmptyDB:
     def test_empty_db_all_zeros(self, test_db):
         res = db.get_due_forecast("weeks")
@@ -90,6 +93,7 @@ class TestGetDueForecastEmptyDB:
 # ============================================================================
 # get_due_forecast — Overdue bucket is distinct
 # ============================================================================
+
 
 class TestGetDueForecastOverdue:
     def test_overdue_concept_counted_in_overdue(self, test_db):
@@ -118,6 +122,7 @@ class TestGetDueForecastOverdue:
 # ============================================================================
 # get_due_forecast — rolling window placement
 # ============================================================================
+
 
 class TestGetDueForecastWindows:
     def test_today_concept_in_bucket_0_days(self, test_db):
@@ -156,6 +161,7 @@ class TestGetDueForecastWindows:
 # get_due_forecast — avg_mastery
 # ============================================================================
 
+
 class TestGetDueForecastAvgMastery:
     def test_avg_mastery_computed(self, test_db):
         _add_concept("A", mastery=20.0, days_until_due=0)
@@ -175,6 +181,7 @@ class TestGetDueForecastAvgMastery:
 # get_forecast_bucket_concepts
 # ============================================================================
 
+
 class TestGetForecastBucketConcepts:
     def test_overdue_bucket(self, test_db):
         cid = _add_concept("Past", mastery=30.0, days_until_due=-3)
@@ -191,7 +198,7 @@ class TestGetForecastBucketConcepts:
     def test_sorted_mastery_asc(self, test_db):
         """Concepts returned sorted by mastery_level ASC (worst first)."""
         _add_concept("High", mastery=80.0, days_until_due=0)
-        _add_concept("Low",  mastery=10.0, days_until_due=0)
+        _add_concept("Low", mastery=10.0, days_until_due=0)
         concepts = db.get_forecast_bucket_concepts("days", "0")
         masteries = [c["mastery_level"] for c in concepts]
         assert masteries == sorted(masteries)

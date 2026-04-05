@@ -1,6 +1,9 @@
 """Quick test for duplicate detection improvements."""
+
 import sys
 from pathlib import Path
+
+from services import tools
 
 # Ensure we can import from the project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,15 +27,17 @@ for a, b in pairs:
 
 print("\n=== Maintenance Duplicate Detection ===")
 d = db.get_maintenance_diagnostics()
-dupes = d['potential_duplicates']
+dupes = d["potential_duplicates"]
 print(f"Found {len(dupes)} potential duplicate(s):")
 for p in dupes:
-    a, b = p['concept_a'], p['concept_b']
-    print(f"  #{a['id']} \"{a['title']}\" <-> #{b['id']} \"{b['title']}\"")
+    a, b = p["concept_a"], p["concept_b"]
+    print(f'  #{a["id"]} "{a["title"]}" <-> #{b["id"]} "{b["title"]}"')
 
 print("\n=== Add Concept Guard Test ===")
-from services import tools
-msg_type, result = tools._handle_add_concept({'title': 'Embedded Bootloader', 'topic_titles': ['Embedded Systems']})
+
+msg_type, result = tools._handle_add_concept(
+    {"title": "Embedded Bootloader", "topic_titles": ["Embedded Systems"]}
+)
 print(f"  {msg_type}: {result}")
 
 print("\nDone.")

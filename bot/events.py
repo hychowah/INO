@@ -8,18 +8,21 @@ from discord.ext import commands
 
 import config
 import db
-from services import pipeline, scheduler
-from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
-from services.formatting import truncate_with_suffix, format_quiz_metadata
-
 from bot.app import bot
-from bot.messages import send_long, send_long_with_view
 from bot.handler import (
     _handle_user_message,
-    _pending_confirmations,
-    _ensure_db,
     _is_affirmative,
     _is_negative,
+    _pending_confirmations,
+)
+from bot.messages import send_long_with_view
+from services import scheduler
+from services.formatting import format_quiz_metadata, truncate_with_suffix
+from services.views import (
+    AddConceptConfirmView,
+    QuizNavigationView,
+    QuizQuestionView,
+    SuggestTopicConfirmView,
 )
 
 logger = logging.getLogger("bot")
@@ -47,7 +50,9 @@ async def on_ready():
 
     try:
         import threading
+
         import webui.server as webui_server
+
         webui_thread = threading.Thread(
             target=webui_server.main, kwargs={"skip_init": True}, daemon=True
         )
@@ -113,69 +118,75 @@ async def on_message(message):
         action_data, view = _pending_confirmations[message.reference.message_id]
         if not view.decided:
             reply_text = text.lower().strip()
-            action_name = action_data.get('action', '').lower().strip()
+            action_name = action_data.get("action", "").lower().strip()
             if _is_affirmative(reply_text):
                 view.decided = True
                 view._disable_all()
-                if action_name == 'suggest_topic':
+                if action_name == "suggest_topic":
                     from services.tools import execute_suggest_topic_accept
+
                     success, summary, topic_id = execute_suggest_topic_accept(action_data)
-                    title = action_data.get('params', {}).get('title', 'topic')
+                    title = action_data.get("params", {}).get("title", "topic")
                     if success:
-                        db.add_chat_message('user', f'[confirmed: add topic "{title}"]')
-                        db.add_chat_message('assistant', summary)
+                        db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
+                        db.add_chat_message("assistant", summary)
                         note = f"\n\n{summary}"
                     else:
                         note = f"\n\n⚠️ {summary}"
                 else:
                     from services.tools import execute_action
+
                     msg_type, result = execute_action(
-                        action_data.get('action', 'add_concept'),
-                        action_data.get('params', {}),
+                        action_data.get("action", "add_concept"),
+                        action_data.get("params", {}),
                     )
-                    note = f"\n\n⚠️ Could not add concept: {result}" if msg_type == 'error' \
+                    note = (
+                        f"\n\n⚠️ Could not add concept: {result}"
+                        if msg_type == "error"
                         else f"\n\n✅ {result}"
-                    if msg_type != 'error':
-                        db.add_chat_message('user', '[confirmed: add concept]')
-                        db.add_chat_message('assistant', f"✅ {result}")
+                    )
+                    if msg_type != "error":
+                        db.add_chat_message("user", "[confirmed: add concept]")
+                        db.add_chat_message("assistant", f"✅ {result}")
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(
-                        content=truncate_with_suffix(orig.content or '', note),
-                        view=view)
+                        content=truncate_with_suffix(orig.content or "", note), view=view
+                    )
                 except discord.errors.NotFound:
                     pass
                 _pending_confirmations.pop(message.reference.message_id, None)
-                await message.add_reaction('✅')
+                await message.add_reaction("✅")
                 return
             elif _is_negative(reply_text):
                 view.decided = True
                 view._disable_all()
-                if action_name == 'suggest_topic':
-                    title = action_data.get('params', {}).get('title', 'topic')
-                    db.add_chat_message('user', f'[declined: add topic "{title}"]')
+                if action_name == "suggest_topic":
+                    title = action_data.get("params", {}).get("title", "topic")
+                    db.add_chat_message("user", f'[declined: add topic "{title}"]')
                 else:
-                    db.add_chat_message('user', '[declined: add concept]')
+                    db.add_chat_message("user", "[declined: add concept]")
                 try:
                     orig = await message.channel.fetch_message(message.reference.message_id)
                     await orig.edit(view=view)
                 except discord.errors.NotFound:
                     pass
                 _pending_confirmations.pop(message.reference.message_id, None)
-                await message.add_reaction('👍')
+                await message.add_reaction("👍")
                 return
 
     try:
         async with message.channel.typing():
             response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
-                text, str(message.author))
+                text, str(message.author)
+            )
 
         if not response or not response.strip():
             response = "(empty response)"
 
         if pending_action:
-            action_name = pending_action.get('action', '')
-            if action_name == 'suggest_topic':
+            action_name = pending_action.get("action", "")
+            if action_name == "suggest_topic":
                 view = SuggestTopicConfirmView(pending_action)
             else:
                 view = AddConceptConfirmView(pending_action)
@@ -184,19 +195,19 @@ async def on_message(message):
             view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
         elif assess_meta:
             view = QuizNavigationView(
-                concept_id=assess_meta['concept_id'],
-                quality=assess_meta['quality'],
+                concept_id=assess_meta["concept_id"],
+                quality=assess_meta["quality"],
                 message_handler=_handle_user_message,
             )
             await send_long_with_view(message.reply, response, view=view)
         elif quiz_meta:
-            concept = db.get_concept(quiz_meta['concept_id'])
+            concept = db.get_concept(quiz_meta["concept_id"])
             meta = format_quiz_metadata(concept)
             meta_suffix = f"\n\n{meta}" if meta else ""
             view = None
-            if quiz_meta.get('show_skip'):
+            if quiz_meta.get("show_skip"):
                 view = QuizQuestionView(
-                    concept_id=quiz_meta['concept_id'],
+                    concept_id=quiz_meta["concept_id"],
                     message_handler=_handle_user_message,
                     show_skip=True,
                 )

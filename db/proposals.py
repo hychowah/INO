@@ -7,10 +7,9 @@ Survives bot restarts. Auto-expires after 24h (configurable).
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timedelta
 
-from db.core import KNOWLEDGE_DB, _conn, _connection, _now_iso
+from db.core import _conn, _connection, _now_iso
 
 logger = logging.getLogger("db.proposals")
 
@@ -18,9 +17,12 @@ logger = logging.getLogger("db.proposals")
 DEFAULT_EXPIRY_HOURS = 24
 
 
-def save_proposal(proposal_type: str, payload: list[dict],
-                  discord_message_id: int | None = None,
-                  expiry_hours: int = DEFAULT_EXPIRY_HOURS) -> int:
+def save_proposal(
+    proposal_type: str,
+    payload: list[dict],
+    discord_message_id: int | None = None,
+    expiry_hours: int = DEFAULT_EXPIRY_HOURS,
+) -> int:
     """Save a pending proposal to DB. Returns the proposal ID.
 
     Args:
@@ -29,15 +31,19 @@ def save_proposal(proposal_type: str, payload: list[dict],
         discord_message_id: Discord message ID for button views
         expiry_hours: hours until auto-expiry
     """
-    expires_at = (datetime.now() + timedelta(hours=expiry_hours)).strftime('%Y-%m-%d %H:%M:%S')
+    expires_at = (datetime.now() + timedelta(hours=expiry_hours)).strftime("%Y-%m-%d %H:%M:%S")
     with _connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO pending_proposals (proposal_type, payload, discord_message_id, expires_at) "
+            "INSERT INTO pending_proposals "
+            "(proposal_type, payload, discord_message_id, expires_at) "
             "VALUES (?, ?, ?, ?)",
-            (proposal_type, json.dumps(payload), discord_message_id, expires_at)
+            (proposal_type, json.dumps(payload), discord_message_id, expires_at),
         )
         proposal_id = cursor.lastrowid
-    logger.info(f"Saved {proposal_type} proposal #{proposal_id} ({len(payload)} groups, expires {expires_at})")
+    logger.info(
+        f"Saved {proposal_type} proposal #{proposal_id} "
+        f"({len(payload)} groups, expires {expires_at})"
+    )
     return proposal_id
 
 
@@ -48,24 +54,24 @@ def get_proposal(proposal_id: int) -> dict | None:
         row = conn.execute(
             "SELECT id, proposal_type, payload, discord_message_id, created_at, expires_at "
             "FROM pending_proposals WHERE id = ?",
-            (proposal_id,)
+            (proposal_id,),
         ).fetchone()
         if not row:
             return None
         # Check expiry
-        expires_at = datetime.strptime(row['expires_at'], '%Y-%m-%d %H:%M:%S')
+        expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%d %H:%M:%S")
         if datetime.now() > expires_at:
             # Expired — clean up
             conn.execute("DELETE FROM pending_proposals WHERE id = ?", (proposal_id,))
             conn.commit()
             return None
         return {
-            'id': row['id'],
-            'proposal_type': row['proposal_type'],
-            'payload': json.loads(row['payload']),
-            'discord_message_id': row['discord_message_id'],
-            'created_at': row['created_at'],
-            'expires_at': row['expires_at'],
+            "id": row["id"],
+            "proposal_type": row["proposal_type"],
+            "payload": json.loads(row["payload"]),
+            "discord_message_id": row["discord_message_id"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
         }
     finally:
         conn.close()
@@ -81,17 +87,17 @@ def get_pending_proposal(proposal_type: str) -> dict | None:
             "SELECT id, proposal_type, payload, discord_message_id, created_at, expires_at "
             "FROM pending_proposals WHERE proposal_type = ? AND expires_at > ? "
             "ORDER BY created_at DESC LIMIT 1",
-            (proposal_type, now)
+            (proposal_type, now),
         ).fetchone()
         if not row:
             return None
         return {
-            'id': row['id'],
-            'proposal_type': row['proposal_type'],
-            'payload': json.loads(row['payload']),
-            'discord_message_id': row['discord_message_id'],
-            'created_at': row['created_at'],
-            'expires_at': row['expires_at'],
+            "id": row["id"],
+            "proposal_type": row["proposal_type"],
+            "payload": json.loads(row["payload"]),
+            "discord_message_id": row["discord_message_id"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
         }
     finally:
         conn.close()
@@ -102,7 +108,7 @@ def update_proposal_message_id(proposal_id: int, discord_message_id: int):
     with _connection() as conn:
         conn.execute(
             "UPDATE pending_proposals SET discord_message_id = ? WHERE id = ?",
-            (discord_message_id, proposal_id)
+            (discord_message_id, proposal_id),
         )
 
 
@@ -117,8 +123,6 @@ def cleanup_expired():
     """Remove all expired proposals. Called periodically by scheduler."""
     now = _now_iso()
     with _connection() as conn:
-        cursor = conn.execute(
-            "DELETE FROM pending_proposals WHERE expires_at <= ?", (now,)
-        )
+        cursor = conn.execute("DELETE FROM pending_proposals WHERE expires_at <= ?", (now,))
         if cursor.rowcount > 0:
             logger.info(f"Cleaned up {cursor.rowcount} expired proposal(s)")

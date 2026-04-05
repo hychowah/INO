@@ -4,27 +4,47 @@ Maintenance diagnostics and duplicate detection.
 
 import re
 import sqlite3
-from typing import List, Dict, Any
-
-from db.core import _conn, _now_iso
 from datetime import datetime, timedelta
+from typing import Any, Dict, List
+
+from db.core import _conn
 
 DIAG_LIMIT = 20
 
 # Stop words excluded from title similarity comparison
-_STOP_WORDS = frozenset({
-    'a', 'an', 'the', 'in', 'of', 'for', 'and', 'or', 'vs', 'to', 'on',
-    'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-})
+_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "in",
+        "of",
+        "for",
+        "and",
+        "or",
+        "vs",
+        "to",
+        "on",
+        "with",
+        "by",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+    }
+)
 
 
 def _stem(word: str) -> str:
     """Minimal suffix stripping for title comparison."""
     if len(word) <= 3:
         return word
-    for suffix in ('ings', 'ing', 'tion', 'sion', 'ers', 'er', 'eds', 'ed', 'ies', 'es', 's'):
+    for suffix in ("ings", "ing", "tion", "sion", "ers", "er", "eds", "ed", "ies", "es", "s"):
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[:-len(suffix)]
+            return word[: -len(suffix)]
     return word
 
 
@@ -33,8 +53,8 @@ def _title_similarity(a: str, b: str) -> float:
     Returns 0.0–1.0. Ignores stop words, case, punctuation, and common suffixes.
     Uses max(Jaccard, containment) so "Bootloader" matches "Bootloader in
     Embedded Systems" even though Jaccard alone would be low."""
-    words_a = {_stem(w) for w in re.findall(r'[a-z0-9]+', a.lower())} - _STOP_WORDS
-    words_b = {_stem(w) for w in re.findall(r'[a-z0-9]+', b.lower())} - _STOP_WORDS
+    words_a = {_stem(w) for w in re.findall(r"[a-z0-9]+", a.lower())} - _STOP_WORDS
+    words_b = {_stem(w) for w in re.findall(r"[a-z0-9]+", b.lower())} - _STOP_WORDS
     if not words_a or not words_b:
         return 0.0
     intersection = words_a & words_b
@@ -53,12 +73,10 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
     """
     # Try vector-based discovery first
     try:
-        from db.vectors import find_nearest_concepts
         from config import SIMILARITY_THRESHOLD_RELATION
+        from db.vectors import find_nearest_concepts
 
-        all_concepts = conn.execute(
-            "SELECT id, title FROM concepts ORDER BY id"
-        ).fetchall()
+        all_concepts = conn.execute("SELECT id, title FROM concepts ORDER BY id").fetchall()
         if len(all_concepts) < 2:
             return []
 
@@ -67,7 +85,7 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
             existing = conn.execute(
                 "SELECT concept_id_low, concept_id_high FROM concept_relations"
             ).fetchall()
-            existing_pairs = {(r['concept_id_low'], r['concept_id_high']) for r in existing}
+            existing_pairs = {(r["concept_id_low"], r["concept_id_high"]) for r in existing}
         except sqlite3.OperationalError:
             existing_pairs = set()
 
@@ -76,19 +94,22 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
 
         for concept in all_concepts:
             neighbors = find_nearest_concepts(
-                concept['id'], limit=5,
+                concept["id"],
+                limit=5,
                 score_threshold=SIMILARITY_THRESHOLD_RELATION,
             )
             for neighbor in neighbors:
-                low = min(concept['id'], neighbor['id'])
-                high = max(concept['id'], neighbor['id'])
+                low = min(concept["id"], neighbor["id"])
+                high = max(concept["id"], neighbor["id"])
                 if (low, high) in existing_pairs or (low, high) in seen_pairs:
                     continue
-                candidates.append({
-                    'concept_a': {'id': concept['id'], 'title': concept['title']},
-                    'concept_b': {'id': neighbor['id'], 'title': neighbor['title']},
-                    'similarity': neighbor['score'],
-                })
+                candidates.append(
+                    {
+                        "concept_a": {"id": concept["id"], "title": concept["title"]},
+                        "concept_b": {"id": neighbor["id"], "title": neighbor["title"]},
+                        "similarity": neighbor["score"],
+                    }
+                )
                 seen_pairs.add((low, high))
                 if len(candidates) >= limit:
                     break
@@ -100,9 +121,7 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
         pass  # Fall through to FTS5-based approach
 
     # FTS5 fallback (original implementation)
-    all_concepts = conn.execute(
-        "SELECT id, title FROM concepts ORDER BY id"
-    ).fetchall()
+    all_concepts = conn.execute("SELECT id, title FROM concepts ORDER BY id").fetchall()
 
     if len(all_concepts) < 2:
         return []
@@ -114,41 +133,46 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
         existing = conn.execute(
             "SELECT concept_id_low, concept_id_high FROM concept_relations"
         ).fetchall()
-        existing_pairs = {(r['concept_id_low'], r['concept_id_high']) for r in existing}
+        existing_pairs = {(r["concept_id_low"], r["concept_id_high"]) for r in existing}
     except sqlite3.OperationalError:
         existing_pairs = set()
 
     for concept in all_concepts:
-        words = {_stem(w) for w in re.findall(r'[a-z0-9]+', concept['title'].lower())} - _STOP_WORDS
+        words = {_stem(w) for w in re.findall(r"[a-z0-9]+", concept["title"].lower())} - _STOP_WORDS
         keywords = [w for w in words if len(w) >= 3]
         if not keywords:
             continue
 
-        fts_query = ' OR '.join(f'"{kw}"' for kw in keywords[:5])
+        fts_query = " OR ".join(f'"{kw}"' for kw in keywords[:5])
         try:
-            matches = conn.execute("""
+            matches = conn.execute(
+                """
                 SELECT c.id, c.title
                 FROM concepts c
                 JOIN concepts_fts fts ON c.id = fts.rowid
                 WHERE concepts_fts MATCH ? AND c.id != ?
                 ORDER BY rank
                 LIMIT 5
-            """, (fts_query, concept['id'])).fetchall()
+            """,
+                (fts_query, concept["id"]),
+            ).fetchall()
         except sqlite3.OperationalError:
             continue
 
         for match in matches:
-            low, high = min(concept['id'], match['id']), max(concept['id'], match['id'])
+            low, high = min(concept["id"], match["id"]), max(concept["id"], match["id"])
             if (low, high) in existing_pairs or (low, high) in seen_pairs:
                 continue
 
-            sim = _title_similarity(concept['title'], match['title'])
+            sim = _title_similarity(concept["title"], match["title"])
             if sim >= 0.3:
-                candidates.append({
-                    'concept_a': {'id': concept['id'], 'title': concept['title']},
-                    'concept_b': {'id': match['id'], 'title': match['title']},
-                    'similarity': round(sim, 2),
-                })
+                candidates.append(
+                    {
+                        "concept_a": {"id": concept["id"], "title": concept["title"]},
+                        "concept_b": {"id": match["id"], "title": match["title"]},
+                        "similarity": round(sim, 2),
+                    }
+                )
                 seen_pairs.add((low, high))
 
             if len(candidates) >= limit:
@@ -163,7 +187,6 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
     """Run diagnostic queries for the maintenance agent. Surfaces issues like
     untagged concepts, empty topics, oversized topics, stale concepts, etc."""
     conn = _conn()
-    now = _now_iso()
 
     # 1. Untagged concepts (no topic link)
     untagged = conn.execute("""
@@ -198,14 +221,17 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
     """).fetchall()
 
     # 4. Stale concepts (created >14 days ago, never reviewed)
-    fourteen_days_ago = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d %H:%M:%S')
-    stale = conn.execute("""
+    fourteen_days_ago = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+    stale = conn.execute(
+        """
         SELECT c.id, c.title, c.created_at, c.review_count
         FROM concepts c
         WHERE c.review_count = 0 AND c.created_at <= ?
         ORDER BY c.created_at ASC
         LIMIT 20
-    """, (fourteen_days_ago,)).fetchall()
+    """,
+        (fourteen_days_ago,),
+    ).fetchall()
 
     # 5. Low score concepts with many reviews (struggling)
     struggling = conn.execute("""
@@ -228,18 +254,18 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
     """).fetchall()
 
     # 7. Potential duplicate concepts (word-overlap similarity)
-    all_concepts = conn.execute(
-        "SELECT id, title FROM concepts ORDER BY id"
-    ).fetchall()
+    all_concepts = conn.execute("SELECT id, title FROM concepts ORDER BY id").fetchall()
     potential_dupes = []
     concept_list = [dict(c) for c in all_concepts]
     for i, a in enumerate(concept_list):
-        for b in concept_list[i + 1:]:
-            if _title_similarity(a['title'], b['title']) >= 0.5:
-                potential_dupes.append({
-                    'concept_a': {'id': a['id'], 'title': a['title']},
-                    'concept_b': {'id': b['id'], 'title': b['title']},
-                })
+        for b in concept_list[i + 1 :]:
+            if _title_similarity(a["title"], b["title"]) >= 0.5:
+                potential_dupes.append(
+                    {
+                        "concept_a": {"id": a["id"], "title": a["title"]},
+                        "concept_b": {"id": b["id"], "title": b["title"]},
+                    }
+                )
                 if len(potential_dupes) >= DIAG_LIMIT:
                     break
         if len(potential_dupes) >= DIAG_LIMIT:
@@ -250,7 +276,8 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
     relationship_candidates = _get_relationship_candidates(conn, limit=DIAG_LIMIT)
 
     # 9. Cluttered root topics — roots with >10 direct concepts and no subtopics
-    cluttered_roots = conn.execute("""
+    cluttered_roots = conn.execute(
+        """
         SELECT t.id, t.title, COUNT(ct.concept_id) as concept_count
         FROM topics t
         JOIN concept_topics ct ON t.id = ct.topic_id
@@ -260,18 +287,20 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         HAVING concept_count > 10
         ORDER BY concept_count DESC
         LIMIT ?
-    """, (DIAG_LIMIT,)).fetchall()
+    """,
+        (DIAG_LIMIT,),
+    ).fetchall()
 
     conn.close()
 
     return {
-        'untagged_concepts': [dict(r) for r in untagged],
-        'empty_topics': [dict(r) for r in empty_topics],
-        'oversized_topics': [dict(r) for r in oversized],
-        'stale_concepts': [dict(r) for r in stale],
-        'struggling_concepts': [dict(r) for r in struggling],
-        'over_tagged_concepts': [dict(r) for r in over_tagged],
-        'potential_duplicates': potential_dupes,
-        'relationship_candidates': relationship_candidates,
-        'cluttered_root_topics': [dict(r) for r in cluttered_roots],
+        "untagged_concepts": [dict(r) for r in untagged],
+        "empty_topics": [dict(r) for r in empty_topics],
+        "oversized_topics": [dict(r) for r in oversized],
+        "stale_concepts": [dict(r) for r in stale],
+        "struggling_concepts": [dict(r) for r in struggling],
+        "over_tagged_concepts": [dict(r) for r in over_tagged],
+        "potential_duplicates": potential_dupes,
+        "relationship_candidates": relationship_candidates,
+        "cluttered_root_topics": [dict(r) for r in cluttered_roots],
     }

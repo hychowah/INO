@@ -10,8 +10,6 @@ Verifies that:
 """
 
 import asyncio
-import math
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -26,7 +24,7 @@ class _MockFollowup:
         self.calls = []
 
     async def send(self, content, view=None):
-        self.calls.append({'content': content, 'view': view})
+        self.calls.append({"content": content, "view": view})
 
 
 class _MockResponse:
@@ -34,7 +32,7 @@ class _MockResponse:
         self.calls = []
 
     async def edit_message(self, *, content=None, view=None):
-        self.calls.append({'content': content, 'view': view})
+        self.calls.append({"content": content, "view": view})
 
 
 class _MockTyping:
@@ -55,13 +53,13 @@ class _MockInteraction:
         self.followup = _MockFollowup()
         self.response = _MockResponse()
         self.channel = _MockChannel()
-        self.user = 'test-user'
-        self.message = type('Message', (), {'content': ''})()
+        self.user = "test-user"
+        self.message = type("Message", (), {"content": ""})()
 
 
 def _get_button(view: quiz_views.QuizNavigationView, label: str):
     for child in view.children:
-        if getattr(child, 'label', None) == label:
+        if getattr(child, "label", None) == label:
             return child
     raise AssertionError(f"Button not found: {label}")
 
@@ -73,27 +71,33 @@ class TestQuizAnchor:
         """quiz action stores both active_concept_id and quiz_anchor_concept_id."""
         cid = db.add_concept("Decorator Pattern", "Wraps objects")
 
-        msg_type, result = execute_action('quiz', {
-            'concept_id': cid,
-            'message': 'What is the Decorator pattern?',
-        })
+        msg_type, result = execute_action(
+            "quiz",
+            {
+                "concept_id": cid,
+                "message": "What is the Decorator pattern?",
+            },
+        )
 
-        assert msg_type == 'reply'
-        assert db.get_session('active_concept_id') == str(cid)
-        assert db.get_session('quiz_anchor_concept_id') == str(cid)
+        assert msg_type == "reply"
+        assert db.get_session("active_concept_id") == str(cid)
+        assert db.get_session("quiz_anchor_concept_id") == str(cid)
 
     def test_quiz_without_concept_id(self, test_db):
         """quiz action without concept_id doesn't set quiz_anchor."""
         # Clear any pre-existing state
-        db.set_session('active_concept_id', None)
-        db.set_session('quiz_anchor_concept_id', None)
+        db.set_session("active_concept_id", None)
+        db.set_session("quiz_anchor_concept_id", None)
 
-        msg_type, result = execute_action('quiz', {
-            'message': 'General question',
-        })
+        msg_type, result = execute_action(
+            "quiz",
+            {
+                "message": "General question",
+            },
+        )
 
-        assert msg_type == 'reply'
-        assert db.get_session('quiz_anchor_concept_id') is None
+        assert msg_type == "reply"
+        assert db.get_session("quiz_anchor_concept_id") is None
 
 
 class TestFetchGuard:
@@ -105,30 +109,30 @@ class TestFetchGuard:
         c2 = db.add_concept("Lambda Captures", "Capture variables")
 
         # Start quiz on concept 1
-        execute_action('quiz', {'concept_id': c1, 'message': 'Q?'})
-        assert db.get_session('active_concept_id') == str(c1)
-        assert db.get_session('quiz_anchor_concept_id') == str(c1)
+        execute_action("quiz", {"concept_id": c1, "message": "Q?"})
+        assert db.get_session("active_concept_id") == str(c1)
+        assert db.get_session("quiz_anchor_concept_id") == str(c1)
 
         # Fetch concept 2 (simulating LLM fetching for comparison)
-        execute_action('fetch', {'concept_id': c2})
+        execute_action("fetch", {"concept_id": c2})
 
         # active_concept_id should NOT be overwritten (quiz anchor guard)
-        assert db.get_session('active_concept_id') == str(c1)
-        assert db.get_session('quiz_anchor_concept_id') == str(c1)
+        assert db.get_session("active_concept_id") == str(c1)
+        assert db.get_session("quiz_anchor_concept_id") == str(c1)
 
     def test_fetch_without_quiz_sets_active(self, test_db):
         """Fetch with concept_id DOES set active_concept_id when no quiz anchor exists."""
         c1 = db.add_concept("Some Concept", "Desc")
 
         # Explicitly clear quiz anchor to simulate no-quiz state
-        db.set_session('quiz_anchor_concept_id', None)
-        db.set_session('active_concept_id', None)
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_id", None)
 
         # Simulate pipeline fetch loop behavior
-        if not db.get_session('quiz_anchor_concept_id'):
-            db.set_session('active_concept_id', str(c1))
+        if not db.get_session("quiz_anchor_concept_id"):
+            db.set_session("active_concept_id", str(c1))
 
-        assert db.get_session('active_concept_id') == str(c1)
+        assert db.get_session("active_concept_id") == str(c1)
 
 
 class TestAssessFallback:
@@ -140,49 +144,55 @@ class TestAssessFallback:
         c2 = db.add_concept("Lambda Captures", "Capture variables")
 
         # Simulate: quiz on c1, then active_concept_id corrupted to c2
-        db.set_session('quiz_anchor_concept_id', str(c1))
-        db.set_session('active_concept_id', str(c2))
+        db.set_session("quiz_anchor_concept_id", str(c1))
+        db.set_session("active_concept_id", str(c2))
 
         # Assess with a concept_id that doesn't exist (forces fallback)
-        msg_type, result = execute_action('assess', {
-            'concept_id': 99999,
-            'quality': 3,
-            'question_difficulty': 50,
-            'assessment': 'Partial answer',
-            'question_asked': 'What is Decorator?',
-            'user_response': 'It wraps stuff',
-            'remark': 'Needs work',
-            'message': 'OK',
-        })
+        msg_type, result = execute_action(
+            "assess",
+            {
+                "concept_id": 99999,
+                "quality": 3,
+                "question_difficulty": 50,
+                "assessment": "Partial answer",
+                "question_asked": "What is Decorator?",
+                "user_response": "It wraps stuff",
+                "remark": "Needs work",
+                "message": "OK",
+            },
+        )
 
-        assert msg_type == 'reply'
+        assert msg_type == "reply"
         # c1 should have been scored (from anchor), not c2
         concept_a = db.get_concept(c1)
-        assert concept_a['review_count'] == 1
+        assert concept_a["review_count"] == 1
 
         concept_b = db.get_concept(c2)
-        assert concept_b['review_count'] == 0
+        assert concept_b["review_count"] == 0
 
     def test_assess_with_explicit_id_ignores_fallback(self, test_db):
         """When LLM provides correct concept_id, fallback is not used."""
         c1 = db.add_concept("Decorator Pattern", "Wraps objects")
 
-        db.set_session('quiz_anchor_concept_id', str(c1))
+        db.set_session("quiz_anchor_concept_id", str(c1))
 
-        msg_type, result = execute_action('assess', {
-            'concept_id': c1,
-            'quality': 4,
-            'question_difficulty': 50,
-            'assessment': 'Good',
-            'question_asked': 'Q',
-            'user_response': 'A',
-            'remark': 'Good progress',
-            'message': 'Nice',
-        })
+        msg_type, result = execute_action(
+            "assess",
+            {
+                "concept_id": c1,
+                "quality": 4,
+                "question_difficulty": 50,
+                "assessment": "Good",
+                "question_asked": "Q",
+                "user_response": "A",
+                "remark": "Good progress",
+                "message": "Nice",
+            },
+        )
 
-        assert msg_type == 'reply'
+        assert msg_type == "reply"
         concept = db.get_concept(c1)
-        assert concept['review_count'] == 1
+        assert concept["review_count"] == 1
 
 
 class TestQuizAnchorClearing:
@@ -193,40 +203,43 @@ class TestQuizAnchorClearing:
         cid = db.add_concept("Test Concept", "Desc")
 
         # Start quiz
-        execute_action('quiz', {'concept_id': cid, 'message': 'Q?'})
-        assert db.get_session('quiz_anchor_concept_id') == str(cid)
+        execute_action("quiz", {"concept_id": cid, "message": "Q?"})
+        assert db.get_session("quiz_anchor_concept_id") == str(cid)
 
         # Assess — this goes through pipeline's clearing logic indirectly
         # but _handle_assess doesn't clear; pipeline.py does via
         # _QUIZ_CLEARING_ACTIONS.  We test the tools layer here—
         # pipeline clearing is tested in integration tests.
         # For now, verify the anchor was set correctly.
-        msg_type, _ = execute_action('assess', {
-            'concept_id': cid,
-            'quality': 4,
-            'question_difficulty': 40,
-            'remark': 'Good',
-            'message': 'Nice',
-        })
-        assert msg_type == 'reply'
+        msg_type, _ = execute_action(
+            "assess",
+            {
+                "concept_id": cid,
+                "quality": 4,
+                "question_difficulty": 40,
+                "remark": "Good",
+                "message": "Nice",
+            },
+        )
+        assert msg_type == "reply"
 
     def test_staleness_clears_anchor(self, test_db):
         """Staleness timeout clears quiz_anchor_concept_id along with active_concept_id."""
         import services.context as ctx
 
         cid = db.add_concept("Stale Concept", "Desc")
-        db.set_session('active_concept_id', str(cid))
-        db.set_session('quiz_anchor_concept_id', str(cid))
+        db.set_session("active_concept_id", str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
 
         # Simulate stale timestamp (20 min ago)
         stale_time = (datetime.now() - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
-        with patch.object(db, 'get_session_updated_at', return_value=stale_time):
+        with patch.object(db, "get_session_updated_at", return_value=stale_time):
             parts = []
             ctx._append_active_quiz_context(parts)
 
         # All quiz state should be cleared
-        assert db.get_session('active_concept_id') is None
-        assert db.get_session('quiz_anchor_concept_id') is None
+        assert db.get_session("active_concept_id") is None
+        assert db.get_session("quiz_anchor_concept_id") is None
         assert parts == []  # No context injected
 
 
@@ -241,11 +254,11 @@ class TestContextInjection:
         c2 = db.add_concept("Lambda Captures", "Capture variables")
 
         # Simulate: quiz anchor on c1, active_concept_id corrupted to c2
-        db.set_session('quiz_anchor_concept_id', str(c1))
-        db.set_session('active_concept_id', str(c2))
+        db.set_session("quiz_anchor_concept_id", str(c1))
+        db.set_session("active_concept_id", str(c2))
 
         parts = []
-        with patch.object(db, 'get_session_updated_at', return_value=None):
+        with patch.object(db, "get_session_updated_at", return_value=None):
             ctx._append_active_quiz_context(parts)
 
         assert len(parts) == 1
@@ -257,11 +270,11 @@ class TestContextInjection:
         import services.context as ctx
 
         cid = db.add_concept("Active Concept", "Desc")
-        db.set_session('active_concept_id', str(cid))
+        db.set_session("active_concept_id", str(cid))
         # No quiz_anchor_concept_id set
 
         parts = []
-        with patch.object(db, 'get_session_updated_at', return_value=None):
+        with patch.object(db, "get_session_updated_at", return_value=None):
             ctx._append_active_quiz_context(parts)
 
         assert len(parts) == 1
@@ -282,58 +295,67 @@ class TestAssessFallbackChain:
         cid = db.add_concept("Active Only", "Desc")
 
         # No anchor, only active_concept_id
-        db.set_session('quiz_anchor_concept_id', None)
-        db.set_session('active_concept_id', str(cid))
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_id", str(cid))
 
-        msg_type, _ = execute_action('assess', {
-            'concept_id': 99999,  # non-existent, forces fallback
-            'quality': 3,
-            'question_difficulty': 50,
-            'remark': 'OK',
-            'message': 'Noted',
-        })
+        msg_type, _ = execute_action(
+            "assess",
+            {
+                "concept_id": 99999,  # non-existent, forces fallback
+                "quality": 3,
+                "question_difficulty": 50,
+                "remark": "OK",
+                "message": "Noted",
+            },
+        )
 
-        assert msg_type == 'reply'
-        assert db.get_concept(cid)['review_count'] == 1
+        assert msg_type == "reply"
+        assert db.get_concept(cid)["review_count"] == 1
 
     def test_fallback3_chat_history(self, test_db):
         """Fallback 3: use chat history regex when no anchor or active."""
         cid = db.add_concept("History Concept", "Desc")
 
         # Clear all session state
-        db.set_session('quiz_anchor_concept_id', None)
-        db.set_session('active_concept_id', None)
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_id", None)
 
         # Plant a quiz marker in chat history
-        db.add_chat_message('assistant', f'quiz on concept #{cid}')
+        db.add_chat_message("assistant", f"quiz on concept #{cid}")
 
-        msg_type, _ = execute_action('assess', {
-            'concept_id': 99999,  # non-existent, forces fallback
-            'quality': 3,
-            'question_difficulty': 50,
-            'remark': 'OK',
-            'message': 'Noted',
-        })
+        msg_type, _ = execute_action(
+            "assess",
+            {
+                "concept_id": 99999,  # non-existent, forces fallback
+                "quality": 3,
+                "question_difficulty": 50,
+                "remark": "OK",
+                "message": "Noted",
+            },
+        )
 
-        assert msg_type == 'reply'
-        assert db.get_concept(cid)['review_count'] == 1
+        assert msg_type == "reply"
+        assert db.get_concept(cid)["review_count"] == 1
 
     def test_error_when_no_fallback(self, test_db):
         """Error returned when all fallbacks are exhausted."""
         # Clear all state — no anchor, no active, no chat history
-        db.set_session('quiz_anchor_concept_id', None)
-        db.set_session('active_concept_id', None)
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_id", None)
 
-        msg_type, result = execute_action('assess', {
-            'concept_id': 99999,
-            'quality': 3,
-            'question_difficulty': 50,
-            'remark': 'OK',
-            'message': 'Noted',
-        })
+        msg_type, result = execute_action(
+            "assess",
+            {
+                "concept_id": 99999,
+                "quality": 3,
+                "question_difficulty": 50,
+                "remark": "OK",
+                "message": "Noted",
+            },
+        )
 
-        assert msg_type == 'error'
-        assert 'not found' in result.lower()
+        assert msg_type == "error"
+        assert "not found" in result.lower()
 
 
 class TestFetchGuardMultiQuiz:
@@ -348,21 +370,25 @@ class TestFetchGuardMultiQuiz:
         c3 = db.add_concept("Unrelated", "C")
 
         # Start multi-quiz
-        execute_action('multi_quiz', {
-            'concept_ids': [c1, c2],
-            'message': 'Compare A and B',
-        })
+        execute_action(
+            "multi_quiz",
+            {
+                "concept_ids": [c1, c2],
+                "message": "Compare A and B",
+            },
+        )
 
-        assert db.get_session('active_concept_id') == str(c1)
-        assert db.get_session('active_concept_ids') == json.dumps([c1, c2])
+        assert db.get_session("active_concept_id") == str(c1)
+        assert db.get_session("active_concept_ids") == json.dumps([c1, c2])
 
         # Simulate pipeline fetch loop guard for c3
-        if (not db.get_session('quiz_anchor_concept_id')
-                and not db.get_session('active_concept_ids')):
-            db.set_session('active_concept_id', str(c3))
+        if not db.get_session("quiz_anchor_concept_id") and not db.get_session(
+            "active_concept_ids"
+        ):
+            db.set_session("active_concept_id", str(c3))
 
         # active_concept_id should NOT have changed
-        assert db.get_session('active_concept_id') == str(c1)
+        assert db.get_session("active_concept_id") == str(c1)
 
     def test_multi_quiz_clears_single_anchor(self, test_db):
         """Starting multi-quiz clears any pre-existing single-quiz anchor."""
@@ -371,17 +397,20 @@ class TestFetchGuardMultiQuiz:
         c3 = db.add_concept("Multi B", "B")
 
         # Start single quiz first
-        execute_action('quiz', {'concept_id': c1, 'message': 'Q?'})
-        assert db.get_session('quiz_anchor_concept_id') == str(c1)
+        execute_action("quiz", {"concept_id": c1, "message": "Q?"})
+        assert db.get_session("quiz_anchor_concept_id") == str(c1)
 
         # Now start multi-quiz — should clear single anchor
-        execute_action('multi_quiz', {
-            'concept_ids': [c2, c3],
-            'message': 'Compare',
-        })
+        execute_action(
+            "multi_quiz",
+            {
+                "concept_ids": [c2, c3],
+                "message": "Compare",
+            },
+        )
 
-        assert db.get_session('quiz_anchor_concept_id') is None
-        assert db.get_session('active_concept_id') == str(c2)
+        assert db.get_session("quiz_anchor_concept_id") is None
+        assert db.get_session("active_concept_id") == str(c2)
 
 
 class TestDeletedConceptFallback:
@@ -392,23 +421,26 @@ class TestDeletedConceptFallback:
         c1 = db.add_concept("Will Delete", "D")
         c2 = db.add_concept("Fallback Active", "F")
 
-        db.set_session('quiz_anchor_concept_id', str(c1))
-        db.set_session('active_concept_id', str(c2))
+        db.set_session("quiz_anchor_concept_id", str(c1))
+        db.set_session("active_concept_id", str(c2))
 
         # Delete the anchored concept
         db.delete_concept(c1)
 
-        msg_type, _ = execute_action('assess', {
-            'concept_id': 99999,  # forces fallback chain
-            'quality': 3,
-            'question_difficulty': 50,
-            'remark': 'OK',
-            'message': 'Noted',
-        })
+        msg_type, _ = execute_action(
+            "assess",
+            {
+                "concept_id": 99999,  # forces fallback chain
+                "quality": 3,
+                "question_difficulty": 50,
+                "remark": "OK",
+                "message": "Noted",
+            },
+        )
 
-        assert msg_type == 'reply'
+        assert msg_type == "reply"
         # c2 should have been scored via Fallback 2
-        assert db.get_concept(c2)['review_count'] == 1
+        assert db.get_concept(c2)["review_count"] == 1
 
 
 class TestQuizResponseViewDelivery:
@@ -425,22 +457,22 @@ class TestQuizResponseViewDelivery:
                 interaction,
                 "Fresh quiz",
                 lambda *_args: None,
-                quiz_meta={'concept_id': cid, 'show_skip': True},
+                quiz_meta={"concept_id": cid, "show_skip": True},
             )
 
         asyncio.run(_send())
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "Fresh quiz\n\n📖 **Fresh Quiz** · Score: 0/100 · Review #4"
-        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
-        assert sent['view'].concept_id == cid
+        assert sent["content"] == "Fresh quiz\n\n📖 **Fresh Quiz** · Score: 0/100 · Review #4"
+        assert isinstance(sent["view"], quiz_views.QuizQuestionView)
+        assert sent["view"].concept_id == cid
 
     def test_send_quiz_response_falls_back_to_session_anchor(self, test_db):
         """Legacy callers without quiz_meta still get the skip button from session state."""
         cid = db.add_concept("Fallback Quiz", "Desc")
         db.update_concept(cid, review_count=3)
-        db.set_session('quiz_anchor_concept_id', str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
 
         interaction = _MockInteraction()
 
@@ -455,15 +487,15 @@ class TestQuizResponseViewDelivery:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "Fallback quiz\n\n📖 **Fallback Quiz** · Score: 0/100 · Review #4"
-        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
-        assert sent['view'].concept_id == cid
+        assert sent["content"] == "Fallback quiz\n\n📖 **Fallback Quiz** · Score: 0/100 · Review #4"
+        assert isinstance(sent["view"], quiz_views.QuizQuestionView)
+        assert sent["view"].concept_id == cid
 
     def test_send_quiz_response_honors_explicit_no_skip(self, test_db):
         """Explicit quiz_meta with show_skip=False sends plain text and skips fallback."""
         cid = db.add_concept("No Skip Quiz", "Desc")
         db.update_concept(cid, review_count=3)
-        db.set_session('quiz_anchor_concept_id', str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
 
         interaction = _MockInteraction()
 
@@ -472,15 +504,15 @@ class TestQuizResponseViewDelivery:
                 interaction,
                 "No skip quiz",
                 lambda *_args: None,
-                quiz_meta={'concept_id': cid, 'show_skip': False},
+                quiz_meta={"concept_id": cid, "show_skip": False},
             )
 
         asyncio.run(_send())
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "No skip quiz\n\n📖 **No Skip Quiz** · Score: 0/100 · Review #4"
-        assert sent['view'] is None
+        assert sent["content"] == "No skip quiz\n\n📖 **No Skip Quiz** · Score: 0/100 · Review #4"
+        assert sent["view"] is None
 
 
 class TestQuizNavigationButtonMetadata:
@@ -493,31 +525,31 @@ class TestQuizNavigationButtonMetadata:
         captured = {}
 
         async def message_handler(text, author):
-            captured['handler_text'] = text
-            captured['handler_author'] = author
-            return "Fresh quiz", None, None, {'concept_id': cid, 'show_skip': True}
+            captured["handler_text"] = text
+            captured["handler_author"] = author
+            return "Fresh quiz", None, None, {"concept_id": cid, "show_skip": True}
 
         async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
-            captured['interaction'] = interaction_arg
-            captured['response'] = response
-            captured['message_handler'] = message_handler_arg
-            captured['quiz_meta'] = quiz_meta
+            captured["interaction"] = interaction_arg
+            captured["response"] = response
+            captured["message_handler"] = message_handler_arg
+            captured["quiz_meta"] = quiz_meta
 
         view = quiz_views.QuizNavigationView(cid, 5, message_handler)
         button = _get_button(view, "Quiz again")
 
         async def _click():
-            with patch.object(quiz_views, '_send_quiz_response', new=fake_send):
+            with patch.object(quiz_views, "_send_quiz_response", new=fake_send):
                 await button.callback(interaction)
 
         asyncio.run(_click())
 
-        assert captured['handler_text'].startswith("[BUTTON] Quiz me again")
-        assert captured['handler_author'] == 'test-user'
-        assert captured['interaction'] is interaction
-        assert captured['response'] == "Fresh quiz"
-        assert captured['message_handler'] is message_handler
-        assert captured['quiz_meta'] == {'concept_id': cid, 'show_skip': True}
+        assert captured["handler_text"].startswith("[BUTTON] Quiz me again")
+        assert captured["handler_author"] == "test-user"
+        assert captured["interaction"] is interaction
+        assert captured["response"] == "Fresh quiz"
+        assert captured["message_handler"] is message_handler
+        assert captured["quiz_meta"] == {"concept_id": cid, "show_skip": True}
 
     def test_quiz_next_due_button_passes_quiz_meta(self, test_db):
         """Next due must forward fresh quiz metadata to the sender helper."""
@@ -526,31 +558,31 @@ class TestQuizNavigationButtonMetadata:
         captured = {}
 
         async def message_handler(text, author):
-            captured['handler_text'] = text
-            captured['handler_author'] = author
-            return "Due quiz", None, None, {'concept_id': cid, 'show_skip': True}
+            captured["handler_text"] = text
+            captured["handler_author"] = author
+            return "Due quiz", None, None, {"concept_id": cid, "show_skip": True}
 
         async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
-            captured['interaction'] = interaction_arg
-            captured['response'] = response
-            captured['message_handler'] = message_handler_arg
-            captured['quiz_meta'] = quiz_meta
+            captured["interaction"] = interaction_arg
+            captured["response"] = response
+            captured["message_handler"] = message_handler_arg
+            captured["quiz_meta"] = quiz_meta
 
         view = quiz_views.QuizNavigationView(cid, 5, message_handler)
         button = _get_button(view, "Next due")
 
         async def _click():
-            with patch.object(quiz_views, '_send_quiz_response', new=fake_send):
+            with patch.object(quiz_views, "_send_quiz_response", new=fake_send):
                 await button.callback(interaction)
 
         asyncio.run(_click())
 
-        assert captured['handler_text'] == "[BUTTON] Quiz me on the next due concept"
-        assert captured['handler_author'] == 'test-user'
-        assert captured['interaction'] is interaction
-        assert captured['response'] == "Due quiz"
-        assert captured['message_handler'] is message_handler
-        assert captured['quiz_meta'] == {'concept_id': cid, 'show_skip': True}
+        assert captured["handler_text"] == "[BUTTON] Quiz me on the next due concept"
+        assert captured["handler_author"] == "test-user"
+        assert captured["interaction"] is interaction
+        assert captured["response"] == "Due quiz"
+        assert captured["message_handler"] is message_handler
+        assert captured["quiz_meta"] == {"concept_id": cid, "show_skip": True}
 
 
 class TestSkipQuizButtonRegression:
@@ -560,21 +592,26 @@ class TestSkipQuizButtonRegression:
         """After skip_quiz clears the anchor, Quiz again still shows the skip button."""
         cid = db.add_concept("Repeatable Quiz", "Desc")
         db.update_concept(cid, review_count=3)
-        db.set_session('quiz_answered', None)
-        db.set_session('quiz_anchor_concept_id', str(cid))
-        db.set_session('last_quiz_question', 'What is it?')
+        db.set_session("quiz_answered", None)
+        db.set_session("quiz_anchor_concept_id", str(cid))
+        db.set_session("last_quiz_question", "What is it?")
 
-        result = skip_quiz(cid, user_id='test-user')
-        assert 'error' not in result
-        assert db.get_session('quiz_anchor_concept_id') is None
+        result = skip_quiz(cid, user_id="test-user")
+        assert "error" not in result
+        assert db.get_session("quiz_anchor_concept_id") is None
 
         interaction = _MockInteraction()
 
         async def message_handler(_text, _author):
-            return "Fresh quiz after skip", None, None, {
-                'concept_id': cid,
-                'show_skip': True,
-            }
+            return (
+                "Fresh quiz after skip",
+                None,
+                None,
+                {
+                    "concept_id": cid,
+                    "show_skip": True,
+                },
+            )
 
         view = quiz_views.QuizNavigationView(cid, 5, message_handler)
         button = _get_button(view, "Quiz again")
@@ -586,6 +623,8 @@ class TestSkipQuizButtonRegression:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'].startswith("Fresh quiz after skip\n\n📖 **Repeatable Quiz** · Score:")
-        assert isinstance(sent['view'], quiz_views.QuizQuestionView)
-        assert sent['view'].concept_id == cid
+        assert sent["content"].startswith(
+            "Fresh quiz after skip\n\n📖 **Repeatable Quiz** · Score:"
+        )
+        assert isinstance(sent["view"], quiz_views.QuizQuestionView)
+        assert sent["view"].concept_id == cid

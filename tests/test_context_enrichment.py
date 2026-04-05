@@ -13,23 +13,22 @@ Run from the learning_agent directory:
 """
 
 import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
-from db import core as db_core
 from services.context import (
+    _format_relations_snippet,
+    _is_quiz_stale,
+    _preload_mentioned_concept,
     build_lightweight_context,
     build_prompt_context,
     build_quiz_generator_context,
-    _is_quiz_stale,
-    _format_relations_snippet,
-    _preload_mentioned_concept,
 )
 
 
@@ -37,6 +36,7 @@ from services.context import (
 def _temp_db(test_db):
     """Use conftest's test_db fixture + patch CHAT_DB on db.chat module too."""
     import db.chat as db_chat
+
     chat_path = test_db / "chat_history.db"
     original_chat_db = db_chat.CHAT_DB
     db_chat.CHAT_DB = chat_path
@@ -50,6 +50,7 @@ def _temp_db(test_db):
 def two_concepts():
     """Create two related concepts that are due for review."""
     from datetime import datetime
+
     tid = db.add_topic(title="TestTopic")
     cid1 = db.add_concept(title="Concept A", description="Desc A", topic_ids=[tid])
     cid2 = db.add_concept(title="Concept B", description="Desc B", topic_ids=[tid])
@@ -57,14 +58,14 @@ def two_concepts():
     past = (datetime.now() - timedelta(hours=1)).isoformat()
     db.update_concept(cid1, next_review_at=past)
     db.update_concept(cid2, next_review_at=past)
-    db.add_relation(cid1, cid2, relation_type="contrasts_with",
-                    note="A and B are often confused")
+    db.add_relation(cid1, cid2, relation_type="contrasts_with", note="A and B are often confused")
     return cid1, cid2, tid
 
 
 # ============================================================================
 # 1. Chat history skip for session-based providers
 # ============================================================================
+
 
 class TestChatHistorySkip:
     """Session-based providers should skip chat history on continuation turns."""
@@ -79,28 +80,28 @@ class TestChatHistorySkip:
 
     def test_session_based_continuation_skips_history(self, two_concepts):
         """On continuation turn (is_new_session=False), no 'Recent Conversation' section."""
-        db.add_chat_message('user', 'hello')
-        db.add_chat_message('assistant', 'hi there')
+        db.add_chat_message("user", "hello")
+        db.add_chat_message("assistant", "hi there")
 
-        with patch('services.llm.get_provider', return_value=self._mock_session_provider()):
+        with patch("services.llm.get_provider", return_value=self._mock_session_provider()):
             ctx = build_lightweight_context("command", is_new_session=False)
             assert "Recent Conversation" not in ctx
 
     def test_session_based_new_session_includes_history(self, two_concepts):
         """On first turn (is_new_session=True), history IS included."""
-        db.add_chat_message('user', 'hello')
-        db.add_chat_message('assistant', 'hi there')
+        db.add_chat_message("user", "hello")
+        db.add_chat_message("assistant", "hi there")
 
-        with patch('services.llm.get_provider', return_value=self._mock_session_provider()):
+        with patch("services.llm.get_provider", return_value=self._mock_session_provider()):
             ctx = build_lightweight_context("command", is_new_session=True)
             assert "Recent Conversation" in ctx
             assert "hello" in ctx
 
     def test_stateless_always_includes_history(self, two_concepts):
         """Stateless providers always get chat history regardless of is_new."""
-        db.add_chat_message('user', 'hello')
+        db.add_chat_message("user", "hello")
 
-        with patch('services.llm.get_provider', return_value=self._mock_stateless_provider()):
+        with patch("services.llm.get_provider", return_value=self._mock_stateless_provider()):
             ctx = build_lightweight_context("command", is_new_session=False)
             assert "Recent Conversation" in ctx
 
@@ -109,13 +110,14 @@ class TestChatHistorySkip:
 # 2. Due concepts show rich relation context
 # ============================================================================
 
+
 class TestDueConceptRelations:
     """Due concepts should show relation lines with scores and note snippets."""
 
     def test_due_concept_shows_relations(self, two_concepts):
         cid1, cid2, _ = two_concepts
 
-        with patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_lightweight_context("command")
             # Should show the relation line with ↳
             assert "↳" in ctx
@@ -134,19 +136,30 @@ class TestDueConceptRelations:
 # 3. Active quiz context includes relations
 # ============================================================================
 
+
 class TestQuizContextRelations:
     """Active quiz context should show relations for the quizzed concept."""
 
     def test_single_quiz_shows_relations(self, two_concepts):
         cid1, cid2, _ = two_concepts
 
-        with patch.object(db, 'get_session', side_effect=lambda k: {
-                'active_concept_id': str(cid1),
-                'active_concept_ids': None,
-                'quiz_anchor_concept_id': None,
-            }.get(k)), \
-             patch.object(db, 'get_session_updated_at', return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")), \
-             patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with (
+            patch.object(
+                db,
+                "get_session",
+                side_effect=lambda k: {
+                    "active_concept_id": str(cid1),
+                    "active_concept_ids": None,
+                    "quiz_anchor_concept_id": None,
+                }.get(k),
+            ),
+            patch.object(
+                db,
+                "get_session_updated_at",
+                return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+            patch("services.llm.get_provider", return_value=MagicMock(spec=[])),
+        ):
             ctx = build_lightweight_context("command")
             assert "Active Quiz Context" in ctx
             assert "contrasts_with" in ctx
@@ -154,15 +167,26 @@ class TestQuizContextRelations:
 
     def test_multi_quiz_shows_relations(self, two_concepts):
         import json
+
         cid1, cid2, _ = two_concepts
 
-        with patch.object(db, 'get_session', side_effect=lambda k: {
-                'active_concept_id': str(cid1),
-                'active_concept_ids': json.dumps([cid1, cid2]),
-                'quiz_anchor_concept_id': None,
-            }.get(k)), \
-             patch.object(db, 'get_session_updated_at', return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")), \
-             patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with (
+            patch.object(
+                db,
+                "get_session",
+                side_effect=lambda k: {
+                    "active_concept_id": str(cid1),
+                    "active_concept_ids": json.dumps([cid1, cid2]),
+                    "quiz_anchor_concept_id": None,
+                }.get(k),
+            ),
+            patch.object(
+                db,
+                "get_session_updated_at",
+                return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+            patch("services.llm.get_provider", return_value=MagicMock(spec=[])),
+        ):
             ctx = build_lightweight_context("command")
             assert "Active Multi-Concept Quiz" in ctx
             assert "↳" in ctx
@@ -172,36 +196,47 @@ class TestQuizContextRelations:
 # 4. Active concept detail auto-included
 # ============================================================================
 
+
 class TestActiveConceptDetail:
     """When active_concept_id is set and not stale, detail is auto-included."""
 
     def test_active_concept_included(self, two_concepts):
         cid1, cid2, _ = two_concepts
 
-        with patch.object(db, 'get_session', side_effect=lambda k: {
-                'active_concept_id': str(cid1),
-                'active_concept_ids': None,
-                'quiz_anchor_concept_id': None,
-            }.get(k)), \
-             patch.object(db, 'get_session_updated_at', return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")), \
-             patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with (
+            patch.object(
+                db,
+                "get_session",
+                side_effect=lambda k: {
+                    "active_concept_id": str(cid1),
+                    "active_concept_ids": None,
+                    "quiz_anchor_concept_id": None,
+                }.get(k),
+            ),
+            patch.object(
+                db,
+                "get_session_updated_at",
+                return_value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+            patch("services.llm.get_provider", return_value=MagicMock(spec=[])),
+        ):
             ctx = build_lightweight_context("command")
             assert "Active Concept Detail" in ctx
             assert "Concept A" in ctx
 
     def test_no_active_concept_no_section(self, two_concepts):
         """When no active concept_id, no detail section."""
-        with patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_lightweight_context("command")
             assert "Active Concept Detail" not in ctx
 
     def test_stale_concept_not_included(self, two_concepts):
         """When quiz context is stale, active concept detail is skipped."""
         cid1, _, _ = two_concepts
-        db.set_session('active_concept_id', str(cid1))
+        db.set_session("active_concept_id", str(cid1))
 
-        with patch('services.context._is_quiz_stale', return_value=True):
-            with patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with patch("services.context._is_quiz_stale", return_value=True):
+            with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
                 ctx = build_lightweight_context("command")
                 assert "Active Concept Detail" not in ctx
 
@@ -209,6 +244,7 @@ class TestActiveConceptDetail:
 # ============================================================================
 # 5. Pre-fetch by exact concept name
 # ============================================================================
+
 
 class TestPreloadMentionedConcept:
     """Exact title match should pre-load concept detail."""
@@ -241,7 +277,7 @@ class TestPreloadMentionedConcept:
 
     def test_preload_in_prompt_context(self, two_concepts):
         """build_prompt_context should include pre-loaded concept for exact match."""
-        with patch('services.llm.get_provider', return_value=MagicMock(spec=[])):
+        with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_prompt_context("Concept A", mode="command")
             assert "Pre-loaded Concept" in ctx
 
@@ -255,13 +291,16 @@ class TestPreloadMentionedConcept:
         cid1, cid2, _ = two_concepts
         # Create a concept in a completely different topic
         other_tid = db.add_topic(title="OtherTopic")
-        other_cid = db.add_concept(title="Unrelated Concept", description="Desc",
-                                   topic_ids=[other_tid])
+        db.add_concept(title="Unrelated Concept", description="Desc", topic_ids=[other_tid])
         # Set active concept to cid1 (in TestTopic)
-        db.set_session('active_concept_id', str(cid1))
-        with patch.object(db, 'get_session', side_effect=lambda k: {
-            'active_concept_id': str(cid1),
-        }.get(k)):
+        db.set_session("active_concept_id", str(cid1))
+        with patch.object(
+            db,
+            "get_session",
+            side_effect=lambda k: {
+                "active_concept_id": str(cid1),
+            }.get(k),
+        ):
             result = _preload_mentioned_concept("Unrelated Concept")
             assert result == ""
 
@@ -269,16 +308,20 @@ class TestPreloadMentionedConcept:
         """Pre-fetch is allowed when matched concept shares a topic with active concept."""
         cid1, cid2, _ = two_concepts
         # cid2 is in same topic as cid1
-        with patch.object(db, 'get_session', side_effect=lambda k: {
-            'active_concept_id': str(cid1),
-        }.get(k)):
+        with patch.object(
+            db,
+            "get_session",
+            side_effect=lambda k: {
+                "active_concept_id": str(cid1),
+            }.get(k),
+        ):
             result = _preload_mentioned_concept("Concept B")
             assert "Pre-loaded Concept" in result
             assert "Concept B" in result
 
     def test_topic_relevance_skipped_when_no_active(self, two_concepts):
         """Pre-fetch is allowed when there's no active concept in session."""
-        with patch.object(db, 'get_session', return_value=None):
+        with patch.object(db, "get_session", return_value=None):
             result = _preload_mentioned_concept("Concept A")
             assert "Pre-loaded Concept" in result
 
@@ -286,6 +329,7 @@ class TestPreloadMentionedConcept:
 # ============================================================================
 # 6. Quiz generator enriched context
 # ============================================================================
+
 
 class TestQuizGeneratorEnrichment:
     """Quiz generator should include description and reviews of related concepts."""
@@ -310,25 +354,26 @@ class TestQuizGeneratorEnrichment:
 # 7. Shared helpers
 # ============================================================================
 
+
 class TestStalenessHelper:
     """_is_quiz_stale should check staleness based on session timestamp."""
 
     def test_no_timestamp_not_stale(self):
         # No active_concept_id in session → get_session_updated_at returns None
-        with patch.object(db, 'get_session_updated_at', return_value=None):
+        with patch.object(db, "get_session_updated_at", return_value=None):
             assert _is_quiz_stale() is False
 
     def test_fresh_timestamp_not_stale(self):
         fresh_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with patch.object(db, 'get_session_updated_at', return_value=fresh_time):
+        with patch.object(db, "get_session_updated_at", return_value=fresh_time):
             assert _is_quiz_stale() is False
 
     def test_old_timestamp_is_stale(self):
-        import config
-        db.set_session('active_concept_id', '1')
+
+        db.set_session("active_concept_id", "1")
         # Simulate old timestamp by patching
         old_time = (datetime.now() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
-        with patch('db.get_session_updated_at', return_value=old_time):
+        with patch("db.get_session_updated_at", return_value=old_time):
             assert _is_quiz_stale() is True
 
 

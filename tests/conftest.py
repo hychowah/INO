@@ -6,11 +6,10 @@ Vector store init is skipped by default to avoid requiring the embedding
 model in normal tests.
 """
 
-import pytest
 from unittest.mock import patch
-from pathlib import Path
 
-import db
+import pytest
+
 from db import core
 
 
@@ -25,35 +24,43 @@ def test_db(tmp_path):
     knowledge = tmp_path / "knowledge.db"
     chat = tmp_path / "chat_history.db"
 
-    with patch.object(core, 'KNOWLEDGE_DB', knowledge), \
-         patch.object(core, 'CHAT_DB', chat), \
-         patch('db.core.KNOWLEDGE_DB', knowledge), \
-         patch('db.core.CHAT_DB', chat), \
-         patch('db.core._init_vector_store'):
+    with (
+        patch.object(core, "KNOWLEDGE_DB", knowledge),
+        patch.object(core, "CHAT_DB", chat),
+        patch("db.core.KNOWLEDGE_DB", knowledge),
+        patch("db.core.CHAT_DB", chat),
+        patch("db.core._init_vector_store"),
+    ):
         # Also patch the module-level reference that _conn() uses
-        import db.topics
-        import db.concepts
-        import db.relations
-        import db.reviews
+        import db.action_log
         import db.chat
+        import db.concepts
         import db.diagnostics
         import db.proposals
-        import db.action_log
+        import db.relations
+        import db.reviews
+        import db.topics
 
         original_knowledge = {}
         original_chat = {}
         modules_to_patch = [
-            db.topics, db.concepts, db.relations, db.reviews,
-            db.chat, db.diagnostics, db.proposals, db.action_log,
+            db.topics,
+            db.concepts,
+            db.relations,
+            db.reviews,
+            db.chat,
+            db.diagnostics,
+            db.proposals,
+            db.action_log,
         ]
 
         # Store originals and patch KNOWLEDGE_DB in modules that have it
         for mod in modules_to_patch:
-            if hasattr(mod, 'KNOWLEDGE_DB'):
+            if hasattr(mod, "KNOWLEDGE_DB"):
                 original_knowledge[mod] = mod.KNOWLEDGE_DB
 
         for mod in modules_to_patch:
-            if hasattr(mod, 'KNOWLEDGE_DB'):
+            if hasattr(mod, "KNOWLEDGE_DB"):
                 mod.KNOWLEDGE_DB = knowledge
 
         # Also patch CHAT_DB in db.chat so session_state operations use the

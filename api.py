@@ -6,7 +6,9 @@ For import (uvicorn api:app) the api/ package is used automatically.
 
 if __name__ == "__main__":
     import logging
+
     import uvicorn
+
     import config
 
     logging.basicConfig(

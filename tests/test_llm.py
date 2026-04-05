@@ -9,25 +9,25 @@ Covers:
   5. Live smoke test — optional, requires real API credentials (--live flag)
 """
 
-import sys
 import asyncio
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 import config
+import services.llm as llm_module
 from services.llm import (
-    LLMError,
     KimiCliProvider,
+    LLMError,
     OpenAICompatibleProvider,
     get_provider,
 )
-import services.llm as llm_module
-
 
 # ============================================================================
 # Helpers for OpenAICompatibleProvider tests
 # ============================================================================
+
 
 def _make_mock_client():
     """Fresh mock openai client + response per test (avoids cross-test leakage)."""
@@ -60,6 +60,7 @@ def _make_provider(mock_client, **kwargs):
 # 1. LLMError
 # ============================================================================
 
+
 class TestLLMError:
     def test_retryable_true(self):
         e = LLMError("timeout", retryable=True)
@@ -78,6 +79,7 @@ class TestLLMError:
 # ============================================================================
 # 2. KimiCliProvider
 # ============================================================================
+
 
 class TestKimiCliProvider:
     def test_instantiation_with_paths(self):
@@ -106,7 +108,7 @@ class TestKimiCliProvider:
             return "REPLY: test response"
 
         async def _test():
-            with patch.object(KimiCliProvider, '_run', mock_run):
+            with patch.object(KimiCliProvider, "_run", mock_run):
                 result = await kp.send(
                     "dynamic context here\n\nuser said: hello",
                     session="test_sess",
@@ -133,7 +135,7 @@ class TestKimiCliProvider:
             return "fixed json"
 
         async def _test():
-            with patch.object(KimiCliProvider, '_run', mock_run):
+            with patch.object(KimiCliProvider, "_run", mock_run):
                 result = await kp_bare.send("Fix this: {}", session=None, timeout=30)
             assert "Follow the instructions" not in captured["stdin"]
             assert captured["stdin"] == "Fix this: {}"
@@ -146,13 +148,16 @@ class TestKimiCliProvider:
 # 3. OpenAICompatibleProvider
 # ============================================================================
 
+
 class TestOpenAICompatibleProvider:
     def test_basic_send(self):
         mock_client, _ = _make_mock_client()
 
         async def _test():
             p = _make_provider(mock_client)
-            result = await p.send("hello", session=None, system_prompt="You are helpful.", timeout=60)
+            result = await p.send(
+                "hello", session=None, system_prompt="You are helpful.", timeout=60
+            )
             call_args = mock_client.chat.completions.create.call_args
             messages = call_args.kwargs["messages"]
             assert messages[0]["role"] == "system"
@@ -277,6 +282,7 @@ class TestOpenAICompatibleProvider:
 # 4. Provider Factory
 # ============================================================================
 
+
 class TestProviderFactory:
     @pytest.fixture(autouse=True)
     def _reset_singleton(self):
@@ -285,29 +291,33 @@ class TestProviderFactory:
         llm_module._provider_instance = None
 
     def test_kimi_provider(self):
-        with patch.object(config, 'LLM_PROVIDER', 'kimi'):
+        with patch.object(config, "LLM_PROVIDER", "kimi"):
             p = get_provider()
             assert isinstance(p, KimiCliProvider)
 
     def test_openai_compat_missing_config(self):
-        with patch.object(config, 'LLM_PROVIDER', 'openai_compat'), \
-             patch.object(config, 'LLM_API_BASE_URL', None), \
-             patch.object(config, 'LLM_API_KEY', None), \
-             patch.object(config, 'LLM_MODEL', None):
+        with (
+            patch.object(config, "LLM_PROVIDER", "openai_compat"),
+            patch.object(config, "LLM_API_BASE_URL", None),
+            patch.object(config, "LLM_API_KEY", None),
+            patch.object(config, "LLM_MODEL", None),
+        ):
             with pytest.raises(LLMError) as exc_info:
                 get_provider()
             assert not exc_info.value.retryable
 
     def test_openai_compat_valid_config(self):
-        with patch.object(config, 'LLM_PROVIDER', 'openai_compat'), \
-             patch.object(config, 'LLM_API_BASE_URL', 'https://api.test.com/v1'), \
-             patch.object(config, 'LLM_API_KEY', 'test-key'), \
-             patch.object(config, 'LLM_MODEL', 'test-model'):
+        with (
+            patch.object(config, "LLM_PROVIDER", "openai_compat"),
+            patch.object(config, "LLM_API_BASE_URL", "https://api.test.com/v1"),
+            patch.object(config, "LLM_API_KEY", "test-key"),
+            patch.object(config, "LLM_MODEL", "test-model"),
+        ):
             p = get_provider()
             assert isinstance(p, OpenAICompatibleProvider)
 
     def test_unknown_provider(self):
-        with patch.object(config, 'LLM_PROVIDER', 'invalid'):
+        with patch.object(config, "LLM_PROVIDER", "invalid"):
             with pytest.raises(LLMError, match="Unknown"):
                 get_provider()
 
@@ -315,6 +325,7 @@ class TestProviderFactory:
 # ============================================================================
 # 5. Live Smoke Test (optional — pass --live to enable)
 # ============================================================================
+
 
 @pytest.mark.skipif("--live" not in sys.argv, reason="pass --live to enable")
 class TestLiveSmoke:

@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import db
-
 from api.auth import verify_token
 
 router = APIRouter()

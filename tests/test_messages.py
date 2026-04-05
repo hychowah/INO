@@ -1,7 +1,8 @@
 """Unit tests for bot.messages low-level helpers."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from bot.messages import send_long_with_view
 

@@ -3,9 +3,10 @@ Tests for the embedding service (services/embeddings.py).
 Uses mocked sentence-transformers to avoid loading a real model.
 """
 
-import pytest
+from unittest.mock import MagicMock
+
 import numpy as np
-from unittest.mock import patch, MagicMock
+import pytest
 
 from services import embeddings
 
@@ -26,10 +27,12 @@ def _make_mock_model(dim=768):
     def fake_encode(text_or_texts, **kwargs):
         if isinstance(text_or_texts, str):
             return np.random.default_rng(hash(text_or_texts) % 2**32).random(dim).astype(np.float32)
-        return np.array([
-            np.random.default_rng(hash(t) % 2**32).random(dim).astype(np.float32)
-            for t in text_or_texts
-        ])
+        return np.array(
+            [
+                np.random.default_rng(hash(t) % 2**32).random(dim).astype(np.float32)
+                for t in text_or_texts
+            ]
+        )
 
     model.encode.side_effect = fake_encode
     return model

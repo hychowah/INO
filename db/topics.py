@@ -4,10 +4,9 @@ Topic CRUD operations, topic maps, and hierarchy queries.
 
 import logging
 import sqlite3
-from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
-from db.core import _conn, _now_iso, KNOWLEDGE_DB
+from db.core import _conn, _now_iso
 
 logger = logging.getLogger("learn.db.topics")
 
@@ -16,10 +15,12 @@ logger = logging.getLogger("learn.db.topics")
 # Vector store sync helpers (best-effort, non-fatal)
 # ============================================================================
 
+
 def _vector_upsert(topic_id: int, title: str, description: Optional[str] = None):
     """Sync a topic to the vector store. Silently skips on failure."""
     try:
         from db.vectors import upsert_topic
+
         upsert_topic(topic_id, title, description)
     except Exception as e:
         logger.debug(f"Vector upsert skipped for topic #{topic_id}: {e}")
@@ -29,6 +30,7 @@ def _vector_delete(topic_id: int):
     """Remove a topic from the vector store. Silently skips on failure."""
     try:
         from db.vectors import delete_topic
+
         delete_topic(topic_id)
     except Exception as e:
         logger.debug(f"Vector delete skipped for topic #{topic_id}: {e}")
@@ -38,15 +40,17 @@ def _vector_delete(topic_id: int):
 # Topic CRUD
 # ============================================================================
 
-def add_topic(title: str, description: Optional[str] = None,
-              parent_ids: Optional[List[int]] = None) -> int:
+
+def add_topic(
+    title: str, description: Optional[str] = None, parent_ids: Optional[List[int]] = None
+) -> int:
     """Create a topic and optionally link it as a child of parent topic(s).
     Returns the new topic ID."""
     conn = _conn()
     now = _now_iso()
     cursor = conn.execute(
         "INSERT INTO topics (title, description, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (title, description, now, now)
+        (title, description, now, now),
     )
     topic_id = cursor.lastrowid
 
@@ -56,8 +60,9 @@ def add_topic(title: str, description: Optional[str] = None,
                 continue  # skip self-link
             try:
                 conn.execute(
-                    "INSERT OR IGNORE INTO topic_relations (parent_id, child_id, created_at) VALUES (?, ?, ?)",
-                    (pid, topic_id, now)
+                    "INSERT OR IGNORE INTO topic_relations "
+                    "(parent_id, child_id, created_at) VALUES (?, ?, ?)",
+                    (pid, topic_id, now),
                 )
             except sqlite3.IntegrityError:
                 pass
@@ -82,22 +87,20 @@ def get_topic(topic_id: int) -> Optional[Dict]:
 def find_topic_by_title(title: str) -> Optional[Dict]:
     """Find a topic by exact title (case-insensitive). Returns topic dict or None."""
     conn = _conn()
-    row = conn.execute(
-        "SELECT * FROM topics WHERE LOWER(title) = LOWER(?)", (title,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM topics WHERE LOWER(title) = LOWER(?)", (title,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
 def update_topic(topic_id: int, **kwargs) -> bool:
     """Update topic fields. Returns True if topic was found."""
-    allowed = {'title', 'description'}
+    allowed = {"title", "description"}
     fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not fields:
         return False
 
-    fields['updated_at'] = _now_iso()
-    set_clause = ', '.join(f'{k} = ?' for k in fields)
+    fields["updated_at"] = _now_iso()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [topic_id]
 
     conn = _conn()
@@ -107,10 +110,10 @@ def update_topic(topic_id: int, **kwargs) -> bool:
     conn.close()
 
     # Sync title/description changes to vector store
-    if updated and ('title' in fields or 'description' in fields):
+    if updated and ("title" in fields or "description" in fields):
         topic = get_topic(topic_id)
         if topic:
-            _vector_upsert(topic_id, topic['title'], topic.get('description'))
+            _vector_upsert(topic_id, topic["title"], topic.get("description"))
 
     return updated
 
@@ -119,8 +122,9 @@ def delete_topic(topic_id: int) -> bool:
     """Delete a topic and its relation edges. Concepts that are still linked
     to other topics are preserved; orphaned concepts are also preserved."""
     conn = _conn()
-    conn.execute("DELETE FROM topic_relations WHERE parent_id = ? OR child_id = ?",
-                 (topic_id, topic_id))
+    conn.execute(
+        "DELETE FROM topic_relations WHERE parent_id = ? OR child_id = ?", (topic_id, topic_id)
+    )
     conn.execute("DELETE FROM concept_topics WHERE topic_id = ?", (topic_id,))
     cursor = conn.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
     conn.commit()
@@ -146,7 +150,8 @@ def link_topics(parent_id: int, child_id: int) -> bool:
     try:
         # Cycle detection: check if child_id is already an ancestor of parent_id.
         # If so, adding parent_id → child_id would create a cycle.
-        cycle_check = conn.execute("""
+        cycle_check = conn.execute(
+            """
             WITH RECURSIVE ancestors AS (
                 SELECT parent_id AS id FROM topic_relations WHERE child_id = ?
                 UNION ALL
@@ -155,13 +160,16 @@ def link_topics(parent_id: int, child_id: int) -> bool:
                 JOIN ancestors a ON tr.child_id = a.id
             )
             SELECT 1 FROM ancestors WHERE id = ? LIMIT 1
-        """, (parent_id, child_id)).fetchone()
+        """,
+            (parent_id, child_id),
+        ).fetchone()
         if cycle_check:
             return False  # would create cycle
 
         conn.execute(
-            "INSERT OR IGNORE INTO topic_relations (parent_id, child_id, created_at) VALUES (?, ?, ?)",
-            (parent_id, child_id, _now_iso())
+            "INSERT OR IGNORE INTO topic_relations "
+            "(parent_id, child_id, created_at) VALUES (?, ?, ?)",
+            (parent_id, child_id, _now_iso()),
         )
         conn.commit()
         return True
@@ -175,8 +183,7 @@ def unlink_topics(parent_id: int, child_id: int) -> bool:
     """Remove a parent→child edge between two topics. Returns True if it existed."""
     conn = _conn()
     cursor = conn.execute(
-        "DELETE FROM topic_relations WHERE parent_id = ? AND child_id = ?",
-        (parent_id, child_id)
+        "DELETE FROM topic_relations WHERE parent_id = ? AND child_id = ?", (parent_id, child_id)
     )
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -203,12 +210,15 @@ def get_topic_relations() -> List[Dict]:
 def get_topic_children(topic_id: int) -> List[Dict]:
     """Get child topics of a given topic."""
     conn = _conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT t.* FROM topics t
         JOIN topic_relations tr ON t.id = tr.child_id
         WHERE tr.parent_id = ?
         ORDER BY t.title
-    """, (topic_id,)).fetchall()
+    """,
+        (topic_id,),
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -216,12 +226,15 @@ def get_topic_children(topic_id: int) -> List[Dict]:
 def get_topic_parents(topic_id: int) -> List[Dict]:
     """Get parent topics of a given topic."""
     conn = _conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT t.* FROM topics t
         JOIN topic_relations tr ON t.id = tr.parent_id
         WHERE tr.child_id = ?
         ORDER BY t.title
-    """, (topic_id,)).fetchall()
+    """,
+        (topic_id,),
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -235,21 +248,25 @@ def search_topics(query: str, limit: int = 20) -> List[Dict]:
     # Try vector search first
     try:
         from db.vectors import search_similar_topics
+
         hits = search_similar_topics(query, limit=limit)
         if hits:
             ids = [h["id"] for h in hits]
             conn = _conn()
             placeholders = ",".join("?" for _ in ids)
-            rows = conn.execute(f"""
+            rows = conn.execute(
+                f"""
                 SELECT t.* FROM topics t
                 WHERE t.id IN ({placeholders})
-            """, ids).fetchall()
+            """,
+                ids,
+            ).fetchall()
             conn.close()
 
             # Preserve vector similarity ordering
             id_order = {tid: i for i, tid in enumerate(ids)}
             results = [dict(r) for r in rows]
-            results.sort(key=lambda d: id_order.get(d['id'], 999))
+            results.sort(key=lambda d: id_order.get(d["id"], 999))
             return results
     except Exception:
         pass  # Fall through to FTS5
@@ -258,20 +275,26 @@ def search_topics(query: str, limit: int = 20) -> List[Dict]:
     conn = _conn()
     try:
         fts_query = '"' + query.replace('"', '""') + '"'
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT t.* FROM topics t
             JOIN topics_fts fts ON t.id = fts.rowid
             WHERE topics_fts MATCH ?
             ORDER BY rank
             LIMIT ?
-        """, (fts_query, limit)).fetchall()
+        """,
+            (fts_query, limit),
+        ).fetchall()
     except sqlite3.OperationalError:
-        pattern = f'%{query}%'
-        rows = conn.execute("""
+        pattern = f"%{query}%"
+        rows = conn.execute(
+            """
             SELECT * FROM topics
             WHERE title LIKE ? OR description LIKE ?
             ORDER BY title LIMIT ?
-        """, (pattern, pattern, limit)).fetchall()
+        """,
+            (pattern, pattern, limit),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -279,6 +302,7 @@ def search_topics(query: str, limit: int = 20) -> List[Dict]:
 # ============================================================================
 # Topic Map (lightweight, for context building)
 # ============================================================================
+
 
 def get_topic_map() -> List[Dict]:
     """Get topic tree/DAG with summary stats per topic.
@@ -293,34 +317,40 @@ def get_topic_map() -> List[Dict]:
     parent_map = {}
     child_map = {}
     for r in relations:
-        parent_map.setdefault(r['child_id'], []).append(r['parent_id'])
-        child_map.setdefault(r['parent_id'], []).append(r['child_id'])
+        parent_map.setdefault(r["child_id"], []).append(r["parent_id"])
+        child_map.setdefault(r["parent_id"], []).append(r["child_id"])
 
-    stats = conn.execute("""
+    stats = conn.execute(
+        """
         SELECT ct.topic_id,
                COUNT(c.id) as concept_count,
                ROUND(AVG(c.mastery_level), 1) as avg_mastery,
-               SUM(CASE WHEN c.next_review_at IS NOT NULL AND c.next_review_at <= ? THEN 1 ELSE 0 END) as due_count
+               SUM(CASE WHEN c.next_review_at IS NOT NULL
+                        AND c.next_review_at <= ? THEN 1 ELSE 0 END) as due_count
         FROM concept_topics ct
         JOIN concepts c ON ct.concept_id = c.id
         GROUP BY ct.topic_id
-    """, (now,)).fetchall()
-    stats_map = {s['topic_id']: dict(s) for s in stats}
+    """,
+        (now,),
+    ).fetchall()
+    stats_map = {s["topic_id"]: dict(s) for s in stats}
 
     result = []
     for t in topics:
-        tid = t['id']
+        tid = t["id"]
         s = stats_map.get(tid, {})
-        result.append({
-            'id': tid,
-            'title': t['title'],
-            'description': t['description'],
-            'concept_count': s.get('concept_count', 0),
-            'avg_mastery': s.get('avg_mastery', 0.0),
-            'due_count': s.get('due_count', 0),
-            'parent_ids': parent_map.get(tid, []),
-            'child_ids': child_map.get(tid, []),
-        })
+        result.append(
+            {
+                "id": tid,
+                "title": t["title"],
+                "description": t["description"],
+                "concept_count": s.get("concept_count", 0),
+                "avg_mastery": s.get("avg_mastery", 0.0),
+                "due_count": s.get("due_count", 0),
+                "parent_ids": parent_map.get(tid, []),
+                "child_ids": child_map.get(tid, []),
+            }
+        )
 
     conn.close()
     return result
@@ -330,13 +360,15 @@ def get_topic_map() -> List[Dict]:
 # Hierarchical Topic Map (root-only, for compact context)
 # ============================================================================
 
+
 def get_hierarchical_topic_map() -> List[Dict]:
     """Get root topics only, with aggregated stats from entire subtree.
     Uses a recursive CTE to compute subtree membership in SQL."""
     conn = _conn()
     now = _now_iso()
 
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         WITH RECURSIVE
         roots AS (
             SELECT id FROM topics
@@ -379,7 +411,9 @@ def get_hierarchical_topic_map() -> List[Dict]:
         LEFT JOIN concepts c ON c.id = rc.concept_id
         GROUP BY t.id
         ORDER BY t.title
-    """, (now,)).fetchall()
+    """,
+        (now,),
+    ).fetchall()
     conn.close()
 
     return [dict(r) for r in rows]
