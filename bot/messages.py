@@ -55,7 +55,10 @@ async def send_long_with_view(send_fn, text: str, view=None) -> "discord.Message
     for chunk in chunks[:-1]:
         await send_fn(chunk)
 
-    sent = await send_fn(chunks[-1], view=view)
+    if view is not None:
+        sent = await send_fn(chunks[-1], view=view)
+    else:
+        sent = await send_fn(chunks[-1])
     return sent
 
 

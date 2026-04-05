@@ -257,6 +257,7 @@ Tests use **pytest**. **Activate the venv first** (see top of this file):
 ```powershell
 & .\venv\Scripts\Activate.ps1              # if not already active
 python -m pytest tests/ -v            # all tests
+python -m pytest tests/ -n auto       # parallel (~3x faster on multi-core)
 python -m pytest tests/test_llm.py -v # single file
 ```
 

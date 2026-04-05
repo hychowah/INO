@@ -181,6 +181,9 @@ If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model)
 
 ```bash
 pytest tests/ -v
+
+# Optional: parallel execution (~3x faster on multi-core machines)
+pytest tests/ -n auto
 ```
 
 Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).

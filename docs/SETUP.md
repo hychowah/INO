@@ -98,6 +98,9 @@ The application degrades gracefully if embeddings or vector storage are unavaila
 ```bash
 make test
 # equivalent to: python -m pytest tests/ -v --tb=short
+
+# Optional: parallel execution (~3x faster on multi-core machines)
+python -m pytest tests/ -n auto
 ```
 
 The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing.

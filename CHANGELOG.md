@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pytest-xdist[psutil]>=3.0` to `requirements-dev.txt` — enables parallel test execution (`pytest -n auto`); opt-in only, not added to `addopts` in `pyproject.toml`
+- `tests/test_messages.py` — unit tests for `send_long_with_view` kwarg-omission behavior (`test_send_long_with_view_omits_view_kwarg_when_none`, `test_send_long_with_view_passes_view_kwarg_when_provided`)
 - `is_quiz_active()` helper in `services/pipeline.py` — single source of truth for whether a quiz session is currently active (checks `quiz_anchor_concept_id` and `active_concept_ids` session keys)
 - `_CONFIRMABLE_ACTIONS` whitelist in `/api/chat/confirm`; the endpoint now returns HTTP 400 for any action type not in the whitelist (`add_concept`, `suggest_topic`, `add_topic`, `link_concept`)
 - 9 new tests in `tests/test_assess_no_quiz_guard.py` covering the assess-guard behavior
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.github/workflows/lint.yml` — Ruff lint CI job
 
 ### Fixed
+- `send_long_with_view()` (`bot/messages.py`) omits the `view=` kwarg entirely when `view` is `None`; Discord raises `TypeError` when `view=None` is passed explicitly
 - `assess` and `multi_assess` actions are now blocked when no quiz is active; `execute_action` in `pipeline.py` and `scripts/agent.py` returns a `REPLY:` message instead of mutating scores or logs
 - `/review` command now pre-sets `quiz_anchor_concept_id` before executing the LLM response, preventing anchor loss on the first assess turn
 - Test isolation: `db.chat.CHAT_DB` is now patched in `tests/conftest.py` alongside `db.core.CHAT_DB`, fixing leakage between test cases
