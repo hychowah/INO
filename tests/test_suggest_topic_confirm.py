@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
+import db.chat as db_chat
 from db import core as db_core
 
 # ============================================================================
@@ -30,9 +31,13 @@ from db import core as db_core
 @pytest.fixture(autouse=True)
 def _temp_db(tmp_path, monkeypatch):
     """Redirect all DB operations to a temp directory."""
+    chat_path = tmp_path / "chat_history.db"
     monkeypatch.setattr(db_core, "KNOWLEDGE_DB", tmp_path / "knowledge.db")
-    monkeypatch.setattr(db_core, "CHAT_DB", tmp_path / "chat_history.db")
+    monkeypatch.setattr(db_core, "CHAT_DB", chat_path)
     monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
+    # db.chat imports CHAT_DB by value at import time, so patch it directly
+    # so that session_state operations use the temp DB.
+    monkeypatch.setattr(db_chat, "CHAT_DB", chat_path)
     db.init_databases()
     yield
 
