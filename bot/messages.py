@@ -7,6 +7,7 @@ import db
 
 import config
 from services.views import QuizQuestionView, should_show_quiz_skip_button
+from services.formatting import format_quiz_metadata
 
 
 def _split_message(text: str, limit: int = config.MAX_MESSAGE_LENGTH) -> list[str]:
@@ -68,6 +69,7 @@ async def send_review_question(send_fn,
                                message_handler: Callable[..., Awaitable]) -> "discord.Message":
     """Send a review question and attach the skip button when eligible."""
     view = None
+    concept = None
 
     if concept_id is not None:
         concept = db.get_concept(concept_id)
@@ -78,4 +80,6 @@ async def send_review_question(send_fn,
                 show_skip=True,
             )
 
-    return await send_long_with_view(send_fn, f"📚 **Learning Review**\n{question}", view=view)
+    meta = format_quiz_metadata(concept)
+    meta_suffix = f"\n\n{meta}" if meta else ""
+    return await send_long_with_view(send_fn, f"📚 **Learning Review**\n{question}{meta_suffix}", view=view)

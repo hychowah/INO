@@ -432,7 +432,7 @@ class TestQuizResponseViewDelivery:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "Fresh quiz"
+        assert sent['content'] == "Fresh quiz\n\n📖 **Fresh Quiz** · Score: 0/100 · Review #4"
         assert isinstance(sent['view'], quiz_views.QuizQuestionView)
         assert sent['view'].concept_id == cid
 
@@ -455,7 +455,7 @@ class TestQuizResponseViewDelivery:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "Fallback quiz"
+        assert sent['content'] == "Fallback quiz\n\n📖 **Fallback Quiz** · Score: 0/100 · Review #4"
         assert isinstance(sent['view'], quiz_views.QuizQuestionView)
         assert sent['view'].concept_id == cid
 
@@ -479,7 +479,7 @@ class TestQuizResponseViewDelivery:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "No skip quiz"
+        assert sent['content'] == "No skip quiz\n\n📖 **No Skip Quiz** · Score: 0/100 · Review #4"
         assert sent['view'] is None
 
 
@@ -586,6 +586,6 @@ class TestSkipQuizButtonRegression:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent['content'] == "Fresh quiz after skip"
+        assert sent['content'].startswith("Fresh quiz after skip\n\n📖 **Repeatable Quiz** · Score:")
         assert isinstance(sent['view'], quiz_views.QuizQuestionView)
         assert sent['view'].concept_id == cid

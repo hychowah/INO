@@ -143,7 +143,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 ## 8. Discord Formatting
 
-**Discord 2000-char overflow:** `formatting.py` provides `truncate_for_discord()` and `truncate_with_suffix()`. Convention: `config.MAX_MESSAGE_LENGTH=1900` for initial sends, `formatting.DISCORD_CHAR_LIMIT=2000` for edits/appends.
+**Discord 2000-char overflow:** `formatting.py` provides `truncate_for_discord()`, `truncate_with_suffix()`, and `format_quiz_metadata()`. Convention: `config.MAX_MESSAGE_LENGTH=1900` for initial sends, `formatting.DISCORD_CHAR_LIMIT=2000` for edits/appends.
 
 **View truncation:** `send_long_with_view()` splits text at newline boundaries, sends all chunks except last as plain messages, attaches view to final chunk. Replaced 5 silent `[:1900]` truncation sites in `bot.py`.
 
@@ -359,12 +359,14 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call. The Discord button's `clicked` flag also prevents duplicate button presses.
 
-**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` tells callers whether to attach a `QuizQuestionView`. `learn_command` and `on_message` used it correctly for initial quiz delivery. A later regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed by passing `quiz_meta` through `_send_quiz_response()`. `Explain` remains plain-text by design.
+**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` has two roles: (1) when `show_skip=True`, attach a `QuizQuestionView` with the skip button; (2) any non-None `quiz_meta` triggers `format_quiz_metadata()` being appended to the message footer. The delivery-path guard was widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py` so that all quiz deliveries — not only skip-eligible ones — receive the metadata footer. A prior regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed by passing `quiz_meta` through `_send_quiz_response()`. `Explain` remains plain-text by design.
 
 **Synthetic remark & LLM continuity:** `skip_quiz()` writes a synthetic remark (`"[Skipped — user indicated prior knowledge]"`) to preserve the LLM's strategy context. `quiz.md` instructs the LLM to probe skipped concepts more rigorously on next encounter.
 
 **Session cleanup:** `skip_quiz()` clears `last_quiz_question`, `last_assess_concept_id`, `last_assess_quality`, and `pending_review` to prevent stale state from interfering with subsequent interactions.
 
-**Delivery-path parity fix:** The manual `/review` command already attached `QuizQuestionView` when `review_count >= 2`, but scheduler-triggered review DMs originally sent plain text only. Both manual and scheduler review-question delivery now route through `bot.messages.send_review_question()`, so timer-triggered quizzes and manual reviews attach the skip button with the same eligibility rule and message-splitting behavior.
+**Delivery-path parity fix:** The manual `/review` command already attached `QuizQuestionView` when `review_count >= 2`, but scheduler-triggered review DMs originally sent plain text only. Both manual and scheduler review-question delivery now route through `bot.messages.send_review_question()`, so timer-triggered quizzes and manual reviews attach the skip button with the same eligibility rule, message-splitting behavior, and metadata footer.
 
-**Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, `QuizQuestionView` attachment), `data/skills/quiz.md` (LLM skip guidance).
+**Quiz message metadata:** Every quiz question message now includes a bot-injected footer line produced by `format_quiz_metadata()` (in `services/formatting.py`): `📖 **{title}** · Score: N/100 · Review #N`. When `review_count < 2`, a hint `_(skip unlocks after N more review(s))_` is also appended. This is injected by the bot layer — the LLM does not generate it.
+
+**Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`, `_send_quiz_response`), `services/formatting.py` (`format_quiz_metadata`), `bot/messages.py` (`send_review_question`, appends metadata + skip button), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, widened `elif quiz_meta:` guard), `data/skills/quiz.md` (LLM skip guidance).

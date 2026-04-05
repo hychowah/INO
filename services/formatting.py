@@ -55,3 +55,25 @@ def truncate_with_suffix(
     # Truncate original to make room for suffix + ellipsis
     available = max_len - len(suffix) - 1  # -1 for the '…'
     return original[:available] + "…" + suffix
+
+
+def format_quiz_metadata(concept: dict | None) -> str:
+    """Return a compact metadata line for a quiz question message.
+
+    Shows concept title, mastery score, and which review number this is.
+    For the first two reviews (before the skip button unlocks), appends a
+    hint explaining when the skip button will appear.
+
+    Returns an empty string when concept is None so callers can safely
+    use ``f"\\n\\n{meta}" if meta else ""`` without special-casing.
+    """
+    if not concept:
+        return ""
+    title = concept.get('title') or '?'
+    mastery = concept.get('mastery_level', 0) if concept.get('mastery_level') is not None else 0
+    count = concept.get('review_count', 0) if concept.get('review_count') is not None else 0
+    line = f"📖 **{title}** · Score: {mastery}/100 · Review #{count + 1}"
+    if count < 2:
+        remaining = 2 - count
+        line += f"\n_(skip unlocks after {remaining} more review(s))_"
+    return line

@@ -148,7 +148,7 @@ After you assess a quiz answer, Discord may render navigation buttons below the 
 - `Next due` — move to the next due concept
 - `Explain` — ask for a plain-language explanation without scoring
 
-Eligible quiz questions may also show an `I know this` skip button when the concept has `review_count >= 2`.
+All quiz question messages include a bot-injected metadata line showing the concept title, current score, and which review number this is. For concepts where `review_count < 2`, a hint is also shown indicating how many more reviews until the skip button unlocks. The `I know this ⏭️` skip button then appears once `review_count >= 2`.
 
 If you later see skipped review history for that concept (for example a synthetic `[Skipped]` answer with strong recall), treat it as a confidence claim rather than proof. Verify with a harder application or synthesis question before fully trusting it.
 

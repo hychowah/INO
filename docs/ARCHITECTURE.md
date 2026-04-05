@@ -94,6 +94,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
+| `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
 | `webui/server.py` | ~220 | Zero-dependency HTTP server — routing, Handler class, static file serving, forecast routes |

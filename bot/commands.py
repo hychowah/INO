@@ -5,7 +5,8 @@ import logging
 import discord
 import db
 from services import pipeline
-from services.views import AddConceptConfirmView, QuizNavigationView, SuggestTopicConfirmView
+from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
+from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
 
 import config
@@ -66,17 +67,22 @@ async def learn_command(ctx, *, text: str = ""):
             else:
                 send_fn = ctx.send
             await send_long_with_view(send_fn, response, view=view)
-        elif quiz_meta and quiz_meta.get('show_skip'):
-            view = QuizQuestionView(
-                concept_id=quiz_meta['concept_id'],
-                message_handler=_handle_user_message,
-                show_skip=True,
-            )
+        elif quiz_meta:
+            concept = db.get_concept(quiz_meta['concept_id'])
+            meta = format_quiz_metadata(concept)
+            meta_suffix = f"\n\n{meta}" if meta else ""
+            view = None
+            if quiz_meta.get('show_skip'):
+                view = QuizQuestionView(
+                    concept_id=quiz_meta['concept_id'],
+                    message_handler=_handle_user_message,
+                    show_skip=True,
+                )
             if is_interaction:
                 send_fn = ctx.interaction.followup.send
             else:
                 send_fn = ctx.send
-            await send_long_with_view(send_fn, response, view=view)
+            await send_long_with_view(send_fn, response + meta_suffix, view=view)
         else:
             await send_long(ctx, response)
     except Exception as e:

@@ -70,6 +70,7 @@ ROOT
 │   ├── llm.py             # LLM provider abstraction (kimi-cli, OpenAI-compat)
 │   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
 │   ├── state.py           # Shared mutable state (avoids circular imports)
+│   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
 │   └── kimi.py            # kimi-cli specific helpers

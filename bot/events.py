@@ -10,7 +10,7 @@ import config
 import db
 from services import pipeline, scheduler
 from services.views import AddConceptConfirmView, QuizNavigationView, QuizQuestionView, SuggestTopicConfirmView
-from services.formatting import truncate_with_suffix
+from services.formatting import truncate_with_suffix, format_quiz_metadata
 
 from bot.app import bot
 from bot.messages import send_long, send_long_with_view
@@ -189,13 +189,18 @@ async def on_message(message):
                 message_handler=_handle_user_message,
             )
             await send_long_with_view(message.reply, response, view=view)
-        elif quiz_meta and quiz_meta.get('show_skip'):
-            view = QuizQuestionView(
-                concept_id=quiz_meta['concept_id'],
-                message_handler=_handle_user_message,
-                show_skip=True,
-            )
-            await send_long_with_view(message.reply, response, view=view)
+        elif quiz_meta:
+            concept = db.get_concept(quiz_meta['concept_id'])
+            meta = format_quiz_metadata(concept)
+            meta_suffix = f"\n\n{meta}" if meta else ""
+            view = None
+            if quiz_meta.get('show_skip'):
+                view = QuizQuestionView(
+                    concept_id=quiz_meta['concept_id'],
+                    message_handler=_handle_user_message,
+                    show_skip=True,
+                )
+            await send_long_with_view(message.reply, response + meta_suffix, view=view)
         else:
             await send_long_with_view(message.reply, response)
 

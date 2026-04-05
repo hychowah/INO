@@ -12,7 +12,7 @@ import discord
 
 import db
 from services.dedup import execute_dedup_merges
-from services.formatting import truncate_for_discord, truncate_with_suffix
+from services.formatting import truncate_for_discord, truncate_with_suffix, format_quiz_metadata
 
 logger = logging.getLogger("views")
 
@@ -778,29 +778,50 @@ async def _send_quiz_response(interaction: discord.Interaction,
         if quiz_cid is not None and quiz_meta.get('show_skip'):
             concept = db.get_concept(int(quiz_cid))
             if should_show_quiz_skip_button(concept):
+                meta = format_quiz_metadata(concept)
+                meta_suffix = f"\n\n{meta}" if meta else ""
                 view = QuizQuestionView(
                     concept_id=int(quiz_cid),
                     message_handler=message_handler,
                     show_skip=True,
                 )
                 await interaction.followup.send(
-                    truncate_for_discord(response), view=view)
+                    truncate_for_discord(response + meta_suffix), view=view)
                 return
+            # show_skip=True but not yet eligible — reuse already-fetched concept
+            meta = format_quiz_metadata(concept)
+            meta_suffix = f"\n\n{meta}" if meta else ""
+            await interaction.followup.send(truncate_for_discord(response + meta_suffix))
+            return
 
-        await interaction.followup.send(truncate_for_discord(response))
+        # show_skip=False: fetch concept for metadata only
+        if quiz_cid is not None:
+            concept = db.get_concept(int(quiz_cid))
+            meta = format_quiz_metadata(concept)
+            meta_suffix = f"\n\n{meta}" if meta else ""
+        else:
+            meta_suffix = ""
+        await interaction.followup.send(truncate_for_discord(response + meta_suffix))
         return
 
     quiz_cid = db.get_session('quiz_anchor_concept_id')
     if quiz_cid:
         concept = db.get_concept(int(quiz_cid))
         if should_show_quiz_skip_button(concept):
+            meta = format_quiz_metadata(concept)
+            meta_suffix = f"\n\n{meta}" if meta else ""
             view = QuizQuestionView(
                 concept_id=int(quiz_cid),
                 message_handler=message_handler,
                 show_skip=True,
             )
             await interaction.followup.send(
-                truncate_for_discord(response), view=view)
+                truncate_for_discord(response + meta_suffix), view=view)
             return
+        # session anchor exists but skip not eligible yet — still add metadata
+        meta = format_quiz_metadata(concept)
+        meta_suffix = f"\n\n{meta}" if meta else ""
+        await interaction.followup.send(truncate_for_discord(response + meta_suffix))
+        return
 
     await interaction.followup.send(truncate_for_discord(response))
