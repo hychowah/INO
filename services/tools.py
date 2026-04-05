@@ -703,6 +703,7 @@ from services.tools_assess import (  # noqa: E402
     _handle_multi_quiz,
     _handle_quiz,
     _handle_suggest_topic,
+    execute_suggest_topic_accept,
 )
 
 ACTION_HANDLERS = {
