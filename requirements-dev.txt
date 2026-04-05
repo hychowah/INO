@@ -7,5 +7,6 @@ anyio[trio]>=4.0
 httpx>=0.23
 pytest>=7.0
 pytest-anyio>=0.0.0
+pytest-cov>=4.0
 pytest-xdist[psutil]>=3.0
-ruff>=0.4
+ruff==0.15.9
