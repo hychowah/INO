@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `is_quiz_active()` helper in `services/pipeline.py` — single source of truth for whether a quiz session is currently active (checks `quiz_anchor_concept_id` and `active_concept_ids` session keys)
 - `_CONFIRMABLE_ACTIONS` whitelist in `/api/chat/confirm`; the endpoint now returns HTTP 400 for any action type not in the whitelist (`add_concept`, `suggest_topic`, `add_topic`, `link_concept`)
 - 9 new tests in `tests/test_assess_no_quiz_guard.py` covering the assess-guard behavior
+- `LOG_LEVEL` env var in `.env` — controls log verbosity for `bot.py` (default: `INFO`; set to `DEBUG` to enable `[quiz_anchor]` and pipeline trace logs)
+- `[quiz_anchor]` debug log lines in `services/context.py` (staleness check), `services/tools_assess.py` (anchor SET), and `services/pipeline.py` (anchor CLEAR + blocked-assess detail); visible when `LOG_LEVEL=DEBUG`
 
 ### Fixed
 - Missing `QuizQuestionView` import in `bot/commands.py` (caused a `NameError` on skip-eligible `/learn` quiz deliveries)
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `assess` and `multi_assess` actions are now blocked when no quiz is active; `execute_action` in `pipeline.py` and `scripts/agent.py` returns a `REPLY:` message instead of mutating scores or logs
 - `/review` command now pre-sets `quiz_anchor_concept_id` before executing the LLM response, preventing anchor loss on the first assess turn
 - Test isolation: `db.chat.CHAT_DB` is now patched in `tests/conftest.py` alongside `db.core.CHAT_DB`, fixing leakage between test cases
+- `_is_quiz_stale()` (`services/context.py`) compared `datetime.now()` (local time) against SQLite `CURRENT_TIMESTAMP` (UTC); in UTC+8 this caused every quiz to appear ~8 hours stale immediately after creation, clearing the quiz anchor and blocking all `assess` actions — fixed by switching to `datetime.now(timezone.utc).replace(tzinfo=None)`
 
 ### Changed
 - `.github/workflows/tests.yml` — installs dev dependencies from `requirements-dev.txt`

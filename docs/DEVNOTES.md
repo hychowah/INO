@@ -370,3 +370,15 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 **Quiz message metadata:** Every quiz question message now includes a bot-injected footer line produced by `format_quiz_metadata()` (in `services/formatting.py`): `📖 **{title}** · Score: N/100 · Review #N`. When `review_count < 2`, a hint `_(skip unlocks after N more review(s))_` is also appended. This is injected by the bot layer — the LLM does not generate it.
 
 **Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`, `_send_quiz_response`), `services/formatting.py` (`format_quiz_metadata`), `bot/messages.py` (`send_review_question`, appends metadata + skip button), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, widened `elif quiz_meta:` guard), `data/skills/quiz.md` (LLM skip guidance).
+
+---
+
+## 19. SQLite Timestamp Timezone Trap
+
+**Bug:** `_is_quiz_stale()` compared `datetime.now()` (local time) against `session_state.updated_at`, which SQLite stores as UTC via `CURRENT_TIMESTAMP`. In non-UTC timezones (e.g. UTC+8) every quiz appeared ~8 hours stale immediately on creation, clearing the quiz anchor and blocking all `assess` actions — so scores never updated.
+
+**Fix:** Changed to `datetime.now(timezone.utc).replace(tzinfo=None)` — a UTC-naive datetime matching SQLite's UTC output.
+
+**Rule:** SQLite `CURRENT_TIMESTAMP` and `datetime('now')` always return **UTC**. Any Python comparison against these columns must use `datetime.now(timezone.utc).replace(tzinfo=None)`, never bare `datetime.now()`. Other DB timestamps in this codebase are written by Python's `datetime.now()` (local) and compared locally — that is consistent. Only `session_state.updated_at` is written by SQLite directly.
+
+**Affected file:** `services/context.py` (`_is_quiz_stale`).

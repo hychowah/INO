@@ -33,6 +33,7 @@ def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     if cid is not None:
         db.set_session("active_concept_id", str(cid))
         db.set_session("quiz_anchor_concept_id", str(cid))
+        logger.debug(f"[quiz_anchor] SET to concept #{cid} by _handle_quiz")
         message += f"\n_(quiz on concept #{cid})_"
 
     return ("reply", message)

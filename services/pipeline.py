@@ -291,7 +291,9 @@ async def execute_action(action_data: dict) -> str:
     if action in ("assess", "multi_assess") and not is_quiz_active():
         logger.warning(
             f"[pipeline] Blocked '{action}' -- no active quiz. "
-            f"concept_id={params.get('concept_id')} quality={params.get('quality')}"
+            f"concept_id={params.get('concept_id')} quality={params.get('quality')} "
+            f"| anchor={db.get_session('quiz_anchor_concept_id')!r} "
+            f"active_ids={db.get_session('active_concept_ids')!r}"
         )
         return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
 
@@ -316,9 +318,14 @@ async def execute_action(action_data: dict) -> str:
     # Clear active quiz context when the LLM chose a non-quiz action
     # (quiz cycle complete, or intent shifted). See module-level constant.
     if action in _QUIZ_CLEARING_ACTIONS and msg_type != "error":
+        anchor_before = db.get_session("quiz_anchor_concept_id")
         db.set_session("active_concept_id", None)
         db.set_session("active_concept_ids", None)
         db.set_session("quiz_anchor_concept_id", None)
+        logger.debug(
+            f"[quiz_anchor] CLEARED by action='{action}' "
+            f"(anchor was {anchor_before!r})"
+        )
 
     if msg_type == "error":
         return f"REPLY: ⚠️ {result}"

@@ -10,7 +10,7 @@ Verifies that:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import db
@@ -231,8 +231,8 @@ class TestQuizAnchorClearing:
         db.set_session("active_concept_id", str(cid))
         db.set_session("quiz_anchor_concept_id", str(cid))
 
-        # Simulate stale timestamp (20 min ago)
-        stale_time = (datetime.now() - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+        # Simulate stale timestamp (20 min ago, UTC — matches _is_quiz_stale comparison)
+        stale_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
         with patch.object(db, "get_session_updated_at", return_value=stale_time):
             parts = []
             ctx._append_active_quiz_context(parts)

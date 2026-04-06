@@ -79,6 +79,9 @@ LEARN_API_SECRET_KEY=choose-a-secret-token
 
 # Spaced repetition interval tuning (optional)
 # LEARN_SR_INTERVAL_EXPONENT=0.05    # interval = e^(score×K): score=50→~12d, score=100→~148d
+
+# Logging (optional)
+# LOG_LEVEL=INFO    # Set to DEBUG to enable verbose [quiz_anchor] and pipeline trace logs
 ```
 
 See `.env.example` for the complete variable reference.

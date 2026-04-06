@@ -6,15 +6,26 @@ All bot logic lives in the bot/ package.
 
 import io
 import logging
+import os
 import sys
+from pathlib import Path
 
 # Fix Windows console encoding before anything else
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
+# Load .env early so LOG_LEVEL (and other vars) are available before config import
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).parent / ".env", override=True)
+except ImportError:
+    pass
+
+_log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
@@ -45,7 +56,10 @@ def main():
         sys.exit(1)
 
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Starting learning bot... data dir: {config.DATA_DIR}")
+    logger.info(
+        f"Starting learning bot... data dir: {config.DATA_DIR} "
+        f"[log level: {logging.getLevelName(_log_level)}]"
+    )
 
     try:
         bot.run(config.BOT_TOKEN, log_handler=None)

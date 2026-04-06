@@ -7,12 +7,15 @@ Separated from tools.py (action handlers) and agent.py (CLI).
 """
 
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import config
 import db
+
+logger = logging.getLogger("context")
 
 
 def _read_file(path: Path) -> str:
@@ -210,12 +213,10 @@ def _is_quiz_stale() -> bool:
         return False
     try:
         updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
-        elapsed = (datetime.now() - updated_at).total_seconds() / 60
+        elapsed = (datetime.now(timezone.utc).replace(tzinfo=None) - updated_at).total_seconds() / 60
         return elapsed > timeout_minutes
     except (ValueError, TypeError):
-        import logging as _log
-
-        _log.getLogger("context").warning(
+        logger.warning(
             f"Failed to parse quiz timestamp '{updated_at_str}', treating as stale."
         )
         return True
@@ -241,10 +242,16 @@ def _append_active_quiz_context(parts: list) -> None:
     import json as _json
 
     # --- Staleness timeout safety net ---
-    if _is_quiz_stale():
+    anchor_cid_pre = db.get_session("quiz_anchor_concept_id")
+    stale = _is_quiz_stale()
+    logger.debug(
+        f"[quiz_anchor] Staleness check — anchor={anchor_cid_pre!r}, stale={stale}"
+    )
+    if stale:
         db.set_session("active_concept_id", None)
         db.set_session("active_concept_ids", None)
         db.set_session("quiz_anchor_concept_id", None)
+        logger.debug("[quiz_anchor] CLEARED by staleness check")
         return
 
     # Check for multi-concept quiz first
