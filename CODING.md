@@ -68,8 +68,7 @@ ROOT
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── llm.py             # LLM provider abstraction (kimi-cli, OpenAI-compat)
-│   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
-│   ├── state.py           # Shared mutable state (avoids circular imports)
+│   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)    ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning│   ├── state.py           # Shared mutable state (avoids circular imports)
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
@@ -145,6 +144,7 @@ from db.core import _conn, _now_iso, KNOWLEDGE_DB
 | `services/pipeline.py` | **Async** (orchestration) | Awaits LLM provider |
 | `services/llm.py` | **Async** (`send()`) | Network I/O to LLM |
 | `services/dedup.py`, `repair.py` | **Async** | Call LLM provider |
+| `services/backup.py` | **Sync** | File I/O + sqlite3 only |
 | `bot.py`, `api.py`, `scheduler.py` | **Async** | Event loops |
 
 **Rule of thumb:** If it calls the LLM → async. Everything else → sync.

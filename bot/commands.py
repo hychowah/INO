@@ -1,5 +1,6 @@
 """Discord slash/hybrid command handlers."""
 
+import asyncio
 import logging
 
 import db
@@ -11,6 +12,7 @@ from bot.handler import (
     _pending_confirmations,
 )
 from bot.messages import send_long, send_long_with_view, send_review_question
+from services import backup as backup_service
 from services import pipeline
 from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
@@ -409,3 +411,23 @@ async def review_command(ctx):
             await ctx.send(msg)
     finally:
         db.set_session("review_in_progress", None)
+
+
+@bot.hybrid_command(
+    name="backup",
+    description="Run a manual backup of all databases and vector store now",
+)
+@authorized_only()
+async def backup_command(ctx):
+    """Manually trigger a full backup-and-prune cycle."""
+    is_interaction = ctx.interaction is not None
+    if is_interaction:
+        await ctx.interaction.response.defer(ephemeral=False)
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, backup_service.run_backup_cycle)
+
+    if is_interaction:
+        await ctx.interaction.followup.send(f"🗄️ {result}")
+    else:
+        await ctx.send(f"🗄️ {result}")

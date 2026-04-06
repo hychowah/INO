@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `services/backup.py` — new backup service; snapshots `knowledge.db`, `chat_history.db`, and `data/vectors/` into a timestamped subdirectory under `backups/` (or `LEARN_BACKUP_DIR`); prunes snapshots older than `LEARN_BACKUP_RETENTION_DAYS` (default: 7); atomic write pattern ensures no partial backup is left on failure
+- `/backup` slash command in `bot/commands.py` — on-demand backup for the authorized user; defers interaction, runs `backup_service.run_backup_cycle()` in a thread executor, replies with snapshot name and pruned count
+- Scheduled backup in `services/scheduler.py` — `run_backup_cycle()` runs unconditionally on every 24-hour maintenance cycle, after maintenance and dedup passes
+- `close_client()` in `db/vectors.py` — safely closes the Qdrant singleton before file copy to avoid Windows file-lock conflicts; client re-initializes lazily on next use
+- `LEARN_BACKUP_DIR` env var (`config.py`) — overrides the backup output directory (default: `backups/` inside the project root)
+- `LEARN_BACKUP_RETENTION_DAYS` env var (`config.py`) — sets snapshot retention window in days (default: `7`, minimum: `1`)
 - `format_quiz_metadata(concept)` in `services/formatting.py` — returns a compact metadata footer (`📖 **Title** · Score: N/100 · Review #N`) appended to all quiz question messages; includes a skip-unlock hint when `review_count < 2`
 - Quiz question messages now show concept title, mastery score, and review count on every delivery (scheduled DM, `/review`, `/learn`, button-triggered quiz)
 - `pytest-xdist[psutil]>=3.0` to `requirements-dev.txt` — enables parallel test execution (`pytest -n auto`); opt-in only, not added to `addopts` in `pyproject.toml`

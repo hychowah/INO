@@ -41,6 +41,21 @@ def _get_client():
     return _client
 
 
+def close_client():
+    """Close and release the Qdrant client singleton.
+
+    Call this before copying the vector store directory to avoid file-lock
+    conflicts on Windows. The client is re-initialized lazily on next use.
+    """
+    global _client
+    if _client is not None:
+        try:
+            _client.close()
+        except Exception as e:
+            logger.warning(f"[VECTORS] Failed to close Qdrant client cleanly: {e}")
+        _client = None
+
+
 def init_vector_store():
     """Initialize Qdrant collections if they don't exist.
 

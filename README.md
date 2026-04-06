@@ -17,6 +17,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
 - **Web dashboard** — Zero-dependency read-only HTTP UI with interactive D3.js topic tree and force-directed graph
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
+- **Automated data backup** — Scheduled 24-hour snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Configurable personas** — Buddy / Coach / Mentor presets loaded from Markdown files
 - **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
 
@@ -163,6 +164,8 @@ For `kimi`, the CLI backend is used instead of the OpenAI-compatible settings ab
 | `LEARN_LLM_MAX_HISTORY_TOKENS` | `40000` | Max chat history tokens sent to LLM |
 | `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
+| `LEARN_BACKUP_DIR` | `backups/` _(project root)_ | Directory for backup snapshots |
+| `LEARN_BACKUP_RETENTION_DAYS` | `7` | Days to retain backups (min: 1) |
 
 See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
 
@@ -212,6 +215,7 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 │   ├── parser.py           # LLM response parsing
 │   ├── embeddings.py       # Sentence-transformers singleton
 │   ├── dedup.py            # Duplicate detection (vector + fuzzy)
+│   ├── backup.py           # Snapshot backup service (DB + vectors)
 │   └── ...
 ├── db/                     # Database package (SQLite + Qdrant)
 │   ├── core.py             # Connections, schema init
@@ -223,6 +227,7 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 ├── data/
 │   ├── skills/             # Modular LLM skill files (hot-reloadable)
 │   └── personas/           # Persona presets (buddy, coach, mentor)
+├── backups/                # Timestamped backup snapshots (git-ignored)
 ├── webui/                  # Zero-dependency web dashboard
 │   ├── server.py           # HTTP server + routing
 │   ├── helpers.py          # HTML helpers (extracted from server.py)

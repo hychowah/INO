@@ -18,6 +18,7 @@ The bot is the primary user-facing interface. All commands require the calling u
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
 | `/maintain` | Run the automated knowledge-base maintenance agent. |
+| `/backup` | Create an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's chat history. |
 | `/ping` | Check that the bot is alive. |
 | `/sync` | (Admin) Sync slash commands with Discord. |
@@ -200,4 +201,6 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
 | `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.05`); `interval_days = e^(score × exponent)` |
+| `LEARN_BACKUP_DIR` | Directory for backup snapshots (default: `backups/` inside project root) |
+| `LEARN_BACKUP_RETENTION_DAYS` | Number of days of backup snapshots to retain before pruning (default: `7`, minimum: `1`) |
 | `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |

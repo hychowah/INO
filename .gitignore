@@ -26,6 +26,9 @@ data/
 Thumbs.db
 .DS_Store
 
+# Backups
+backups/
+
 # Testing / coverage
 .pytest_cache/
 .ruff_cache/

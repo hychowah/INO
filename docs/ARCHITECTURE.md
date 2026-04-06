@@ -87,7 +87,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
 | `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
-| `bot/commands.py` | ~280 | Slash command implementations (`/learn`, `/review`, `/maintain`, etc.) |
+| `bot/commands.py` | ~435 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
@@ -118,7 +118,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/reviews.py` | ~100 | Review log, remarks |
 | `db/chat.py` | ~105 | Chat history, session state |
 | `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity; vector nearest-neighbor for relation candidates |
-| `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all` |
+| `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
 | `services/pipeline.py` | ~675 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
@@ -127,7 +127,8 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/kimi.py` | ~83 | Thin subprocess wrapper around kimi-cli (the only subprocess in the system) |
-| `services/scheduler.py` | ~200 | Background task — review checks every 15 min, maintenance every 24 h |
+| `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
+| `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/dedup/backup every 24 h |
 | `services/state.py` | ~10 | Shared mutable state (e.g. `last_activity_at`) between bot and scheduler |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
@@ -304,6 +305,28 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          └── DM user: "🔧 Knowledge Base Maintenance\n<report>"
 ```
 
+```
+  (same 24h cycle, after maintenance)
+         │
+         ▼
+  scheduler._check_dedup()           ← dedup sub-agent; proposes merges via DM
+
+         │
+         ▼ (after dedup — captures post-maintenance DB state)
+  scheduler._check_backup()
+         │
+         └── backup_service.run_backup_cycle()   ← in thread executor
+               ├── perform_backup()  → backups/TIMESTAMP_microseconds/
+               │       ├── knowledge.db  (sqlite3.Connection.backup)
+               │       ├── chat_history.db
+               │       └── vectors/      (shutil.copytree; Qdrant client closed first)
+               └── prune_old_backups()  → deletes dirs > BACKUP_RETENTION_DAYS
+
+         │
+         ▼
+  db.cleanup_expired_proposals()
+```
+
 ### Flow 4: Web UI (read-only)
 
 ```
@@ -465,6 +488,7 @@ The core brain of the system. Coordinates everything:
 - Review check: every 15 minutes (configurable), calls `pipeline.handle_review_check()` → sends quiz DMs
 - **Suppresses reviews** when user has been active within `SESSION_TIMEOUT_MINUTES` to avoid interrupting conversations
 - Maintenance: every 24 hours, calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
+- Backup: every 24 hours (same cycle as maintenance), calls `backup_service.run_backup_cycle()` via thread executor — runs after dedup, before proposal cleanup
 
 ### agent.py — CLI (not used by bot)
 - Standalone entry point for testing: `python agent.py --mode=command --input="quiz me"`
@@ -655,6 +679,24 @@ This creates a self-improving loop entirely through prompt instructions — no c
 
 ---
 
+## Backup Storage
+
+Created at runtime under `config.BACKUP_DIR` (default: `<project root>/backups/`).
+Each run of `services/backup.run_backup_cycle()` produces one timestamped subdirectory:
+
+```
+backups/
+└── 2026-04-06_14-30-00_123456/
+    ├── knowledge.db        # SQLite online-backup copy (sqlite3.Connection.backup())
+    ├── chat_history.db     # SQLite online-backup copy
+    └── vectors/            # shutil.copytree of data/vectors/ (Qdrant client closed first)
+```
+
+Directories older than `BACKUP_RETENTION_DAYS` (default: 7) are pruned automatically
+after each run. The `backups/` directory is `.gitignore`d and never committed.
+
+---
+
 ## Configuration Summary
 
 | Setting | Default | Source |
@@ -676,3 +718,5 @@ This creates a self-improving loop entirely through prompt instructions — no c
 | Vector search limit | 10 | `LEARN_VECTOR_SEARCH_LIMIT` / config.py |
 | Dedup similarity threshold | 0.92 | `LEARN_SIM_DEDUP` / config.py |
 | Relation similarity threshold | 0.50 | `LEARN_SIM_RELATION` / config.py |
+| Backup directory | `backups/` (repo root) | `LEARN_BACKUP_DIR` / config.py |
+| Backup retention | 7 days | `LEARN_BACKUP_RETENTION_DAYS` / config.py |

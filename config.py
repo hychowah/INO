@@ -82,6 +82,16 @@ MAX_GRAPH_NODES = int(os.environ.get("LEARN_MAX_GRAPH_NODES", "500"))
 SR_INTERVAL_EXPONENT = float(os.environ.get("LEARN_SR_INTERVAL_EXPONENT", "0.075"))
 
 # ============================================================================
+# BACKUP SETTINGS
+# ============================================================================
+
+# Directory where timestamped backup snapshots are stored
+BACKUP_DIR = Path(os.environ.get("LEARN_BACKUP_DIR", str(BASE_DIR / "backups")))
+
+# Number of daily backups to retain before pruning (minimum 1 enforced)
+BACKUP_RETENTION_DAYS = max(1, int(os.environ.get("LEARN_BACKUP_RETENTION_DAYS", "7")))
+
+# ============================================================================
 # VECTOR STORE SETTINGS (hybrid search)
 # ============================================================================
 

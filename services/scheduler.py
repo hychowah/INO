@@ -20,6 +20,7 @@ import discord
 import config
 import db
 from bot.messages import send_review_question
+from services import backup as backup_service
 from services import pipeline
 from services.dedup import format_dedup_suggestions
 from services.formatting import truncate_for_discord
@@ -395,6 +396,14 @@ async def _send_maintenance_report(diagnostic_context: str):
         logger.error(f"Error sending maintenance report: {e}", exc_info=True)
 
 
+async def _check_backup():
+    """Run a full backup-and-prune cycle (non-blocking via thread executor)."""
+    logger.info("[BACKUP] Running scheduled backup...")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, backup_service.run_backup_cycle)
+    logger.info(f"[BACKUP] {result}")
+
+
 async def _check_dedup():
     """Run the dedup sub-agent to find potential duplicates.
     Now proposal-only: stores suggestions in DB and DMs user with buttons."""
@@ -489,6 +498,12 @@ async def _loop():
                 await _check_dedup()
             except Exception as e:
                 logger.error(f"Dedup loop error: {e}", exc_info=True)
+
+            # Backup runs after dedup — captures post-maintenance DB state
+            try:
+                await _check_backup()
+            except Exception as e:
+                logger.error(f"Backup loop error: {e}", exc_info=True)
 
             # Clean up expired proposals
             try:

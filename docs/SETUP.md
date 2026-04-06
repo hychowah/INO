@@ -77,6 +77,10 @@ LEARN_API_SECRET_KEY=choose-a-secret-token
 # LEARN_DB_PATH=data/knowledge.db
 # LEARN_CHAT_DB_PATH=data/chat_history.db
 
+# Backup settings (optional)
+# LEARN_BACKUP_DIR=backups              # Directory for timestamped backup snapshots (default: backups/)
+# LEARN_BACKUP_RETENTION_DAYS=7        # Number of days to keep old backups before pruning (minimum: 1)
+
 # Spaced repetition interval tuning (optional)
 # LEARN_SR_INTERVAL_EXPONENT=0.05    # interval = e^(score×K): score=50→~12d, score=100→~148d
 
@@ -164,6 +168,7 @@ INO/
 ├── bot.py              # Discord bot entry point
 ├── api.py              # FastAPI backend entry point
 ├── config.py           # Shared configuration and env-var loading
+├── backups/            # Runtime-generated — timestamped backup snapshots (git-ignored)
 ├── db/                 # SQLite database access layer
 ├── services/           # Core business logic (pipeline, tools, tools_assess, context, …)
 ├── webui/              # Read-only web dashboard
@@ -199,6 +204,7 @@ INO/
 | `/topics` | Show the current topic hierarchy and knowledge map. |
 | `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |
 | `/maintain` | Run manual maintenance diagnostics and cleanup suggestions. |
+| `/backup` | Run an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's saved chat history. |
 | `/sync` | Admin command to sync slash commands with Discord. |
 
