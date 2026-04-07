@@ -628,3 +628,41 @@ class TestSkipQuizButtonRegression:
         )
         assert isinstance(sent["view"], quiz_views.QuizQuestionView)
         assert sent["view"].concept_id == cid
+
+    def test_skip_button_callback_updates_session_and_navigation(self, test_db):
+        """Clicking the skip button uses skip_quiz and returns navigation controls."""
+        cid = db.add_concept("Callback Skip", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session("quiz_answered", None)
+        db.set_session("quiz_anchor_concept_id", str(cid))
+        db.set_session("last_quiz_question", "What do you already know?")
+
+        async def message_handler(_text, _author):
+            return "unused", None, None, None
+
+        interaction = _MockInteraction()
+        view = quiz_views.QuizQuestionView(
+            concept_id=cid,
+            message_handler=message_handler,
+            show_skip=True,
+        )
+        button = _get_button(view, "I know this")
+
+        async def _click():
+            await button.callback(interaction)
+
+        asyncio.run(_click())
+
+        assert len(interaction.response.calls) == 1
+        assert interaction.response.calls[0]["view"] is view
+        assert all(child.disabled for child in view.children)
+
+        assert len(interaction.followup.calls) == 1
+        sent = interaction.followup.calls[0]
+        assert sent["content"].startswith("⏭️ Skipped — score:")
+        assert isinstance(sent["view"], quiz_views.QuizNavigationView)
+        assert sent["view"].concept_id == cid
+
+        assert db.get_session("quiz_anchor_concept_id") is None
+        assert db.get_session("quiz_answered") == "1"
+        assert db.get_session("last_assess_concept_id") == str(cid)

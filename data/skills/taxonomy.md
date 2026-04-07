@@ -83,7 +83,7 @@ When moving a topic under a new parent:
 
 ## Action Budget
 
-You have up to 15 actions per run. Prioritize:
+Routine scheduler runs use up to 15 actions per run. Operator-triggered rebuild workflows may grant a higher budget; always honor the explicit remaining-action budget shown in the prompt. Prioritize:
 1. **High-value groupings** — clustering 3+ scattered root topics under a clear parent
 2. **Clear reparenting** — moving a topic that obviously belongs under an existing parent
 3. **Renames** — only for genuinely ambiguous titles (require approval anyway)

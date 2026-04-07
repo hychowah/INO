@@ -776,7 +776,7 @@ class _QuizSkipButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        from services.tools import skip_quiz
+        from services.tools_assess import skip_quiz
 
         try:
             result = skip_quiz(

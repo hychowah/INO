@@ -297,13 +297,12 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
                     ▼
   scheduler._send_maintenance_report(context)
          │
-         ├── pipeline.call_with_fetch_loop(    ← LLM triages issues
-         │       "[MAINTENANCE] Triage these DB issues..."
-         │   )
-         │
-         ├── pipeline.execute_llm_response(    ← LLM may fix something
-         │       llm_response
-         │   )
+         ├── pipeline.call_maintenance_loop(context)
+         │       └── pipeline.call_action_loop(
+         │              mode="maintenance",
+         │              safe_actions=SAFE_MAINTENANCE_ACTIONS,
+         │              max_actions=5
+         │          )
          │
          └── DM user: "🔧 Knowledge Base Maintenance\n<report>"
 ```
@@ -364,7 +363,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /api/topics    → JSON: full topic map
          └── /api/due       → JSON: due concepts
          │
-         └── All read directly from db.py
+         └── All read directly from the db/ package
              (no pipeline, no LLM — pure DB ➜ HTML)
 ```
 
@@ -393,10 +392,13 @@ concepts
   ├── description
   ├── mastery_level    (0–100, score-based)
   ├── ease_factor      (float, frozen — not used)
-  ├── interval_days    (exponential: e^(score×0.05))
+  ├── interval_days    (exponential: e^(score×SR_INTERVAL_EXPONENT), default 0.075)
   ├── next_review_at   (ISO datetime)
   ├── last_reviewed_at
   ├── review_count
+  ├── remark_summary
+  ├── remark_updated_at
+  ├── last_quiz_generator_output
   ├── created_at
   └── updated_at
 
@@ -418,6 +420,23 @@ review_log (audit trail of every quiz interaction)
   ├── quality        (0–5, LLM-assessed)
   ├── llm_assessment
   └── reviewed_at
+
+concept_relations (symmetric concept-to-concept edges)
+  ├── id (PK)
+  ├── concept_id_low  → concepts.id
+  ├── concept_id_high → concepts.id
+  ├── relation_type
+  ├── strength
+  ├── note
+  └── created_at
+
+pending_proposals (DB-backed confirmation queue)
+  ├── id (PK)
+  ├── proposal_type
+  ├── payload
+  ├── discord_message_id
+  ├── created_at
+  └── expires_at
 ```
 
 ### chat_history.db
@@ -488,9 +507,9 @@ conversations
 ### services/pipeline.py — Orchestrator
 The core brain of the system. Coordinates everything:
 
-1. **`call_with_fetch_loop(mode, text, author)`** — Main entry point. Builds context, calls kimi-cli, handles fetch loop (up to 3 iterations), returns final LLM response string.
+1. **`call_with_fetch_loop(mode, text, author)`** — Main entry point. Builds context, calls the active LLM provider, handles fetch loop (up to 3 iterations), returns final LLM response string.
 2. **`execute_llm_response(user_input, llm_response, mode)`** — Parses the LLM response, executes any action, saves chat history. Returns prefixed result string.
-3. **`_call_kimi(mode, text, author, extra_context)`** — Assembles the prompt (file refs + dynamic context), calls `kimi.run_kimi()`, extracts the action from raw output.
+3. **`_call_llm(mode, text, author, extra_context)`** — Assembles the prompt (file refs + dynamic context), calls `provider.send()`, extracts the action from raw output.
 4. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
 5. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
 6. **Parsing utilities** — `parse_llm_response()`, `extract_llm_action()`, `process_output()`.
@@ -526,7 +545,7 @@ The core brain of the system. Coordinates everything:
 - Interactive topic tree with expand/collapse, search/filter, and subtree stats
 - Topic detail pages with breadcrumb navigation and child topic cards
 - Computes aggregated subtree stats (own + total concepts) via post-order DFS
-- Imports `db.py` directly — completely independent of the bot/pipeline
+- Imports the `db/` package directly — completely independent of the bot/pipeline
 
 ---
 
@@ -580,8 +599,8 @@ Replaced SM-2 with an asymmetric score system (0–100). See DEVNOTES.md §3 for
   - Correct: score increases (bigger gain for harder questions)
   - Wrong + above level: no penalty (probe)
   - Wrong + at/below level: proportional decrease
-- **`tools.py`** writes the review log and updates score/interval via `db.add_review()`
-- **Interval:** `max(1, round(e^(score × 0.05)))` — exponential spacing
+- **`services/tools_assess.py`** writes the review log and updates score/interval via `db.add_review()` and `db.update_concept()`
+- **Interval:** `max(1, round(e^(score × config.SR_INTERVAL_EXPONENT)))` — exponential spacing (default exponent `0.075`)
 
 Initial values for new concepts: score=0, interval=1 day. `ease_factor` column frozen (not used).
 
@@ -740,7 +759,7 @@ backup model without requiring administrator privileges.
 | Max Discord message | 1900 chars | config.py |
 | Web UI port | 8050 | webui/server.py |
 | Static assets | `webui/static/` | webui/server.py |
-| Data directory | `learning_agent/data/` | db.py |
+| Data directory | `learning_agent/data/` | config.py |
 | Vector store path | `data/vectors/` | `LEARN_VECTOR_STORE_PATH` / config.py |
 | Embedding model | `all-mpnet-base-v2` | `LEARN_EMBEDDING_MODEL` / config.py |
 | Vector search limit | 10 | `LEARN_VECTOR_SEARCH_LIMIT` / config.py |

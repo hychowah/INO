@@ -67,12 +67,12 @@ When `execute_action()` gets an "Unknown action" error, it calls `repair_action(
 - **Wrong + gap > 0:** NO decrease (probe above user's level)
 - **Wrong + gap ≤ 0:** proportional decrease (actual regression)
 
-**Score → interval:** `interval_days = max(1, round(e^(score × SR_INTERVAL_EXPONENT)))` where `SR_INTERVAL_EXPONENT` defaults to `0.05` (env var `LEARN_SR_INTERVAL_EXPONENT`, set in `config.py`)
+**Score → interval:** `interval_days = max(1, round(e^(score × SR_INTERVAL_EXPONENT)))` where `SR_INTERVAL_EXPONENT` defaults to `0.075` (env var `LEARN_SR_INTERVAL_EXPONENT`, set in `config.py`)
 
 | Score | Interval | Score | Interval |
 |-------|----------|-------|----------|
-| 0 | 1 day | 50 | 12 days |
-| 25 | 3 days | 75 | 43 days |
+| 0 | 1 day | 50 | 43 days |
+| 25 | 7 days | 75 | 277 days |
 
 **Score delta constants:**
 ```
@@ -183,12 +183,14 @@ Safety net in `process_output()`: if output has no recognized prefix but contain
 
 ## 11. Modular Skill Loading
 
-Split monolithic `AGENTS.md` (~690 lines) into `data/skills/` (4 files, conditional per mode):
+Split monolithic `AGENTS.md` (~690 lines) into `data/skills/` (mode-specific files with conditional loading):
 
 ```
 interactive (COMMAND/REPLY) → core + quiz + knowledge
 review (REVIEW-CHECK)       → core + quiz
 maintenance (MAINTENANCE)   → core + maintenance + knowledge
+quiz-packaging              → core + quiz
+taxonomy (TAXONOMY-MODE)    → taxonomy
 ```
 
 `pipeline.py`: `SKILL_SETS` dict → `_mode_to_skill_set()` → `_get_base_prompt(skill_set)` with per-file mtime hot-reload. Cache keyed on `(persona, skill_set)`.
@@ -375,7 +377,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Design — button-only, not an LLM action:**
 
-The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButton`), calling `tools.skip_quiz()` directly. It is **not** registered in `ACTION_HANDLERS` because the LLM should never autonomously skip a quiz — only the user presses the button.
+The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButton`), calling `services.tools_assess.skip_quiz()` directly. It is **not** registered in `ACTION_HANDLERS` because the LLM should never autonomously skip a quiz — only the user presses the button.
 
 **Scoring:** Uses the same quality=5 algorithm as a normal perfect answer. A synthetic `question_difficulty = min(100, current_score + 10)` is used since no actual question was assessed. This gives `base_gain=7` plus a gap-proportional bonus (`gap * 0.15`), typically ~8.5 points — identical to what a real quality-5 assessment would yield.
 

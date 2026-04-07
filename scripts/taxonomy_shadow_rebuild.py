@@ -538,6 +538,7 @@ def _orchestrate(args: argparse.Namespace) -> int:
                 "preview-internal",
                 "--result-file",
                 str(preview_file),
+                *( ["--conservative"] if not args.aggressive else [] ),
                 "--max-actions",
                 str(args.max_actions),
                 "--continuation-context-limit",

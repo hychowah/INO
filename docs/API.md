@@ -94,7 +94,7 @@ Any other action returns HTTP **400**:
 | `GET` | `/api/topics/{id}` | Get a single topic with its concepts. |
 | `POST` | `/api/topics` | Create a new topic. |
 | `PUT` | `/api/topics/{id}` | Update a topic name or parent. |
-| `DELETE` | `/api/topics/{id}` | Delete a topic (`?force=true` to delete with concepts). |
+| `DELETE` | `/api/topics/{id}` | Delete a topic (`?force=true` to delete even when it still has concepts or child topics). |
 | `POST` | `/api/topics/link` | Link two topics (parent → child). |
 | `POST` | `/api/topics/unlink` | Remove a parent → child link. |
 
@@ -102,7 +102,7 @@ Any other action returns HTTP **400**:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/concepts` | List concepts (filterable by `topic_id`, `search`, `limit`). |
+| `GET` | `/api/concepts` | List concepts (filterable by `topic_id`, `search`, `page`, `per_page`; returns a paginated `items`/`total` envelope). |
 | `GET` | `/api/concepts/{id}` | Get a single concept with remarks. |
 | `POST` | `/api/concepts` | Create a new concept. |
 | `PUT` | `/api/concepts/{id}` | Update a concept. |
@@ -121,12 +121,12 @@ Any other action returns HTTP **400**:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/reviews` | List review history (filterable by `concept_id`, `limit`). |
+| `GET` | `/api/reviews` | List review history (`concept_id` required; optional `limit` from 1 to 200). |
 | `GET` | `/api/reviews/next` | Get the next concept due for review. |
 | `GET` | `/api/due` | Get concepts due for review (`?limit=10`). |
 | `GET` | `/api/stats` | Aggregate knowledge-base statistics. |
-| `GET` | `/api/actions` | Action log with optional filters (`user`, `type`, `since`, `limit`, `page`). |
-| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `depth`). |
+| `GET` | `/api/actions` | Action log with optional filters (`action`, `source`, `page`, `per_page`). |
+| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`). |
 
 ### Persona
 
@@ -201,7 +201,7 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_API_SECRET_KEY` | Bearer token for the REST API |
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
-| `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.05`); `interval_days = e^(score × exponent)` |
+| `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.075`); `interval_days = e^(score × exponent)` |
 | `LEARN_BACKUP_DIR` | Directory for backup snapshots (default: `backups/` inside project root) |
 | `LEARN_BACKUP_RETENTION_DAYS` | Number of days of backup snapshots to retain before pruning (default: `7`, minimum: `1`) |
 | `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |

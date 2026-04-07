@@ -82,7 +82,7 @@ LEARN_API_SECRET_KEY=choose-a-secret-token
 # LEARN_BACKUP_RETENTION_DAYS=7        # Number of days to keep old backups before pruning (minimum: 1)
 
 # Spaced repetition interval tuning (optional)
-# LEARN_SR_INTERVAL_EXPONENT=0.05    # interval = e^(score×K): score=50→~12d, score=100→~148d
+# LEARN_SR_INTERVAL_EXPONENT=0.075   # interval = e^(score×K); tune cautiously because growth is exponential
 
 # Logging (optional)
 # LOG_LEVEL=INFO    # Set to DEBUG to enable verbose [quiz_anchor] and pipeline trace logs
@@ -118,7 +118,7 @@ The test suite uses mocked LLM responses and an in-memory SQLite database — no
 
 ```bash
 # Check for lint errors
-make lint        # ruff check .
+make lint        # ruff check . && ruff format --check .
 
 # Auto-format code
 make format      # ruff format .
@@ -174,7 +174,7 @@ INO/
 ├── webui/              # Read-only web dashboard
 │   ├── server.py       # HTTP server + routing
 │   ├── helpers.py      # HTML helpers (extracted from server.py)
-│   ├── pages.py        # Page renderers (extracted from server.py)
+│   ├── pages/          # Page renderer package (dashboard, topics, concepts, reviews, activity, graph)
 │   └── static/         # JS and CSS assets
 ├── data/
 │   ├── skills/         # LLM skill files (hot-reloadable)

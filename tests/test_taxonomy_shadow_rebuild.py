@@ -89,6 +89,42 @@ def test_call_taxonomy_loop_forwards_overrides(monkeypatch):
     assert captured["preamble"].endswith("## Operator Directive\nbe aggressive")
 
 
+def test_orchestrate_forwards_conservative_flag_to_preview_child(monkeypatch, tmp_path):
+    preview_calls = []
+
+    monkeypatch.setattr(
+        rebuild,
+        "_create_shadow_workspace",
+        lambda _path: {
+            "knowledge_db": tmp_path / "knowledge.db",
+            "chat_db": tmp_path / "chat_history.db",
+            "vectors_dir": tmp_path / "vectors",
+        },
+    )
+    monkeypatch.setattr(
+        rebuild,
+        "_read_json",
+        lambda _path: {"no_topics": True, "action_journal": [], "proposed_actions": []},
+    )
+    monkeypatch.setattr(rebuild, "_print_preview", lambda _preview: None)
+    monkeypatch.setattr(rebuild, "_write_preview_exports", lambda _args, _preview: None)
+
+    def fake_run_child(args, env):
+        preview_calls.append((args, env))
+        return 0
+
+    monkeypatch.setattr(rebuild, "_run_child", fake_run_child)
+
+    args = rebuild._build_parser().parse_args(["--conservative"])
+    rc = rebuild._orchestrate(args)
+
+    assert rc == 0
+    assert len(preview_calls) == 1
+    preview_args, _preview_env = preview_calls[0]
+    assert preview_args[0:3] == ["--phase", "preview-internal", "--result-file"]
+    assert "--conservative" in preview_args
+
+
 def test_render_structure_document_markdown_contains_tree():
     topic_map = [
         {
