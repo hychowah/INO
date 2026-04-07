@@ -103,9 +103,12 @@ def test_skill_sets_structure():
 
 
 def test_core_in_all_skill_sets():
-    """core.md is loaded for every skill set."""
+    """core.md is loaded for every skill set except taxonomy (self-contained agent)."""
     for name, skills in SKILL_SETS.items():
-        assert "core" in skills, f"core missing from skill set '{name}'"
+        if name == "taxonomy":
+            assert "core" not in skills, "taxonomy skill set should not include core"
+        else:
+            assert "core" in skills, f"core missing from skill set '{name}'"
 
 
 def test_interactive_has_quiz_and_knowledge():

@@ -36,7 +36,7 @@ COMMAND / REPLY  → interactive    → core + quiz + knowledge
 REVIEW-CHECK     → review         → core + quiz
 MAINTENANCE      → maintenance    → core + maintenance + knowledge
 quiz-packaging   → quiz-packaging → core + quiz  (P2 scheduled quiz packaging)
-TAXONOMY-MODE    → taxonomy       → core + taxonomy  (/reorganize, weekly scheduler)
+TAXONOMY-MODE    → taxonomy       → taxonomy only   (/reorganize, weekly scheduler)
 ```
 
 Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`.

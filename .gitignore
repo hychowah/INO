@@ -8,13 +8,9 @@ build/
 # Virtual environment
 venv/
 
-# Data (local SQLite databases, but track persona presets, skill files, and preferences)
-data/
-!data/personas/
-!data/personas/*.md
-!data/skills/
-!data/skills/*.md
-!data/preferences.md
+# Data (ignore local vector store and SQLite databases; track persona presets, skill files, and preferences)
+data/vectors/
+data/*.db
 
 # IDE
 .vscode/
@@ -28,6 +24,9 @@ Thumbs.db
 
 # Backups
 backups/
+
+# Manual prompt inspection logs
+scripts/prompt_logs/
 
 # Testing / coverage
 .pytest_cache/

@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `[quiz_anchor]` debug log lines in `services/context.py` (staleness check), `services/tools_assess.py` (anchor SET), and `services/pipeline.py` (anchor CLEAR + blocked-assess detail); visible when `LOG_LEVEL=DEBUG`
 - `/reorganize` slash command in `bot/commands.py` — manually triggers the taxonomy reorganization agent for the authorized user
 - `data/skills/taxonomy.md` — LLM skill file for the taxonomy reorganization agent; covers topic tree restructuring, grouping rules, rename criteria, and suppressed-rename handling
-- `SKILL_SETS["taxonomy"]` in `services/pipeline.py` — new `"taxonomy-mode"` skill set (`core + taxonomy`); entry points `handle_taxonomy()` and `call_taxonomy_loop()`
+- `SKILL_SETS["taxonomy"]` in `services/pipeline.py` — new `"taxonomy-mode"` skill set (`taxonomy` only); entry points `handle_taxonomy()` and `call_taxonomy_loop()`
 - `call_action_loop()` in `services/pipeline.py` — generic LLM action loop shared by maintenance and taxonomy; `call_maintenance_loop()` and `call_taxonomy_loop()` are thin wrappers around it
 - `build_taxonomy_context()` in `services/context.py` — builds DFS topic tree + suppressed renames context for the taxonomy agent
 - `get_rejected_renames(days=90)` in `db/action_log.py` — suppresses re-proposed renames the user already rejected

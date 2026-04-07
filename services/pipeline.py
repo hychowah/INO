@@ -38,7 +38,7 @@ SKILL_SETS: dict[str, list[str]] = {
     "review": ["core", "quiz"],
     "maintenance": ["core", "maintenance", "knowledge"],
     "quiz-packaging": ["core", "quiz"],
-    "taxonomy": ["core", "taxonomy"],
+    "taxonomy": ["taxonomy"],
 }
 
 # Actions that clear active quiz context — the LLM moved on from the quiz.

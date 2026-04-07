@@ -22,7 +22,7 @@ Instructions are split into modular skill files loaded per-mode:
 - **interactive** (COMMAND/REPLY): core + quiz + knowledge
 - **review** (REVIEW-CHECK): core + quiz
 - **maintenance** (MAINTENANCE): core + maintenance + knowledge
-- **taxonomy** (TAXONOMY-MODE, /reorganize): core + taxonomy
+- **taxonomy** (TAXONOMY-MODE, /reorganize): taxonomy
 - **quiz-packaging** (Scheduled quiz P2): core + quiz
 
 See `docs/index.md` for the full knowledge base map.
