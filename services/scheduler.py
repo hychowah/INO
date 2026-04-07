@@ -309,32 +309,22 @@ async def _send_review_quiz(payload: str):
         logger.error(f"Error sending review: {e}", exc_info=True)
 
 
-async def _check_maintenance():
-    """Run DB diagnostics and send maintenance report if issues found."""
-    logger.debug("Running maintenance check...")
-    try:
-        # Direct call — no subprocess
-        diagnostic_context = pipeline.handle_maintenance()
+async def _send_mode_report(
+    mode_label: str,
+    icon: str,
+    final_result: str,
+    proposed_actions: list,
+    proposal_type: str,
+    execute_fn,
+):
+    """DM the user a mode report with optional proposed-action buttons.
 
-        if not diagnostic_context:
-            logger.debug("Maintenance: no issues found")
-            return
-
-        logger.info("Maintenance issues found, sending to LLM for triage")
-        await _send_maintenance_report(diagnostic_context)
-
-    except Exception as e:
-        logger.error(f"Error in maintenance check: {e}", exc_info=True)
-
-
-async def _send_maintenance_report(diagnostic_context: str):
-    """Send diagnostic context to the LLM for triage, then DM the report.
-    Safe actions are executed immediately; destructive actions are proposed
-    with Discord buttons for user approval."""
-    from services.views import MaintenanceConfirmView
+    Shared by maintenance and taxonomy — only the label/icon/proposal_type differ.
+    """
+    from services.views import ProposedActionsView
 
     if not _bot or not _authorized_user_id:
-        logger.error("Bot not initialized, can't send maintenance report")
+        logger.error(f"Bot not initialized, can't send {mode_label} report")
         return
 
     try:
@@ -343,57 +333,91 @@ async def _send_maintenance_report(diagnostic_context: str):
             logger.error(f"Could not find user {_authorized_user_id}")
             return
 
-        try:
-            # Let the LLM triage and fix issues (multi-action loop)
-            final_result, proposed_actions = await pipeline.call_maintenance_loop(
-                diagnostic_context
+        if final_result and final_result.strip():
+            msg = final_result
+            if msg.startswith("REPLY: "):
+                msg = msg[7:]
+            elif msg.startswith("REPLY:"):
+                msg = msg[6:]
+            if msg.strip():
+                await user.send(f"{icon} **{mode_label}**\n\n{msg[:1900]}")
+                logger.info(f"Sent {mode_label} report DM")
+
+        if proposed_actions:
+            proposal_id = db.save_proposal(proposal_type, proposed_actions)
+            view = ProposedActionsView(proposal_id, proposed_actions, execute_fn)
+            action_lines = []
+            for i, a in enumerate(proposed_actions, 1):
+                name = a.get("action", "unknown")
+                desc = a.get("message", "")[:80]
+                action_lines.append(f"**{i}.** `{name}` — {desc}")
+            proposal_text = (
+                "⏳ **Actions needing your approval:**\n\n"
+                + "\n".join(action_lines)
+                + "\n\nUse the buttons below to approve or reject."
             )
-
-            if final_result and final_result.strip():
-                # Strip REPLY: prefix
-                msg = final_result
-                if msg.startswith("REPLY: "):
-                    msg = msg[7:]
-                elif msg.startswith("REPLY:"):
-                    msg = msg[6:]
-
-                if msg.strip():
-                    await user.send(f"🔧 **Knowledge Base Maintenance**\n\n{msg[:1900]}")
-                    logger.info("Sent maintenance report DM")
-
-            # If there are proposed destructive actions, send with buttons
-            if proposed_actions:
-                proposal_id = db.save_proposal("maintenance", proposed_actions)
-                view = MaintenanceConfirmView(
-                    proposal_id,
-                    proposed_actions,
-                    pipeline.execute_maintenance_actions,
-                )
-                # Format proposed actions for the DM
-                action_lines = []
-                for i, a in enumerate(proposed_actions, 1):
-                    name = a.get("action", "unknown")
-                    desc = a.get("message", "")[:80]
-                    action_lines.append(f"**{i}.** `{name}` — {desc}")
-
-                proposal_text = (
-                    "⏳ **Actions needing your approval:**\n\n"
-                    + "\n".join(action_lines)
-                    + "\n\nUse the buttons below to approve or reject."
-                )
-                sent_msg = await user.send(content=proposal_text[:1900], view=view)
-                db.update_proposal_message_id(proposal_id, sent_msg.id)
-                logger.info(f"Sent {len(proposed_actions)} proposed maintenance actions")
-
-        except ImportError as ie:
-            logger.error(f"Import error in maintenance: {ie}")
-        except Exception as e:
-            logger.error(f"Error in maintenance pipeline: {e}", exc_info=True)
+            sent_msg = await user.send(content=proposal_text[:1900], view=view)
+            db.update_proposal_message_id(proposal_id, sent_msg.id)
+            logger.info(f"Sent {len(proposed_actions)} proposed {mode_label} actions")
 
     except discord.Forbidden:
         logger.error("Cannot send DM (forbidden)")
     except Exception as e:
-        logger.error(f"Error sending maintenance report: {e}", exc_info=True)
+        logger.error(f"Error sending {mode_label} report: {e}", exc_info=True)
+
+
+async def _check_maintenance():
+    """Run DB diagnostics and send maintenance report if issues found."""
+    logger.debug("Running maintenance check...")
+    try:
+        diagnostic_context = pipeline.handle_maintenance()
+        if not diagnostic_context:
+            logger.debug("Maintenance: no issues found")
+            return
+        logger.info("Maintenance issues found, sending to LLM for triage")
+        await _send_maintenance_report(diagnostic_context)
+    except Exception as e:
+        logger.error(f"Error in maintenance check: {e}", exc_info=True)
+
+
+async def _send_maintenance_report(diagnostic_context: str):
+    """Send diagnostic context to the LLM for triage, then DM the report."""
+    try:
+        final_result, proposed_actions = await pipeline.call_maintenance_loop(
+            diagnostic_context
+        )
+        await _send_mode_report(
+            mode_label="Knowledge Base Maintenance",
+            icon="🔧",
+            final_result=final_result,
+            proposed_actions=proposed_actions,
+            proposal_type="maintenance",
+            execute_fn=pipeline.execute_maintenance_actions,
+        )
+    except Exception as e:
+        logger.error(f"Error in maintenance pipeline: {e}", exc_info=True)
+
+
+async def _check_taxonomy():
+    """Run taxonomy reorganization and DM the report if there are topics."""
+    logger.debug("Running taxonomy check...")
+    try:
+        taxonomy_context = pipeline.handle_taxonomy()
+        if not taxonomy_context:
+            logger.debug("Taxonomy: no topics found")
+            return
+        logger.info("Running taxonomy reorganization LLM loop")
+        final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+        await _send_mode_report(
+            mode_label="Weekly Taxonomy Reorganization",
+            icon="🌿",
+            final_result=final_result,
+            proposed_actions=proposed_actions,
+            proposal_type="taxonomy",
+            execute_fn=pipeline.execute_maintenance_actions,
+        )
+    except Exception as e:
+        logger.error(f"Error in taxonomy check: {e}", exc_info=True)
 
 
 async def _check_backup():
@@ -492,6 +516,12 @@ async def _loop():
                 await _check_maintenance()
             except Exception as e:
                 logger.error(f"Maintenance loop error: {e}", exc_info=True)
+
+            # Taxonomy reorganization runs after maintenance on the same weekly schedule
+            try:
+                await _check_taxonomy()
+            except Exception as e:
+                logger.error(f"Taxonomy loop error: {e}", exc_info=True)
 
             # Dedup runs after maintenance on the same schedule
             try:

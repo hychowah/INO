@@ -99,7 +99,7 @@ def test_mode_to_skill_set_unknown_falls_back():
 
 def test_skill_sets_structure():
     """SKILL_SETS has the expected entries."""
-    assert set(SKILL_SETS.keys()) == {"interactive", "review", "maintenance", "quiz-packaging"}
+    assert set(SKILL_SETS.keys()) == {"interactive", "review", "maintenance", "quiz-packaging", "taxonomy"}
 
 
 def test_core_in_all_skill_sets():

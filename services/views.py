@@ -210,12 +210,12 @@ class RejectGroupButton(discord.ui.Button):
 
 
 # ============================================================================
-# Maintenance confirmation view
+# Proposed-actions confirmation view (maintenance, taxonomy, etc.)
 # ============================================================================
 
 
-class MaintenanceConfirmView(discord.ui.View):
-    """View for confirming destructive maintenance actions.
+class ProposedActionsView(discord.ui.View):
+    """View for confirming proposed LLM actions (maintenance, taxonomy, etc.).
     Shows proposed actions with approve/reject buttons."""
 
     def __init__(
@@ -229,23 +229,27 @@ class MaintenanceConfirmView(discord.ui.View):
         self.actions = actions
         self.execute_fn = execute_fn
         self.decisions: dict[int, bool | None] = {i: None for i in range(len(actions))}
+        self._finalizing: bool = False
 
-        self.add_item(MaintenanceApproveAllButton(self))
-        self.add_item(MaintenanceRejectAllButton(self))
+        self.add_item(ApproveAllActionsButton(self))
+        self.add_item(RejectAllActionsButton(self))
 
         max_actions = min(len(actions), 10)
         for i in range(max_actions):
             action_label = actions[i].get("action", "unknown")[:20]
-            self.add_item(MaintenanceApproveButton(self, i, action_label))
-            self.add_item(MaintenanceRejectButton(self, i, action_label))
+            self.add_item(ApproveActionButton(self, i, action_label))
+            self.add_item(RejectActionButton(self, i, action_label))
 
     async def _finalize(self, interaction: discord.Interaction):
         pending = [i for i, d in self.decisions.items() if d is None]
         if pending:
             return
+        if self._finalizing:
+            return
+        self._finalizing = True
 
         approved = [self.actions[i] for i, d in self.decisions.items() if d]
-        rejected_count = sum(1 for d in self.decisions.values() if not d)
+        rejected = [self.actions[i] for i, d in self.decisions.items() if d is False]
 
         result_parts = []
         if approved:
@@ -256,8 +260,19 @@ class MaintenanceConfirmView(discord.ui.View):
                     + "\n".join(f"• {s}" for s in summaries)
                 )
 
-        if rejected_count:
-            result_parts.append(f"❌ Rejected {rejected_count} action(s).")
+        # Log rejected rename actions BEFORE deleting proposal (prevents log loss on crash)
+        for action in rejected:
+            if action.get("action") in ("update_topic", "update_concept"):
+                db.log_action(
+                    action=action["action"],
+                    params=action.get("params", {}),
+                    result_type="rejected",
+                    result="",
+                    source="maintenance",
+                )
+
+        if rejected:
+            result_parts.append(f"❌ Rejected {len(rejected)} action(s).")
 
         db.delete_proposal(self.proposal_id)
         self._disable_all()
@@ -279,8 +294,8 @@ class MaintenanceConfirmView(discord.ui.View):
         self._disable_all()
 
 
-class MaintenanceApproveAllButton(discord.ui.Button):
-    def __init__(self, parent_view: MaintenanceConfirmView):
+class ApproveAllActionsButton(discord.ui.Button):
+    def __init__(self, parent_view: ProposedActionsView):
         super().__init__(label="Approve All", style=discord.ButtonStyle.success, emoji="✅", row=0)
         self.parent_view = parent_view
 
@@ -291,8 +306,8 @@ class MaintenanceApproveAllButton(discord.ui.Button):
         await self.parent_view._finalize(interaction)
 
 
-class MaintenanceRejectAllButton(discord.ui.Button):
-    def __init__(self, parent_view: MaintenanceConfirmView):
+class RejectAllActionsButton(discord.ui.Button):
+    def __init__(self, parent_view: ProposedActionsView):
         super().__init__(label="Reject All", style=discord.ButtonStyle.danger, emoji="❌", row=0)
         self.parent_view = parent_view
 
@@ -303,8 +318,8 @@ class MaintenanceRejectAllButton(discord.ui.Button):
         await self.parent_view._finalize(interaction)
 
 
-class MaintenanceApproveButton(discord.ui.Button):
-    def __init__(self, parent_view: MaintenanceConfirmView, idx: int, label: str):
+class ApproveActionButton(discord.ui.Button):
+    def __init__(self, parent_view: ProposedActionsView, idx: int, label: str):
         row = min(4, (idx // 2) + 1)
         super().__init__(
             label=f"✅ {idx + 1}",
@@ -319,15 +334,15 @@ class MaintenanceApproveButton(discord.ui.Button):
         self.parent_view.decisions[self.idx] = True
         self.disabled = True
         for item in self.parent_view.children:
-            if isinstance(item, MaintenanceRejectButton) and item.idx == self.idx:
+            if isinstance(item, RejectActionButton) and item.idx == self.idx:
                 item.disabled = True
                 break
         await interaction.response.edit_message(view=self.parent_view)
         await self.parent_view._finalize(interaction)
 
 
-class MaintenanceRejectButton(discord.ui.Button):
-    def __init__(self, parent_view: MaintenanceConfirmView, idx: int, label: str):
+class RejectActionButton(discord.ui.Button):
+    def __init__(self, parent_view: ProposedActionsView, idx: int, label: str):
         row = min(4, (idx // 2) + 1)
         super().__init__(
             label=f"❌ {idx + 1}",
@@ -342,7 +357,7 @@ class MaintenanceRejectButton(discord.ui.Button):
         self.parent_view.decisions[self.idx] = False
         self.disabled = True
         for item in self.parent_view.children:
-            if isinstance(item, MaintenanceApproveButton) and item.idx == self.idx:
+            if isinstance(item, ApproveActionButton) and item.idx == self.idx:
                 item.disabled = True
                 break
         await interaction.response.edit_message(view=self.parent_view)

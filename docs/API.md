@@ -18,6 +18,7 @@ The bot is the primary user-facing interface. All commands require the calling u
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
 | `/maintain` | Run the automated knowledge-base maintenance agent. |
+| `/reorganize` | Manually trigger the weekly taxonomy reorganization agent. |
 | `/backup` | Create an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's chat history. |
 | `/ping` | Check that the bot is alive. |

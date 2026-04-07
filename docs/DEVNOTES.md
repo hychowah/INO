@@ -87,7 +87,7 @@ WRONG   — base: q0=5, q1=3, q2=1.  above: 0 (no penalty).   at/below: base + |
 
 ## 4. Confirmation Flows & Proposals
 
-Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`/`update_concept`) are now **proposals** stored in `pending_proposals` DB table. Users approve/reject via Discord buttons (`DedupConfirmView`, `MaintenanceConfirmView` in `services/views.py`).
+Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`/`update_concept`) are now **proposals** stored in `pending_proposals` DB table. Users approve/reject via Discord buttons (`DedupConfirmView`, `ProposedActionsView` in `services/views.py`).
 
 **Key decisions:**
 - Discord buttons over text replies — text goes to LLM pipeline, buttons are unambiguous

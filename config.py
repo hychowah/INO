@@ -57,7 +57,7 @@ COMMAND_TIMEOUT = 120
 REVIEW_CHECK_INTERVAL_MINUTES = 15
 
 # Maintenance scheduler interval (hours)
-MAINTENANCE_INTERVAL_HOURS = 24
+MAINTENANCE_INTERVAL_HOURS = 168
 
 # Session timeout (minutes of inactivity before session auto-ends)
 SESSION_TIMEOUT_MINUTES = 15

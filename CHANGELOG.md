@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `services/backup.py` — new backup service; snapshots `knowledge.db`, `chat_history.db`, and `data/vectors/` into a timestamped subdirectory under `backups/` (or `LEARN_BACKUP_DIR`); prunes snapshots older than `LEARN_BACKUP_RETENTION_DAYS` (default: 7); atomic write pattern ensures no partial backup is left on failure
 - `/backup` slash command in `bot/commands.py` — on-demand backup for the authorized user; defers interaction, runs `backup_service.run_backup_cycle()` in a thread executor, replies with snapshot name and pruned count
-- Scheduled backup in `services/scheduler.py` — `run_backup_cycle()` runs unconditionally on every 24-hour maintenance cycle, after maintenance and dedup passes
+- Scheduled backup in `services/scheduler.py` — `run_backup_cycle()` runs unconditionally on every weekly maintenance cycle, after maintenance and dedup passes
 - `close_client()` in `db/vectors.py` — safely closes the Qdrant singleton before file copy to avoid Windows file-lock conflicts; client re-initializes lazily on next use
 - `LEARN_BACKUP_DIR` env var (`config.py`) — overrides the backup output directory (default: `backups/` inside the project root)
 - `LEARN_BACKUP_RETENTION_DAYS` env var (`config.py`) — sets snapshot retention window in days (default: `7`, minimum: `1`)
@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 9 new tests in `tests/test_assess_no_quiz_guard.py` covering the assess-guard behavior
 - `LOG_LEVEL` env var in `.env` — controls log verbosity for `bot.py` (default: `INFO`; set to `DEBUG` to enable `[quiz_anchor]` and pipeline trace logs)
 - `[quiz_anchor]` debug log lines in `services/context.py` (staleness check), `services/tools_assess.py` (anchor SET), and `services/pipeline.py` (anchor CLEAR + blocked-assess detail); visible when `LOG_LEVEL=DEBUG`
+- `/reorganize` slash command in `bot/commands.py` — manually triggers the taxonomy reorganization agent for the authorized user
+- `data/skills/taxonomy.md` — LLM skill file for the taxonomy reorganization agent; covers topic tree restructuring, grouping rules, rename criteria, and suppressed-rename handling
+- `SKILL_SETS["taxonomy"]` in `services/pipeline.py` — new `"taxonomy-mode"` skill set (`core + taxonomy`); entry points `handle_taxonomy()` and `call_taxonomy_loop()`
+- `call_action_loop()` in `services/pipeline.py` — generic LLM action loop shared by maintenance and taxonomy; `call_maintenance_loop()` and `call_taxonomy_loop()` are thin wrappers around it
+- `build_taxonomy_context()` in `services/context.py` — builds DFS topic tree + suppressed renames context for the taxonomy agent
+- `get_rejected_renames(days=90)` in `db/action_log.py` — suppresses re-proposed renames the user already rejected
+- `SAFE_TAXONOMY_ACTIONS` in `services/pipeline.py` — `frozenset({"add_topic", "link_topics", "fetch", "list_topics"})`; `unlink_topics` intentionally excluded
+- `add_topic` added to `SAFE_MAINTENANCE_ACTIONS` in `services/pipeline.py`
+- `_check_taxonomy()` in `services/scheduler.py` — runs taxonomy reorganization in the weekly cycle after `_check_maintenance()`
+- `_send_mode_report()` in `services/scheduler.py` — shared DM dispatcher used by both maintenance and taxonomy
+- `ProposedActionsView` in `services/views.py` — renamed from `MaintenanceConfirmView`; now shared by both maintenance and taxonomy approval flows
 
 ### Fixed
 - Missing `QuizQuestionView` import in `bot/commands.py` (caused a `NameError` on skip-eligible `/learn` quiz deliveries)
@@ -43,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_is_quiz_stale()` (`services/context.py`) compared `datetime.now()` (local time) against SQLite `CURRENT_TIMESTAMP` (UTC); in UTC+8 this caused every quiz to appear ~8 hours stale immediately after creation, clearing the quiz anchor and blocking all `assess` actions — fixed by switching to `datetime.now(timezone.utc).replace(tzinfo=None)`
 
 ### Changed
+- `MAINTENANCE_INTERVAL_HOURS` changed from `24` to `168` — maintenance, taxonomy, dedup, and backup now run on a weekly schedule instead of daily
 - `.github/workflows/tests.yml` — installs dev dependencies from `requirements-dev.txt`
 - `docs/index.md` — updated to reference new documentation files
 

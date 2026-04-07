@@ -17,7 +17,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
 - **Web dashboard** — Zero-dependency read-only HTTP UI with interactive D3.js topic tree and force-directed graph
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
-- **Automated data backup** — Scheduled 24-hour snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
+- **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Configurable personas** — Buddy / Coach / Mentor presets loaded from Markdown files
 - **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
 

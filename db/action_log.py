@@ -178,6 +178,45 @@ def get_action_summary(days: int = 7) -> Dict[str, Any]:
     }
 
 
+def get_rejected_renames(days: int = 90) -> List[Dict[str, Any]]:
+    """Return rejected rename actions (update_topic / update_concept) from the last N days.
+
+    Used by taxonomy context to suppress renames already rejected by the user.
+
+    Returns a list of dicts with keys: action, target_id, proposed_title, rejected_at.
+    Entries with malformed/truncated params JSON are silently skipped.
+    """
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT id, action, params, created_at FROM action_log "
+        "WHERE action IN ('update_topic', 'update_concept') "
+        "AND result_type = 'rejected' AND source = 'maintenance' "
+        "AND created_at >= ? ORDER BY created_at DESC",
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    results = []
+    for row in rows:
+        try:
+            params = json.loads(row["params"]) if row["params"] else {}
+        except json.JSONDecodeError:
+            logger.warning(f"Malformed action_log params (truncated?): entry #{row['id']}")
+            continue
+        target_id = params.get("topic_id") or params.get("concept_id")
+        proposed_title = params.get("title") or params.get("new_title")
+        results.append(
+            {
+                "action": row["action"],
+                "target_id": target_id,
+                "proposed_title": proposed_title,
+                "rejected_at": row["created_at"],
+            }
+        )
+    return results
+
+
 def get_distinct_actions() -> List[str]:
     """Return distinct action names present in the log."""
     conn = _conn()

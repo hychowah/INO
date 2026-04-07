@@ -82,12 +82,13 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/skills/quiz.md` | ~200 | Quiz skill — quiz/assess actions, scoring rubric, adaptive quiz evolution (interactive + review) |
 | `data/skills/knowledge.md` | ~170 | Knowledge skill — topic/concept CRUD, casual Q&A, overlap detection (interactive + maintenance) |
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
+| `data/skills/taxonomy.md` | ~80 | Taxonomy skill — topic tree restructuring, grouping rules, rename criteria, suppressed-rename tracking (taxonomy mode only) |
 | `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection, JSON output format (scheduled quiz P1 only) |
 | `data/preferences.md` | ~20 | User learning preferences (interests, style) |
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
 | `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
-| `bot/commands.py` | ~435 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, etc.) |
+| `bot/commands.py` | ~435 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
@@ -128,7 +129,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/kimi.py` | ~83 | Thin subprocess wrapper around kimi-cli (the only subprocess in the system) |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
-| `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/dedup/backup every 24 h |
+| `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
 | `services/state.py` | ~10 | Shared mutable state (e.g. `last_activity_at`) between bot and scheduler |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
@@ -276,7 +277,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   DM user: "📚 Learning Review\n<quiz question>"
 ```
 
-### Flow 3: Scheduled maintenance (every 24 hours)
+### Flow 3: Scheduled maintenance & taxonomy (every 168 hours / weekly)
 
 ```
   scheduler._loop()
@@ -306,7 +307,22 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
 ```
 
 ```
-  (same 24h cycle, after maintenance)
+  (same weekly cycle, after maintenance)
+         │
+         ▼
+  scheduler._check_taxonomy()         ← taxonomy reorganization agent
+         │
+         ├── pipeline.handle_taxonomy()
+         │       └── context.build_taxonomy_context()
+         │               ├── db.get_topic_map()
+         │               ├── db.get_review_stats()
+         │               └── db.get_rejected_renames(days=90)
+         │
+         └── pipeline.call_taxonomy_loop(context)  ← LLM restructures topic tree
+                    │
+                    └── DM user: "🌿 Taxonomy Reorganization\n<proposals>"
+
+  (same weekly cycle, after taxonomy)
          │
          ▼
   scheduler._check_dedup()           ← dedup sub-agent; proposes merges via DM
@@ -440,6 +456,7 @@ conversations
 | `_format_relations_snippet(concept_id, max_rels)` | Shared helper: formats top N relation lines as `↳ relation_type #id title (score, "note")`. Used by due concepts, quiz context, active concept detail, and quiz generator. |
 | `format_fetch_result(data)` | Formats fetch data (topic/concept/search) into markdown. Caps concept remarks to 3, truncates review text to 200 chars. |
 | `build_maintenance_context()` | Runs `db.get_maintenance_diagnostics()` and formats the diagnostic report. |
+| `build_taxonomy_context()` | Builds topic tree context for the taxonomy agent. Calls `db.get_topic_map()`, `db.get_review_stats()`, and `db.get_rejected_renames(days=90)` to include suppressed renames. |
 | `build_quiz_generator_context(concept_id)` | Builds pre-loaded context for P1 quiz generation. Includes concept detail + enriched related concepts (descriptions, remarks, review Q&As). |
 
 ### tools.py — Action Executor
@@ -477,6 +494,10 @@ The core brain of the system. Coordinates everything:
 6. **Parsing utilities** — `parse_llm_response()`, `extract_llm_action()`, `process_output()`.
 7. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
 8. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
+9. **`call_action_loop(mode, safe_actions, max_actions, context, preamble)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals. Returns `(final_result_str, proposed_actions_list)`.
+10. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
+11. **`call_taxonomy_loop(taxonomy_context)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS` and `MAX_TAXONOMY_ACTIONS = 15`.
+12. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
 ### services/kimi.py — LLM Subprocess (the only one)
 - Wraps `kimi-cli` as a subprocess via `asyncio.to_thread(subprocess.run, ...)`
@@ -487,8 +508,9 @@ The core brain of the system. Coordinates everything:
 - Starts as a `bot.loop.create_task` on bot ready
 - Review check: every 15 minutes (configurable), calls `pipeline.handle_review_check()` → sends quiz DMs
 - **Suppresses reviews** when user has been active within `SESSION_TIMEOUT_MINUTES` to avoid interrupting conversations
-- Maintenance: every 24 hours, calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
-- Backup: every 24 hours (same cycle as maintenance), calls `backup_service.run_backup_cycle()` via thread executor — runs after dedup, before proposal cleanup
+- Maintenance: every 168 hours (weekly), calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
+- Taxonomy: every 168 hours (same weekly cycle, after maintenance), calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM
+- Backup: every 168 hours (same weekly cycle, after dedup), calls `backup_service.run_backup_cycle()` via thread executor — runs after dedup, before proposal cleanup
 
 ### agent.py — CLI (not used by bot)
 - Standalone entry point for testing: `python agent.py --mode=command --input="quiz me"`
@@ -706,7 +728,7 @@ after each run. The `backups/` directory is `.gitignore`d and never committed.
 | kimi-cli path | `"kimi"` | config.py |
 | LLM timeout | 120 seconds | config.py |
 | Review check interval | 15 minutes | config.py |
-| Maintenance interval | 24 hours | config.py |
+| Maintenance interval | 168 hours (weekly) | config.py |
 | Max fetch iterations | 3 | pipeline.py |
 | Chat history in context | 12 messages | context.py |
 | Max Discord message | 1900 chars | config.py |

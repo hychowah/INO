@@ -807,3 +807,115 @@ def build_maintenance_context() -> str:
     parts.append(f"**Total issues: {issue_count}**")
 
     return "\n".join(parts)
+
+
+# ============================================================================
+# Taxonomy Context
+# ============================================================================
+
+
+def build_taxonomy_context() -> str:
+    """Build context for the taxonomy reorganization agent.
+
+    Provides the full topic tree with indented hierarchy, root-topic
+    candidates for grouping, and a suppressed-renames block so the LLM
+    won't re-propose renames the user already rejected.
+    """
+    parts = []
+    now = datetime.now()
+    parts.append(f"## Taxonomy Reorganization — {now.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+    topic_map = db.get_topic_map()  # flat list: {id, title, concept_count, parent_ids, child_ids}
+    stats = db.get_review_stats()
+
+    # Overview
+    root_topics = [t for t in topic_map if not t["parent_ids"]]
+    parts.append("### Overview")
+    parts.append(
+        f"Total topics: {len(topic_map)} | Root topics: {len(root_topics)} | "
+        f"Concepts: {stats['total_concepts']} | Avg score: {stats['avg_mastery']}/100\n"
+    )
+
+    # Build children lookup for DFS
+    children: dict[int, list[int]] = {}
+    topic_by_id: dict[int, dict] = {}
+    for t in topic_map:
+        topic_by_id[t["id"]] = t
+        for cid in t.get("child_ids", []):
+            children.setdefault(t["id"], []).append(cid)
+
+    # Indented topic tree via iterative DFS
+    parts.append("### Full Topic Tree")
+    parts.append(
+        "(indent = hierarchy depth; [topic:ID] = reference for actions; "
+        "N concepts = concept count directly tagged)\n"
+    )
+
+    def _render_tree(node_id: int, depth: int, visited: set) -> list[str]:
+        if node_id in visited:
+            return []
+        visited.add(node_id)
+        t = topic_by_id.get(node_id)
+        if not t:
+            return []
+        indent = "  " * depth
+        lines = [
+            f"{indent}[topic:{t['id']}] {t['title']} ({t['concept_count']} concepts)"
+        ]
+        for child_id in sorted(children.get(node_id, [])):
+            lines.extend(_render_tree(child_id, depth + 1, visited))
+        return lines
+
+    visited: set = set()
+    root_ids = sorted(t["id"] for t in root_topics)
+    tree_lines = []
+    for rid in root_ids:
+        tree_lines.extend(_render_tree(rid, 0, visited))
+
+    # Orphaned topics (no parent and not in a tree, e.g. cycles broken) — append flat
+    for t in topic_map:
+        if t["id"] not in visited:
+            tree_lines.append(
+                f"⚠️ [topic:{t['id']}] {t['title']} ({t['concept_count']} concepts) [orphaned]"
+            )
+
+    if tree_lines:
+        parts.extend(tree_lines)
+    else:
+        parts.append("No topics yet.")
+    parts.append("")
+
+    # Root topics as grouping candidates
+    parts.append("### Root Topics (candidates for new parent grouping)")
+    parts.append(
+        "(If 3+ root topics share a clear theme, propose a new parent topic "
+        "and `link_topics` each under it.)\n"
+    )
+    for t in root_topics:
+        parts.append(
+            f"- [topic:{t['id']}] {t['title']}: {t['concept_count']} concepts"
+        )
+    parts.append("")
+
+    # Suppressed renames
+    try:
+        rejected = db.get_rejected_renames(days=90)
+    except Exception:
+        rejected = []
+
+    if rejected:
+        parts.append("### ⛔ Suppressed Renames (do NOT propose these again)")
+        parts.append(
+            "(These were previously proposed and rejected by the user. "
+            "Skip them entirely — do not mention, do not re-propose.)\n"
+        )
+        for r in rejected:
+            target_ref = f"[topic:{r['target_id']}]" if r["action"] == "update_topic" else \
+                         f"[concept:{r['target_id']}]"
+            title_note = f' → "{r["proposed_title"]}"' if r["proposed_title"] else ""
+            parts.append(
+                f"- {target_ref}{title_note} — rejected on {r['rejected_at'][:10]}"
+            )
+        parts.append("")
+
+    return "\n".join(parts)

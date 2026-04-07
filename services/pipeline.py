@@ -30,6 +30,7 @@ SKILLS_DIR = config.SKILLS_DIR
 PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
+MAX_TAXONOMY_ACTIONS = 15
 
 # Skill sets: which skill files to load per mode category.
 SKILL_SETS: dict[str, list[str]] = {
@@ -37,6 +38,7 @@ SKILL_SETS: dict[str, list[str]] = {
     "review": ["core", "quiz"],
     "maintenance": ["core", "maintenance", "knowledge"],
     "quiz-packaging": ["core", "quiz"],
+    "taxonomy": ["core", "taxonomy"],
 }
 
 # Actions that clear active quiz context — the LLM moved on from the quiz.
@@ -60,7 +62,19 @@ SAFE_MAINTENANCE_ACTIONS = frozenset(
         "link_concept",  # fix untagged concepts
         "link_topics",  # fix orphan subtopics / reparent
         "delete_topic",  # remove empty topics
+        "add_topic",  # create grouping parent topics
         "remark",  # add notes
+        "fetch",  # data retrieval
+        "list_topics",  # read-only
+    }
+)
+
+# Actions that taxonomy can execute without user confirmation.
+# update_topic (rename) and unlink_topics are intentionally excluded — require approval.
+SAFE_TAXONOMY_ACTIONS = frozenset(
+    {
+        "add_topic",  # create grouping parent topics (safe — reversible)
+        "link_topics",  # nest topic under new parent
         "fetch",  # data retrieval
         "list_topics",  # read-only
     }
@@ -74,6 +88,7 @@ def _mode_to_skill_set(mode: str) -> str:
         "reply": "interactive",
         "review-check": "review",
         "maintenance": "maintenance",
+        "taxonomy-mode": "taxonomy",
         "quiz-packaging": "quiz-packaging",
     }.get(mode, "interactive")
 
@@ -727,6 +742,107 @@ def handle_maintenance() -> str | None:
     return maint_context
 
 
+async def call_action_loop(
+    mode: str,
+    safe_actions: frozenset,
+    max_actions: int,
+    context: str,
+    preamble: str,
+) -> tuple[str, list[dict]]:
+    """Generic LLM action loop for semi-autonomous modes (maintenance, taxonomy, etc.).
+
+    Iterates up to *max_actions* times.  On each iteration the LLM receives
+    the accumulated action log and the remaining budget.  Safe actions are
+    executed immediately; everything else is deferred for user approval.
+
+    Returns:
+        (report_text, proposed_actions) — report_text is the final REPLY: summary,
+        proposed_actions is a list of action dicts needing user approval.
+    """
+    actions_taken: list[str] = []
+    proposed_actions: list[dict] = []
+
+    source = mode.split("-")[0]  # "maintenance", "taxonomy", etc.
+    tools.set_action_source(source)
+
+    text = f"[{mode.upper()}] {preamble}\n\n{context}\n\n"
+    text += (
+        f"You may execute up to {max_actions} actions this run. "
+        f"Output one JSON action at a time. After each, you'll see the result "
+        f"and can output another action or a final REPLY: summary."
+    )
+
+    for action_num in range(max_actions):
+        llm_response = await call_with_fetch_loop(
+            mode=mode,
+            text=text,
+            author=f"{source}_agent",
+        )
+
+        prefix, message, action_data = parse_llm_response(llm_response)
+
+        if not action_data:
+            final_msg = message or ""
+            if actions_taken:
+                action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+                final_msg = (
+                    f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{final_msg}"
+                )
+            return f"REPLY: {final_msg}", proposed_actions
+
+        action_name = action_data.get("action", "unknown").lower().strip()
+        action_msg = action_data.get("message", "")
+
+        if action_name in safe_actions:
+            result = await execute_action(action_data)
+
+            result_clean = result
+            for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
+                if result_clean.startswith(pfx):
+                    result_clean = result_clean[len(pfx):]
+                    break
+
+            is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
+            status = "\u274c" if is_error else "\u2705"
+            actions_taken.append(f"{status} `{action_name}` — {action_msg[:80]}")
+            logger.info(
+                f"{source} action {action_num + 1}/{max_actions}: "
+                f"{action_name} → {'error' if is_error else 'ok'}"
+            )
+        else:
+            proposed_actions.append(action_data)
+            actions_taken.append(
+                f"\u23f3 `{action_name}` — {action_msg[:80]} *(pending user approval)*"
+            )
+            logger.info(
+                f"{source} action {action_num + 1}/{max_actions}: "
+                f"{action_name} → deferred (needs approval)"
+            )
+
+        action_log = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+        text = (
+            f"[{mode.upper()} continuation] Actions taken so far:\n{action_log}\n\n"
+            f"Original context:\n{context[:1500]}\n\n"
+            f"You have {max_actions - action_num - 1} action(s) remaining. "
+            f"Output the next JSON action, or REPLY: with a summary if you're done."
+        )
+
+    # Exhausted action budget — ask for final summary
+    text = (
+        f"[{mode.upper()} final] You've used all {max_actions} actions:\n"
+        + "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+        + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
+    )
+    llm_response = await call_with_fetch_loop(
+        mode=mode, text=text, author=f"{source}_agent"
+    )
+    _prefix, message, _action_data = parse_llm_response(llm_response)
+
+    action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+    final_msg = f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{message or ''}"
+    return f"REPLY: {final_msg}", proposed_actions
+
+
 async def call_maintenance_loop(
     diagnostic_context: str, user_id: str = "default"
 ) -> tuple[str, list[dict]]:
@@ -743,106 +859,64 @@ async def call_maintenance_loop(
     Args:
         user_id: User identifier for multi-user support. Currently unused.
     """
-    actions_taken = []
-    proposed_actions = []
-
-    # Set action source for audit trail
-    tools.set_action_source("maintenance")
-
-    text = (
-        f"[MAINTENANCE] Triage these DB issues and fix what you can.\n\n"
-        f"{diagnostic_context}\n\n"
-        f"You may execute up to {MAX_MAINTENANCE_ACTIONS} actions this run. "
-        f"Output one JSON action at a time. After each, you'll see the result "
-        f"and can output another action or a final REPLY: summary.\n\n"
-        f"**Note:** Destructive actions (delete_concept, unlink_concept) will be "
-        f"proposed to the user for approval rather than executed immediately. "
-        f"Do NOT attempt to merge duplicate concepts — that is handled by a "
-        f"separate dedup sub-agent.\n\n"
-        f"**IMPORTANT:** Do NOT use update_concept to change mastery_level, "
-        f"interval_days, next_review_at, ease_factor, or review_count. "
-        f"Scores are managed exclusively by the assess action during quiz sessions. "
-        f"For struggling concepts, add remarks or suggest splitting — never adjust scores."
+    preamble = (
+        "Triage these DB issues and fix what you can.\n\n"
+        "**Note:** Destructive actions (delete_concept, unlink_concept) will be "
+        "proposed to the user for approval rather than executed immediately. "
+        "Do NOT attempt to merge duplicate concepts — that is handled by a "
+        "separate dedup sub-agent.\n\n"
+        "**IMPORTANT:** Do NOT use update_concept to change mastery_level, "
+        "interval_days, next_review_at, ease_factor, or review_count. "
+        "Scores are managed exclusively by the assess action during quiz sessions. "
+        "For struggling concepts, add remarks or suggest splitting — never adjust scores."
+    )
+    return await call_action_loop(
+        mode="maintenance",
+        safe_actions=SAFE_MAINTENANCE_ACTIONS,
+        max_actions=MAX_MAINTENANCE_ACTIONS,
+        context=diagnostic_context,
+        preamble=preamble,
     )
 
-    for action_num in range(MAX_MAINTENANCE_ACTIONS):
-        llm_response = await call_with_fetch_loop(
-            mode="maintenance",
-            text=text,
-            author="maintenance_agent",
-            # TODO: Phase 3 — forward user_id for multi-user scoping
-        )
 
-        prefix, message, action_data = parse_llm_response(llm_response)
+async def call_taxonomy_loop(taxonomy_context: str) -> tuple[str, list[dict]]:
+    """Run the taxonomy reorganization LLM loop, executing up to MAX_TAXONOMY_ACTIONS.
 
-        if not action_data:
-            # LLM is done — returned a REPLY/ASK summary
-            final_msg = message or ""
-            if actions_taken:
-                action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
-                final_msg = (
-                    f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{final_msg}"
-                )
-            return f"REPLY: {final_msg}", proposed_actions
+    Safe actions (add_topic, link_topics) execute immediately.
+    Destructive actions (update_topic, unlink_topics, delete_topic, unlink_concept)
+    are collected as proposals for user confirmation.
 
-        action_name = action_data.get("action", "unknown").lower().strip()
-        action_msg = action_data.get("message", "")
-
-        # Check if this action is safe to auto-execute
-        if action_name in SAFE_MAINTENANCE_ACTIONS:
-            # Execute immediately
-            result = await execute_action(action_data)
-
-            result_clean = result
-            for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
-                if result_clean.startswith(pfx):
-                    result_clean = result_clean[len(pfx) :]
-                    break
-
-            is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
-            status = "\u274c" if is_error else "\u2705"
-            actions_taken.append(f"{status} `{action_name}` — {action_msg[:80]}")
-
-            logger.info(
-                f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
-                f"{action_name} → {'error' if is_error else 'ok'}"
-            )
-        else:
-            # Destructive action — collect as proposal, tell LLM it's deferred
-            proposed_actions.append(action_data)
-            actions_taken.append(
-                f"⏳ `{action_name}` — {action_msg[:80]} *(pending user approval)*"
-            )
-
-            logger.info(
-                f"Maintenance action {action_num + 1}/{MAX_MAINTENANCE_ACTIONS}: "
-                f"{action_name} → deferred (needs approval)"
-            )
-
-        # Build continuation prompt with results so far
-        action_log = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
-        text = (
-            f"[MAINTENANCE continuation] Actions taken so far:\n{action_log}\n\n"
-            f"Original diagnostic report:\n{diagnostic_context[:1500]}\n\n"
-            f"You have {MAX_MAINTENANCE_ACTIONS - action_num - 1} action(s) remaining. "
-            f"Output the next JSON action, or REPLY: with a summary if you're done."
-        )
-
-    # Exhausted all action slots — ask LLM for final summary
-    text = (
-        f"[MAINTENANCE final] You've used all {MAX_MAINTENANCE_ACTIONS} actions:\n"
-        + "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
-        + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
+    Returns:
+        (report_text, proposed_actions)
+    """
+    preamble = (
+        "Analyze this topic tree and improve its hierarchy for clarity and scannability.\n\n"
+        "**Safe to execute:** add_topic (create grouping parents), link_topics (nest topics).\n"
+        "**Propose for approval:** update_topic (rename), unlink_topics, delete_topic, "
+        "unlink_concept.\n\n"
+        "**NEVER** modify mastery_level, interval_days, next_review_at, ease_factor, or "
+        "review_count. Do NOT re-propose renames listed in the ⛔ Suppressed Renames section."
     )
-    # TODO: Phase 3 — forward user_id for multi-user scoping
-    llm_response = await call_with_fetch_loop(
-        mode="maintenance", text=text, author="maintenance_agent"
+    return await call_action_loop(
+        mode="taxonomy-mode",
+        safe_actions=SAFE_TAXONOMY_ACTIONS,
+        max_actions=MAX_TAXONOMY_ACTIONS,
+        context=taxonomy_context,
+        preamble=preamble,
     )
-    _prefix, message, _action_data = parse_llm_response(llm_response)
 
-    action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
-    final_msg = f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{message or ''}"
-    return f"REPLY: {final_msg}", proposed_actions
+
+def handle_taxonomy() -> str | None:
+    """Build taxonomy context. Returns the context string for use in call_taxonomy_loop().
+
+    Unlike handle_maintenance(), this returns the context itself so the caller
+    (scheduler or /reorganize command) can pass it to call_taxonomy_loop() async.
+    Returns None if there are no topics yet.
+    """
+    if not db.get_topic_map():
+        return None
+    return ctx.build_taxonomy_context()
+
 
 
 async def execute_maintenance_actions(actions: list[dict]) -> list[str]:

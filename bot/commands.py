@@ -225,7 +225,7 @@ async def clear_command(ctx):
 async def maintain_command(ctx):
     """Manually trigger maintenance diagnostics and dedup agent."""
     from services.dedup import format_dedup_suggestions
-    from services.views import DedupConfirmView, MaintenanceConfirmView
+    from services.views import DedupConfirmView, ProposedActionsView
 
     is_interaction = ctx.interaction is not None
     if is_interaction:
@@ -279,7 +279,7 @@ async def maintain_command(ctx):
         views_to_send.append(("dedup", view))
     if proposed_actions:
         maint_proposal_id = db.save_proposal("maintenance", proposed_actions)
-        maint_view = MaintenanceConfirmView(
+        maint_view = ProposedActionsView(
             maint_proposal_id,
             proposed_actions,
             pipeline.execute_maintenance_actions,
@@ -431,3 +431,63 @@ async def backup_command(ctx):
         await ctx.interaction.followup.send(f"🗄️ {result}")
     else:
         await ctx.send(f"🗄️ {result}")
+
+
+@bot.hybrid_command(
+    name="reorganize",
+    description="Run taxonomy reorganization — cluster and clean up the topic tree now",
+)
+@authorized_only()
+async def reorganize_command(ctx):
+    """Manually trigger the taxonomy reorganization agent."""
+    from services.views import ProposedActionsView
+
+    is_interaction = ctx.interaction is not None
+    if is_interaction:
+        await ctx.interaction.response.defer(ephemeral=False)
+
+    _ensure_db()
+
+    try:
+        async with ctx.channel.typing():
+            taxonomy_context = pipeline.handle_taxonomy()
+            if not taxonomy_context:
+                msg = "🌿 **Taxonomy** — no topics found yet ✅"
+                if is_interaction:
+                    await ctx.interaction.followup.send(msg)
+                else:
+                    await ctx.send(msg)
+                return
+
+            final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+
+        msg = final_result
+        for pfx in ("REPLY: ", "REPLY:"):
+            if msg.startswith(pfx):
+                msg = msg[len(pfx):]
+        main_text = f"🌿 **Taxonomy Reorganization**\n\n{msg.strip()}" if msg.strip() else \
+            "🌿 **Taxonomy Reorganization** — complete ✅"
+
+        if proposed_actions:
+            proposal_id = db.save_proposal("taxonomy", proposed_actions)
+            view = ProposedActionsView(
+                proposal_id,
+                proposed_actions,
+                pipeline.execute_maintenance_actions,
+            )
+            await send_long(ctx, main_text)
+            approve_text = "⏳ **Proposed taxonomy changes — approve or reject:**"
+            if is_interaction:
+                await ctx.interaction.followup.send(content=approve_text, view=view)
+            else:
+                await ctx.send(content=approve_text, view=view)
+        else:
+            await send_long(ctx, main_text)
+
+    except Exception as e:
+        logger.error(f"reorganize_command error: {e}", exc_info=True)
+        err = f"🌿 **Taxonomy** — error: `{e}`"
+        if is_interaction:
+            await ctx.interaction.followup.send(err)
+        else:
+            await ctx.send(err)
