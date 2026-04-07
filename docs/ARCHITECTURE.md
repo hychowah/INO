@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-04
+> Last updated: 2026-04-07
 
 ## Overview
 
@@ -132,11 +132,13 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
 | `services/state.py` | ~10 | Shared mutable state (e.g. `last_activity_at`) between bot and scheduler |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
+| `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
 | `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
 | **tests/** | | |
 | `tests/test_maintenance.py` | ~160 | Test maintenance diagnostics and dedup sub-agent |
 | `tests/test_dedup.py` | ~35 | Quick test for title similarity and duplicate detection |
+| `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 
 ---
 
@@ -494,9 +496,9 @@ The core brain of the system. Coordinates everything:
 6. **Parsing utilities** — `parse_llm_response()`, `extract_llm_action()`, `process_output()`.
 7. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
 8. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
-9. **`call_action_loop(mode, safe_actions, max_actions, context, preamble)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals. Returns `(final_result_str, proposed_actions_list)`.
+9. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
 10. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
-11. **`call_taxonomy_loop(taxonomy_context)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS` and `MAX_TAXONOMY_ACTIONS = 15`.
+11. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
 12. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
 ### services/kimi.py — LLM Subprocess (the only one)
@@ -716,6 +718,10 @@ backups/
 
 Directories older than `BACKUP_RETENTION_DAYS` (default: 7) are pruned automatically
 after each run. The `backups/` directory is `.gitignore`d and never committed.
+
+On Windows, the final temp-dir → timestamped-dir promotion now retries when sync/indexing tools
+(most notably OneDrive) briefly lock freshly copied vector-store files. This preserves the atomic
+backup model without requiring administrator privileges.
 
 ---
 

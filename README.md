@@ -166,6 +166,7 @@ For `kimi`, the CLI backend is used instead of the OpenAI-compatible settings ab
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
 | `LEARN_BACKUP_DIR` | `backups/` _(project root)_ | Directory for backup snapshots |
 | `LEARN_BACKUP_RETENTION_DAYS` | `7` | Days to retain backups (min: 1) |
+| `LEARN_VECTOR_STORE_PATH` | `data/vectors/` | Embedded Qdrant storage path |
 
 See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
 
@@ -192,6 +193,41 @@ pytest tests/ -n auto
 Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
 
 `make test` injects safe defaults for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` if your shell does not already provide them.
+
+## Admin Script
+
+For full taxonomy reconstruction planning, use the shadow-copy rebuild script:
+
+```bash
+python scripts/taxonomy_shadow_rebuild.py
+```
+
+The script runs taxonomy mode against temporary copies of `knowledge.db`, `chat_history.db`, and the vector store, shows the recorded safe actions plus approval-gated follow-ups, then asks whether to replay only the safe actions against live data. The backup is taken inside the apply phase immediately before the first live write.
+
+By default the script uses a more aggressive reconstruction directive than the normal weekly taxonomy run. Use `--conservative` to fall back to the standard taxonomy preamble.
+
+Each run also exports readable topic-tree snapshots to `backups/taxonomy_shadow_rebuild/` as markdown by default:
+
+- `live_before_latest.md` and a timestamped archive copy
+- `preview_after_latest.md` and a timestamped archive copy
+- `live_after_latest.md` and a timestamped archive copy after a successful apply
+
+Useful options:
+
+- `--yes` — skip the interactive apply confirmation
+- `--max-actions N` — change the preview action budget (default: 75)
+- `--structure-format txt` — export plain-text snapshots instead of markdown
+- `--structure-dir PATH` — write structure snapshots to a different directory
+
+Requirements:
+
+- Stop the bot and API first. The project uses embedded Qdrant and SQLite files, so concurrent live processes can cause file locks or invalidate the preview baseline.
+- Preview and apply run as separate fresh processes on purpose; the preview result is not a free-form fresh rerun.
+- Apply aborts if the live taxonomy no longer matches the preview baseline.
+- Approval-gated actions (`update_topic`, `unlink_topics`, `delete_topic`, `unlink_concept`, `update_concept`) are printed as manual follow-up only and are never auto-applied by the script.
+- Restore remains manual from the backup snapshot if replay diverges or you want to roll back.
+
+For the full operator workflow, examples, rollback steps, and Windows/OneDrive troubleshooting, see [docs/TAXONOMY_REBUILD.md](docs/TAXONOMY_REBUILD.md).
 
 ## Project Structure
 
@@ -228,14 +264,18 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 │   ├── skills/             # Modular LLM skill files (hot-reloadable)
 │   └── personas/           # Persona presets (buddy, coach, mentor)
 ├── backups/                # Timestamped backup snapshots (git-ignored)
+├── scripts/                # Operator/admin scripts and test harnesses
+│   ├── taxonomy_shadow_rebuild.py  # Manual taxonomy preview/apply workflow
+│   └── ...
 ├── webui/                  # Zero-dependency web dashboard
 │   ├── server.py           # HTTP server + routing
 │   ├── helpers.py          # HTML helpers (extracted from server.py)
-│   └── pages.py            # Page renderers (extracted from server.py)
+│   └── pages/              # Page renderers split into package modules
 ├── tests/                  # pytest test suite
 └── docs/
-    ├── architecture.md     # Full architecture documentation
+    ├── ARCHITECTURE.md     # Full architecture documentation
     ├── DEVNOTES.md         # Bug history & architectural decisions
+    ├── TAXONOMY_REBUILD.md # Manual operator guide for topic rebuilds
     └── index.md            # Knowledge base map
 ```
 
@@ -244,6 +284,7 @@ Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup,
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architecture diagrams, data flows, schema, module map
 - [CODING.md](CODING.md) — Development guide, conventions, async/sync patterns
 - [docs/DEVNOTES.md](docs/DEVNOTES.md) — Bug stories with root causes, multi-layer fixes, and design rationale
+- [docs/TAXONOMY_REBUILD.md](docs/TAXONOMY_REBUILD.md) — Manual trigger guide for taxonomy preview/apply runs
 
 ## Development Approach
 

@@ -141,6 +141,29 @@ def test_perform_backup_atomic_on_failure(env):
     assert tmp_dirs == [], f"Temp dir not cleaned up after failure: {tmp_dirs}"
 
 
+def test_perform_backup_retries_temp_dir_rename(env):
+    """perform_backup() retries temp-dir promotion on transient PermissionError."""
+    from services import backup as backup_module
+
+    original_replace = backup_module.os.replace
+    calls = {"count": 0}
+
+    def flaky_replace(src, dst):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise PermissionError("locked by sync client")
+        return original_replace(src, dst)
+
+    with (
+        patch.object(backup_module.os, "replace", side_effect=flaky_replace),
+        patch.object(backup_module.time, "sleep", return_value=None),
+    ):
+        result_path = backup_module.perform_backup()
+
+    assert calls["count"] == 2
+    assert Path(result_path).exists(), "Backup directory should exist after retry succeeds"
+
+
 # ---------------------------------------------------------------------------
 # test_prune_removes_old_keeps_new
 # ---------------------------------------------------------------------------

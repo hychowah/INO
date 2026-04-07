@@ -9,6 +9,7 @@ import json
 import logging
 import re
 from datetime import datetime
+from typing import Any
 
 import config
 import db
@@ -31,6 +32,7 @@ PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
 MAX_TAXONOMY_ACTIONS = 15
+DEFAULT_CONTINUATION_CONTEXT_LIMIT = 1500
 
 # Skill sets: which skill files to load per mode category.
 SKILL_SETS: dict[str, list[str]] = {
@@ -240,6 +242,12 @@ def _get_conv_session() -> tuple[str, bool]:
         return _conv_session_name, True
     _conv_session_last_used = now
     return _conv_session_name, False
+
+
+def _make_isolated_session_name(mode: str) -> str:
+    """Return a unique session name for isolated non-interactive modes."""
+    now = datetime.now()
+    return f"{mode}_{now.strftime('%H%M%S_%f')}"
 
 
 # ============================================================================
@@ -489,7 +497,14 @@ async def _call_llm_followup(
 # ============================================================================
 
 
-async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str = "default") -> str:
+async def call_with_fetch_loop(
+    mode: str,
+    text: str,
+    author: str,
+    user_id: str = "default",
+    session: str | None = None,
+    is_new_session: bool | None = None,
+) -> str:
     """
     Main entry point for LLM calls. Implements the fetch loop:
       1. Call LLM with lightweight context (reuse conversation session)
@@ -503,12 +518,16 @@ async def call_with_fetch_loop(mode: str, text: str, author: str, user_id: str =
     """
     extra_context = ""
 
+    # Session isolation: maintenance, review-check, and taxonomy-mode use
+    # dedicated sessions to prevent cross-contamination with the interactive
+    # session's cached system prompt. See DEVNOTES.md §11.
+    if session is not None:
+        is_new = True if is_new_session is None else is_new_session
     # Session isolation: maintenance and review-check use dedicated sessions
     # to prevent cross-contamination with the interactive session's cached
     # system prompt. See DEVNOTES.md §11.
-    if mode in ("maintenance", "review-check"):
-        now = datetime.now()
-        session = f"{mode}_{now.strftime('%H%M%S')}"
+    elif mode in ("maintenance", "review-check", "taxonomy-mode"):
+        session = _make_isolated_session_name(mode)
         is_new = True
         logger.info(f"Isolated session for {mode}: {session}")
     else:
@@ -748,6 +767,8 @@ async def call_action_loop(
     max_actions: int,
     context: str,
     preamble: str,
+    continuation_context_limit: int = DEFAULT_CONTINUATION_CONTEXT_LIMIT,
+    action_journal: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[dict]]:
     """Generic LLM action loop for semi-autonomous modes (maintenance, taxonomy, etc.).
 
@@ -765,6 +786,13 @@ async def call_action_loop(
     source = mode.split("-")[0]  # "maintenance", "taxonomy", etc.
     tools.set_action_source(source)
 
+    stable_session = None
+    next_is_new_session = None
+    if mode == "taxonomy-mode":
+        stable_session = _make_isolated_session_name(mode)
+        next_is_new_session = True
+        logger.info(f"Stable taxonomy session: {stable_session}")
+
     text = f"[{mode.upper()}] {preamble}\n\n{context}\n\n"
     text += (
         f"You may execute up to {max_actions} actions this run. "
@@ -777,7 +805,11 @@ async def call_action_loop(
             mode=mode,
             text=text,
             author=f"{source}_agent",
+            session=stable_session,
+            is_new_session=next_is_new_session,
         )
+        if stable_session is not None:
+            next_is_new_session = False
 
         prefix, message, action_data = parse_llm_response(llm_response)
 
@@ -809,6 +841,22 @@ async def call_action_loop(
                 f"{source} action {action_num + 1}/{max_actions}: "
                 f"{action_name} → {'error' if is_error else 'ok'}"
             )
+            if action_journal is not None:
+                entry: dict[str, Any] = {
+                    "step": action_num + 1,
+                    "action": action_name,
+                    "message": action_msg,
+                    "params": action_data.get("params", {}),
+                    "action_data": dict(action_data),
+                    "status": "error" if is_error else "executed",
+                    "result": result_clean,
+                    "replayable": not is_error and action_name not in {"fetch", "list_topics"},
+                }
+                if action_name == "add_topic" and not is_error:
+                    created_topic_id = db.get_session("last_added_topic_id")
+                    if created_topic_id and created_topic_id.isdigit():
+                        entry["created_topic_id"] = int(created_topic_id)
+                action_journal.append(entry)
         else:
             proposed_actions.append(action_data)
             actions_taken.append(
@@ -818,11 +866,29 @@ async def call_action_loop(
                 f"{source} action {action_num + 1}/{max_actions}: "
                 f"{action_name} → deferred (needs approval)"
             )
+            if action_journal is not None:
+                action_journal.append(
+                    {
+                        "step": action_num + 1,
+                        "action": action_name,
+                        "message": action_msg,
+                        "params": action_data.get("params", {}),
+                        "action_data": dict(action_data),
+                        "status": "proposed",
+                        "result": "pending user approval",
+                        "replayable": False,
+                    }
+                )
 
         action_log = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+        continuation_context = (
+            context
+            if continuation_context_limit <= 0
+            else context[:continuation_context_limit]
+        )
         text = (
             f"[{mode.upper()} continuation] Actions taken so far:\n{action_log}\n\n"
-            f"Original context:\n{context[:1500]}\n\n"
+            f"Original context:\n{continuation_context}\n\n"
             f"You have {max_actions - action_num - 1} action(s) remaining. "
             f"Output the next JSON action, or REPLY: with a summary if you're done."
         )
@@ -834,7 +900,11 @@ async def call_action_loop(
         + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
     )
     llm_response = await call_with_fetch_loop(
-        mode=mode, text=text, author=f"{source}_agent"
+        mode=mode,
+        text=text,
+        author=f"{source}_agent",
+        session=stable_session,
+        is_new_session=next_is_new_session,
     )
     _prefix, message, _action_data = parse_llm_response(llm_response)
 
@@ -879,7 +949,13 @@ async def call_maintenance_loop(
     )
 
 
-async def call_taxonomy_loop(taxonomy_context: str) -> tuple[str, list[dict]]:
+async def call_taxonomy_loop(
+    taxonomy_context: str,
+    max_actions: int = MAX_TAXONOMY_ACTIONS,
+    continuation_context_limit: int = DEFAULT_CONTINUATION_CONTEXT_LIMIT,
+    action_journal: list[dict[str, Any]] | None = None,
+    operator_directive: str | None = None,
+) -> tuple[str, list[dict]]:
     """Run the taxonomy reorganization LLM loop, executing up to MAX_TAXONOMY_ACTIONS.
 
     Safe actions (add_topic, link_topics) execute immediately.
@@ -897,12 +973,16 @@ async def call_taxonomy_loop(taxonomy_context: str) -> tuple[str, list[dict]]:
         "**NEVER** modify mastery_level, interval_days, next_review_at, ease_factor, or "
         "review_count. Do NOT re-propose renames listed in the ⛔ Suppressed Renames section."
     )
+    if operator_directive:
+        preamble = f"{preamble}\n\n## Operator Directive\n{operator_directive.strip()}"
     return await call_action_loop(
         mode="taxonomy-mode",
         safe_actions=SAFE_TAXONOMY_ACTIONS,
-        max_actions=MAX_TAXONOMY_ACTIONS,
+        max_actions=max_actions,
         context=taxonomy_context,
         preamble=preamble,
+        continuation_context_limit=continuation_context_limit,
+        action_journal=action_journal,
     )
 
 

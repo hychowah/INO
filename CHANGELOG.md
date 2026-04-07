@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `scripts/taxonomy_shadow_rebuild.py` — operator-facing taxonomy rebuild workflow; previews taxonomy changes against shadow copies of the live DBs/vector store, records replayable safe actions, writes before/after structure snapshots, then replays safe actions against live data after an immediate backup
+- `docs/TAXONOMY_REBUILD.md` — manual operator guide covering preview vs apply, aggressive vs conservative mode, structure exports, backup behavior, rollback, and Windows/OneDrive troubleshooting
+- `tests/test_taxonomy_shadow_rebuild.py` — focused coverage for taxonomy shadow rebuild helpers, replay validation, structure exports, and taxonomy loop parameter forwarding
+- `LEARN_VECTOR_STORE_PATH` env var (`config.py`) — overrides the embedded Qdrant storage path, enabling shadow-copy taxonomy preview runs against temporary vector-store directories
+- `call_taxonomy_loop(..., max_actions=, continuation_context_limit=, action_journal=, operator_directive=)` in `services/pipeline.py` — script hooks for aggressive taxonomy rebuilds, action journaling, and larger preview budgets
+- stable isolated taxonomy sessions in `services/pipeline.py` — taxonomy-mode now reuses one isolated LLM session across the action loop instead of piggybacking on the interactive conversation session
+- markdown/plain-text taxonomy structure exports under `backups/taxonomy_shadow_rebuild/` — `live_before`, `preview_after`, and `live_after` snapshots with latest + timestamped archive copies
 - `services/backup.py` — new backup service; snapshots `knowledge.db`, `chat_history.db`, and `data/vectors/` into a timestamped subdirectory under `backups/` (or `LEARN_BACKUP_DIR`); prunes snapshots older than `LEARN_BACKUP_RETENTION_DAYS` (default: 7); atomic write pattern ensures no partial backup is left on failure
 - `/backup` slash command in `bot/commands.py` — on-demand backup for the authorized user; defers interaction, runs `backup_service.run_backup_cycle()` in a thread executor, replies with snapshot name and pruned count
 - Scheduled backup in `services/scheduler.py` — `run_backup_cycle()` runs unconditionally on every weekly maintenance cycle, after maintenance and dedup passes
@@ -36,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ProposedActionsView` in `services/views.py` — renamed from `MaintenanceConfirmView`; now shared by both maintenance and taxonomy approval flows
 
 ### Fixed
+- `services/backup.py` — temp backup directory promotion now retries on transient Windows `PermissionError` file locks (common with OneDrive/Defender on freshly copied vector-store files) before failing the backup
 - Missing `QuizQuestionView` import in `bot/commands.py` (caused a `NameError` on skip-eligible `/learn` quiz deliveries)
 - Quiz deliveries via typed message (`on_message`) with `show_skip=False` fell through to `send_long_with_view` without metadata; guard widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py`
 - `CHANGELOG.md` — this file

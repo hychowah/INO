@@ -28,6 +28,7 @@
 15. [Quiz Intent Detection & Context Lifecycle](#15-quiz-intent-detection--context-lifecycle)
 16. [Quiz Anchor Concept ID](#16-quiz-anchor-concept-id)
 17. [Context Enrichment & Qdrant Migration](#17-context-enrichment--qdrant-migration)
+20. [Taxonomy Shadow Rebuild](#20-taxonomy-shadow-rebuild)
 
 ---
 
@@ -194,7 +195,7 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 
 **`AGENTS.md` is a pointer file** (~25 lines) — coding-agent entry point, not read by runtime LLM.
 
-**Session isolation:** Maintenance and review-check modes create dedicated sessions. Interactive modes share `_get_conv_session()` with 5-min idle timeout.
+**Session isolation:** Maintenance and review-check modes create dedicated sessions. Interactive modes share `_get_conv_session()` with 5-min idle timeout. Taxonomy-mode now also uses an isolated session, and the taxonomy action loop reuses one stable session across all iterations so operator-triggered rebuild passes do not contaminate the interactive session.
 
 ---
 
@@ -317,7 +318,30 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **§H3 — Module Extraction Refactor (2026-03-28):** Split oversized files into focused submodules: `db/core.py` (740→232) → extracted `db/migrations.py` (~265 lines, all migration blocks). `webui/server.py` (1090→198) → extracted `webui/helpers.py` (~145, HTML helpers) + `webui/pages.py` (~890, page renderers). `services/tools.py` (960→552) → extracted `services/tools_assess.py` (~360, quiz/assess action handlers). Child modules use `import db.core as _core` for dynamic DB path access (required by test fixtures that patch `db.core.KNOWLEDGE_DB`). Parent modules re-import from children after all local definitions to avoid circular imports.
 
-**§H4 — WebUI Package Split + Forecast Feature + Configurable SR Exponent (2026-04-04):** `webui/pages.py` (~890 lines) further split into `webui/pages/` package (6 modules: `dashboard.py`, `topics.py`, `concepts.py`, `reviews.py`, `activity.py`, `graph.py`; ~950 total lines). All 10 page functions re-exported via `webui/pages/__init__.py`. Added `/forecast` page with D3 v7 bar chart (`webui/static/forecast.js`, ~245 lines) showing due concepts bucketed by days/weeks/months with Overdue always first; drill-down fetches concept list sorted mastery ASC. DB layer: `get_due_forecast(range_type)` and `get_forecast_bucket_concepts(range_type, bucket_key)` added to `db/concepts.py` using rolling `DATE('now', N || ' days')` windows (not calendar weeks). `config.SR_INTERVAL_EXPONENT` introduced (`LEARN_SR_INTERVAL_EXPONENT` env var, default `0.05`) replacing 3 hardcoded literals in `services/tools_assess.py`.
+**§H4 — WebUI Package Split + Forecast Feature + Configurable SR Exponent (2026-04-04):** `webui/pages.py` (~890 lines) further split into `webui/pages/` package (6 modules: `dashboard.py`, `topics.py`, `concepts.py`, `reviews.py`, `activity.py`, `graph.py`; ~950 total lines). All 10 page functions re-exported via `webui/pages/__init__.py`. Added `/forecast` page with D3 v7 bar chart (`webui/static/forecast.js`, ~245 lines) showing due concepts bucketed by days/weeks/months with Overdue always first; drill-down fetches concept list sorted mastery ASC. DB layer: `get_due_forecast(range_type)` and `get_forecast_bucket_concepts(range_type, bucket_key)` added to `db/concepts.py` using rolling `DATE('now', N || ' days')` windows (not calendar weeks). `config.SR_INTERVAL_EXPONENT` introduced (`LEARN_SR_INTERVAL_EXPONENT` env var, default `0.075`) replacing 3 hardcoded literals in `services/tools_assess.py`.
+
+---
+
+## 20. Taxonomy Shadow Rebuild
+
+**Problem:** The standard taxonomy loop is conservative and mutates live state immediately for safe actions. For a full operator-driven rebuild, that was the wrong execution model: previewing changes needed to be isolated from live data, but a pure dry-run could not produce trustworthy IDs for dependent actions like `add_topic` followed by `link_topics`.
+
+**Design — shadow preview + replay:**
+
+1. **Separate-process shadow preview** (`scripts/taxonomy_shadow_rebuild.py`): the parent process copies `knowledge.db`, `chat_history.db`, and the embedded vector store to a temp workspace, then launches a child process with `LEARN_DB_PATH`, `LEARN_CHAT_DB_PATH`, and `LEARN_VECTOR_STORE_PATH` pointing at those shadow copies.
+2. **Real taxonomy execution on shadow data**: preview runs the normal taxonomy loop against the copied stores, not a simulation. This preserves real topic IDs and lets the loop create/link topics exactly as it would on live data.
+3. **Action journaling in `call_action_loop()`**: safe actions append structured entries to an optional `action_journal` list. `add_topic` records the newly created topic ID via `last_added_topic_id`, making downstream replay validation possible.
+4. **Stable taxonomy session**: taxonomy-mode now uses one isolated session reused across the entire action loop. This avoids mixing operator rebuild traffic into the interactive conversation session and keeps the rebuild turns coherent.
+5. **Apply = replay, not fresh rerun**: the live apply phase does **not** ask the LLM to regenerate actions. It first checks that the live taxonomy still matches the preview baseline, takes a fresh backup, then replays only the recorded safe actions in order.
+6. **ID mismatch is a hard stop**: when replaying `add_topic`, the live-created ID must match the preview-created ID. If it does not, replay aborts because subsequent `link_topics` operations would target the wrong nodes.
+7. **Approval-gated actions remain manual in v1**: `update_topic`, `unlink_topics`, `delete_topic`, `unlink_concept`, and `update_concept` are printed as follow-up work only. The script never auto-applies them.
+8. **Structure snapshots are the operator-facing artifact**: each run writes `live_before`, `preview_after`, and `live_after` topic-tree snapshots under `backups/taxonomy_shadow_rebuild/` in markdown or plain text.
+
+**Why separate processes?** `db/core.py` and `services/backup.py` capture path configuration at import time. Switching a single Python process from shadow paths back to live paths would be brittle and easy to get wrong. Separate child processes keep shadow preview and live apply isolated.
+
+**Windows/OneDrive note:** backup finalization uses an atomic temp-dir rename. On Windows, OneDrive or Defender can briefly lock newly copied vector-store files and block that rename. `services/backup.py` now retries the final rename a few times before surfacing the error. If the backup directory lives under OneDrive, operators should prefer pausing sync or overriding `LEARN_BACKUP_DIR` to a non-OneDrive path during manual rebuilds.
+
+**Operator guide:** see `docs/TAXONOMY_REBUILD.md` for the full manual workflow.
 
 ---
 

@@ -96,7 +96,9 @@ BACKUP_RETENTION_DAYS = max(1, int(os.environ.get("LEARN_BACKUP_RETENTION_DAYS",
 # ============================================================================
 
 # Path to Qdrant embedded storage (alongside SQLite databases)
-VECTOR_STORE_PATH = BASE_DIR / "data" / "vectors"
+VECTOR_STORE_PATH = Path(
+    os.environ.get("LEARN_VECTOR_STORE_PATH", str(BASE_DIR / "data" / "vectors"))
+)
 
 # Sentence-transformers model for embeddings
 EMBEDDING_MODEL = os.environ.get("LEARN_EMBEDDING_MODEL", "all-mpnet-base-v2")

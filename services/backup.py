@@ -11,8 +11,10 @@ directories are pruned after each run.
 """
 
 import logging
+import os
 import shutil
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -70,6 +72,29 @@ def _backup_vectors(src_dir: Path, dest_dir: Path) -> None:
     shutil.copytree(src_dir, dest_dir)
 
 
+def _finalize_backup_dir(tmp_dir: Path, final_dir: Path) -> None:
+    """Promote a completed temp backup dir to its final name.
+
+    On Windows, file indexers/sync tools such as OneDrive can briefly hold a
+    handle on newly copied files, causing an immediate rename to fail with
+    PermissionError. Retry a few times before surfacing the error.
+    """
+    delays = (0.1, 0.25, 0.5, 1.0, 2.0)
+
+    for attempt, delay in enumerate(delays, start=1):
+        try:
+            os.replace(tmp_dir, final_dir)
+            return
+        except PermissionError:
+            if attempt == len(delays):
+                raise
+            logger.warning(
+                f"[BACKUP] Temp dir rename blocked (attempt {attempt}/{len(delays)}): "
+                f"{tmp_dir} -> {final_dir}; retrying in {delay:.2f}s"
+            )
+            time.sleep(delay)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -107,7 +132,7 @@ def perform_backup() -> str:
         _backup_vectors(config.VECTOR_STORE_PATH, tmp_dir / "vectors")
 
         # Atomic commit: rename temp dir to final name
-        tmp_dir.rename(final_dir)
+        _finalize_backup_dir(tmp_dir, final_dir)
         logger.info(f"[BACKUP] Snapshot complete: {final_dir}")
         return str(final_dir)
 
