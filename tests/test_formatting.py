@@ -1,10 +1,14 @@
 """Tests for services.formatting — Discord message truncation helpers."""
 
+import pytest
+
 from services.formatting import (
     DISCORD_CHAR_LIMIT,
     truncate_for_discord,
     truncate_with_suffix,
 )
+
+pytestmark = pytest.mark.unit
 
 # ============================================================================
 # truncate_for_discord

@@ -2,6 +2,7 @@
 Concept CRUD operations, search, and detail queries.
 """
 
+import os
 import logging
 import sqlite3
 from datetime import datetime, timedelta
@@ -12,6 +13,11 @@ from db.core import _conn, _normalize_dt_str, _now_iso
 logger = logging.getLogger("learn.db.concepts")
 
 
+def _vector_sync_disabled() -> bool:
+    """Allow tests to disable automatic vector sync to avoid heavy model loads."""
+    return os.environ.get("LEARN_DISABLE_VECTOR_SYNC") == "1"
+
+
 # ============================================================================
 # Vector store sync helpers (best-effort, non-fatal)
 # ============================================================================
@@ -19,6 +25,8 @@ logger = logging.getLogger("learn.db.concepts")
 
 def _vector_upsert(concept_id: int, title: str, description: Optional[str] = None):
     """Sync a concept to the vector store. Silently skips on failure."""
+    if _vector_sync_disabled():
+        return
     try:
         from db.vectors import upsert_concept
 
@@ -29,6 +37,8 @@ def _vector_upsert(concept_id: int, title: str, description: Optional[str] = Non
 
 def _vector_delete(concept_id: int):
     """Remove a concept from the vector store. Silently skips on failure."""
+    if _vector_sync_disabled():
+        return
     try:
         from db.vectors import delete_concept
 
@@ -391,14 +401,15 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
     num_buckets = 7
 
     conn = _conn()
+    today = datetime.now().date().isoformat()
 
     # --- Overdue bucket ---
     overdue_row = conn.execute("""
         SELECT COUNT(*) as cnt, COALESCE(AVG(mastery_level), 0) as avg_m
         FROM concepts
         WHERE next_review_at IS NOT NULL
-          AND DATE(next_review_at) < DATE('now')
-    """).fetchone()
+          AND DATE(next_review_at) < DATE(?)
+    """, (today,)).fetchone()
     overdue_count = overdue_row["cnt"] if overdue_row else 0
     # Not included in main buckets list — returned separately for chart rendering
 
@@ -413,10 +424,10 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
             SELECT COUNT(*) as cnt, COALESCE(AVG(mastery_level), 0) as avg_m
             FROM concepts
             WHERE next_review_at IS NOT NULL
-              AND DATE(next_review_at) >= DATE('now', ? || ' days')
-              AND DATE(next_review_at) < DATE('now', ? || ' days')
-        """,
-            (str(start_offset), str(end_offset)),
+                            AND DATE(next_review_at) >= DATE(?, ? || ' days')
+                            AND DATE(next_review_at) < DATE(?, ? || ' days')
+                        """,
+                        (today, str(start_offset), today, str(end_offset)),
         ).fetchone()
 
         count = row["cnt"] if row else 0
@@ -481,6 +492,7 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
 
     window_days = window_sizes[range_type]
     conn = _conn()
+    today = datetime.now().date().isoformat()
 
     if bucket_key == "overdue":
         rows = conn.execute("""
@@ -488,9 +500,9 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
                    c.interval_days, c.review_count
             FROM concepts c
             WHERE c.next_review_at IS NOT NULL
-              AND DATE(c.next_review_at) < DATE('now')
+              AND DATE(c.next_review_at) < DATE(?)
             ORDER BY c.mastery_level ASC
-        """).fetchall()
+        """, (today,)).fetchall()
     else:
         try:
             i = int(bucket_key)
@@ -505,11 +517,11 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
                    c.interval_days, c.review_count
             FROM concepts c
             WHERE c.next_review_at IS NOT NULL
-              AND DATE(c.next_review_at) >= DATE('now', ? || ' days')
-              AND DATE(c.next_review_at) < DATE('now', ? || ' days')
+              AND DATE(c.next_review_at) >= DATE(?, ? || ' days')
+              AND DATE(c.next_review_at) < DATE(?, ? || ' days')
             ORDER BY c.mastery_level ASC
-        """,
-            (str(start_offset), str(end_offset)),
+            """,
+            (today, str(start_offset), today, str(end_offset)),
         ).fetchall()
 
     conn.close()

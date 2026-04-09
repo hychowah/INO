@@ -1,8 +1,15 @@
-.PHONY: test lint format run-bot run-api
+.PHONY: test test-fast test-all lint format run-bot run-api
 
-# Run the test suite
-test:
-	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/', '-v', '--tb=short'], env=env))"
+# Run the full test suite (parallel)
+test: test-all
+
+# Run only pure unit tests (fast feedback, no DB or network)
+test-fast:
+	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', '-m', 'unit'], env=env))"
+
+# Run the full test suite
+test-all:
+	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/'], env=env))"
 
 # Lint with Ruff
 lint:
