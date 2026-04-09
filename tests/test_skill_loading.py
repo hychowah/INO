@@ -99,14 +99,23 @@ def test_mode_to_skill_set_unknown_falls_back():
 
 def test_skill_sets_structure():
     """SKILL_SETS has the expected entries."""
-    assert set(SKILL_SETS.keys()) == {"interactive", "review", "maintenance", "quiz-packaging", "taxonomy"}
+    assert set(SKILL_SETS.keys()) == {
+        "interactive",
+        "review",
+        "maintenance",
+        "quiz-packaging",
+        "taxonomy",
+        "preference-edit",
+    }
 
 
 def test_core_in_all_skill_sets():
-    """core.md is loaded for every skill set except taxonomy (self-contained agent)."""
+    """core.md is loaded for every skill set except self-contained agents."""
+    # These skill sets are intentionally isolated and don't use core.
+    no_core_sets = {"taxonomy", "preference-edit"}
     for name, skills in SKILL_SETS.items():
-        if name == "taxonomy":
-            assert "core" not in skills, "taxonomy skill set should not include core"
+        if name in no_core_sets:
+            assert "core" not in skills, f"{name} skill set should not include core"
         else:
             assert "core" in skills, f"core missing from skill set '{name}'"
 

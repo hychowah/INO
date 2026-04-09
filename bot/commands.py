@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+import config
 import db
 from bot.app import bot
 from bot.auth import authorized_only
@@ -18,6 +19,7 @@ from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
 from services.views import (
     AddConceptConfirmView,
+    PreferenceUpdateView,
     QuizNavigationView,
     QuizQuestionView,
     SuggestTopicConfirmView,
@@ -487,6 +489,56 @@ async def reorganize_command(ctx):
     except Exception as e:
         logger.error(f"reorganize_command error: {e}", exc_info=True)
         err = f"🌿 **Taxonomy** — error: `{e}`"
+        if is_interaction:
+            await ctx.interaction.followup.send(err)
+        else:
+            await ctx.send(err)
+
+
+@bot.hybrid_command(
+    name="preference",
+    description="View or update your preferences",
+)
+@authorized_only()
+async def preference_command(ctx, *, text: str = ""):
+    """Show current preferences (no args) or edit them via LLM (with args)."""
+    is_interaction = ctx.interaction is not None
+
+    _ensure_db()
+
+    if not text:
+        # Display mode — no LLM call needed
+        try:
+            content = config.PREFERENCES_MD.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            content = "_(preferences.md not found)_"
+        await send_long(ctx, f"## Your Preferences\n\n```\n{content}\n```")
+        return
+
+    # Edit mode
+    if is_interaction:
+        await ctx.interaction.response.defer(ephemeral=False)
+
+    try:
+        async with ctx.channel.typing():
+            preview_text, proposed_content = await pipeline.call_preference_edit(text)
+
+        view = PreferenceUpdateView(proposed_content, pipeline.execute_preference_update)
+        msg = f"📝 **Proposed preference update**\n\n{preview_text}\n\n*Review the change and confirm below.*"
+        if is_interaction:
+            await ctx.interaction.followup.send(content=msg, view=view)
+        else:
+            await ctx.send(content=msg, view=view)
+
+    except ValueError as e:
+        err = f"⚠️ Could not parse LLM response: `{e}`"
+        if is_interaction:
+            await ctx.interaction.followup.send(err)
+        else:
+            await ctx.send(err)
+    except Exception as e:
+        logger.error(f"preference_command error: {e}", exc_info=True)
+        err = f"⚠️ Preference update failed: `{e}`"
         if is_interaction:
             await ctx.interaction.followup.send(err)
         else:
