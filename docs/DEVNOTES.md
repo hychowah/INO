@@ -29,6 +29,7 @@
 16. [Quiz Anchor Concept ID](#16-quiz-anchor-concept-id)
 17. [Context Enrichment & Qdrant Migration](#17-context-enrichment--qdrant-migration)
 20. [Taxonomy Shadow Rebuild](#20-taxonomy-shadow-rebuild)
+21. [Preference-Edit Isolated Skill Path](#21-preference-edit-isolated-skill-path)
 
 ---
 
@@ -309,6 +310,20 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
 
 **Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `bot/commands.py` (`/review` anchor pre-set), `scripts/agent.py` (assess guard), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`.
+
+---
+
+## 21. Preference-Edit Isolated Skill Path
+
+**What changed:** `/preference` now has two modes. With no arguments it shows the current runtime `data/preferences.md`. With text input it enters a one-shot edit flow that asks the LLM to rewrite the full preferences file, then shows `PreferenceUpdateView` Apply/Reject buttons before any write happens.
+
+**Why it bypasses `_call_llm()`:** `call_preference_edit()` in `services/pipeline.py` talks to the provider directly instead of using the normal `_call_llm()` path. That is deliberate. The normal path injects conversation history and runs the action-extraction logic used for JSON actions; both behaviors corrupt the required fenced ` ```preferences ` output format. The isolated path keeps the response as plain text plus one fenced block so the parser can reliably extract the rewritten file.
+
+**Template/runtime file split:** The tracked file is now `data/preferences.template.md`. The live file used in prompts remains `data/preferences.md`, but it is git-ignored and copied from the template on first bot startup (`bot/events.py` `on_ready()`). This avoids committing personal preference edits while still giving fresh clones a default file.
+
+**Why there is no DB-backed proposal:** `PreferenceUpdateView` carries the proposed file content in memory and calls `execute_preference_update()` directly on approval. Unlike maintenance or dedup proposals, this flow edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
+
+**Key files:** `bot/commands.py` (`/preference`), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/pipeline.py` (`SKILL_SETS["preference-edit"]`, `_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
 
 ---
 

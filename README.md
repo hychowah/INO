@@ -18,6 +18,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Web dashboard** — Zero-dependency read-only HTTP UI with interactive D3.js topic tree and force-directed graph
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
+- **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
 - **Configurable personas** — Buddy / Coach / Mentor presets loaded from Markdown files
 - **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
 
@@ -184,11 +185,16 @@ If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model)
 ## Testing
 
 ```bash
-pytest tests/ -v
+make test
 
-# Optional: parallel execution (~3x faster on multi-core machines)
-pytest tests/ -n auto
+# Fast unit-only subset
+make test-fast
+
+# Direct pytest invocation uses pyproject defaults
+pytest tests/
 ```
+
+`pytest` now defaults to `-n 4 --dist loadfile --tb=short` via `pyproject.toml`, so parallel execution is the standard path rather than an opt-in flag. Use `make test-fast` for the unit-marked subset when you want quicker feedback.
 
 Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
 
@@ -262,6 +268,8 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   └── ...
 ├── data/
 │   ├── skills/             # Modular LLM skill files (hot-reloadable)
+│   ├── preferences.template.md  # Tracked default copied to runtime preferences.md on first bot startup
+│   ├── preferences.md      # Runtime preferences file (local, git-ignored)
 │   └── personas/           # Persona presets (buddy, coach, mentor)
 ├── backups/                # Timestamped backup snapshots (git-ignored)
 ├── scripts/                # Operator/admin scripts and test harnesses

@@ -19,6 +19,7 @@ The bot is the primary user-facing interface. All commands require the calling u
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
 | `/maintain` | Run the automated knowledge-base maintenance agent. |
 | `/reorganize` | Manually trigger the weekly taxonomy reorganization agent. |
+| `/preference [text]` | Show the current runtime `preferences.md` when omitted, or propose an LLM-generated edit with Apply/Reject buttons when `text` describes a change. |
 | `/backup` | Create an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's chat history. |
 | `/ping` | Check that the bot is alive. |

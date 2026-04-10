@@ -18,7 +18,8 @@ All commands (pytest, scripts, bot) **must** run inside the project's virtual en
 & .\venv\Scripts\Activate.ps1
 
 # Then run commands normally
-python -m pytest tests/ -v
+make test
+make test-fast
 python scripts/test_similarity.py
 python bot.py
 ```
@@ -56,9 +57,13 @@ ROOT
 │   │   ├── core.md        # Role, philosophy, response format, universal actions, rules
 │   │   ├── quiz.md        # Quiz/assess actions, scoring rubric, adaptive quiz evolution
 │   │   ├── knowledge.md   # Topic/concept CRUD, casual Q&A, overlap detection
-│   │   └── maintenance.md # Maintenance mode behavioral rules
+│   │   ├── maintenance.md # Maintenance mode behavioral rules
+│   │   ├── taxonomy.md    # Taxonomy reorganization instructions (`/reorganize`, weekly scheduler)
+│   │   ├── preferences.md # Preference-edit instructions for `/preference` text mode
+│   │   └── quiz_generator.md # P1 scheduled-quiz question generator instructions
 │   ├── personas/          # Persona preset .md files (mentor, coach, buddy)
-│   └── preferences.md     # Runtime LLM user preferences
+│   ├── preferences.template.md # Tracked default copied to runtime preferences.md on first bot startup
+│   └── preferences.md     # Runtime LLM user preferences (local, git-ignored)
 │
 ├── services/              # All business logic
 │   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
@@ -68,7 +73,9 @@ ROOT
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── llm.py             # LLM provider abstraction (kimi-cli, OpenAI-compat)
-│   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)    ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning│   ├── state.py           # Shared mutable state (avoids circular imports)
+│   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
+│   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
+│   ├── state.py           # Shared mutable state (avoids circular imports)
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
@@ -93,14 +100,18 @@ ROOT
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, routing + Handler class
 │   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
-│   ├── pages.py           # Page renderers (page_dashboard, page_topic_detail, etc.)
-│   └── static/            # CSS, JS (graph.js for D3 graph, concepts.js, tree.js)
+│   ├── pages/             # Page renderers package (dashboard, topics, concepts, reviews, activity, graph)
+│   └── static/            # CSS, JS (tree.js, concepts.js, forecast.js)
 ├── docs/                  # Architecture, dev notes, plans (index.md for map)
-│   ├── architecture.md
+│   ├── ARCHITECTURE.md
+│   ├── API.md
 │   ├── DEVNOTES.md
+│   ├── SETUP.md
+│   ├── TAXONOMY_REBUILD.md
 │   ├── index.md
 │   └── plans/             # Feature plans (mobile-conversion.md, concept-relations.md)
 ├── scripts/               # agent.py (maintenance CLI), utility scripts
+│   ├── taxonomy_shadow_rebuild.py # Operator taxonomy preview/apply workflow
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
 │   └── test_similarity.py # Configurable similarity test harness (tune thresholds)
 └── .env                   # Secrets (git-ignored)
@@ -257,14 +268,15 @@ with _connection() as conn:
 Tests use **pytest**. **Activate the venv first** (see top of this file):
 ```powershell
 & .\venv\Scripts\Activate.ps1              # if not already active
-python -m pytest tests/ -v            # all tests
-python -m pytest tests/ -n auto       # parallel (~3x faster on multi-core)
+make test                             # full suite (parallel defaults from pyproject.toml)
+make test-fast                        # unit-marked subset
+python -m pytest tests/ -n 0          # single-threaded override for debugging
 python -m pytest tests/test_llm.py -v # single file
 ```
 
 **Vector store tests** (`tests/test_vectors.py`) are automatically skipped when `qdrant-client` is not installed — `pytest.importorskip("qdrant_client")` at module top.
 
-**Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store` — no model or Qdrant needed for the rest of the suite.
+**Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store`, and they set `LEARN_DISABLE_VECTOR_SYNC=1` so CRUD helpers do not trigger embedding-model loads during ordinary test runs.
 
 **Any test that reads or writes `session_state`** (via `db.get_session` / `db.set_session`) **must use the `test_db` fixture**. The reason: `db.chat` imports `CHAT_DB` by value at import time, so patching `db.core.CHAT_DB` alone is not sufficient. The `test_db` fixture patches `db.chat.CHAT_DB` directly. Without it, session writes in the test bleed into the real `chat_history.db`.
 
@@ -280,7 +292,7 @@ classes, fixtures, and assertions.
 |------|------|-----|
 | `data/skills/*.md` | **High** | Runtime LLM prompt skill files. Every word affects behavior. Test changes by chatting with the bot. See DEVNOTES §1 for past formatting bugs. **No tone/style directives here** — those go in persona files. Preserve `<!-- DO NOT REMOVE -->` comments. |
 | `AGENTS.md` | **Low** | Pointer file only — references data/skills/. No instructions here. |
-| `data/preferences.md` | **Medium** | User preferences injected into every LLM call. |
+| `data/preferences.template.md` | **Medium** | Tracked default for user preferences. The runtime `data/preferences.md` copy is git-ignored and auto-created from this template on first startup. |
 | `data/personas/*.md` | **Medium** | Persona presets. Changes reflected without restart (mtime cache). Token budget: ~600 tokens max per file. |
 | `db/core.py` migrations | **High** | Schema migrations are append-only (in `db/migrations.py`). Never modify existing migration blocks. |
 | `services/pipeline.py` | **Medium** | Central orchestrator. Changes here affect both Discord and API. |
