@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-07
+> Last updated: 2026-04-10
 
 ## Overview
 
@@ -69,7 +69,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and `data/preferences.md`. With `LLM_PROVIDER="openai_compat"`, that assembled prompt is sent directly in the API request. With `LLM_PROVIDER="kimi"`, the provider prepends file references for `AGENTS.md`, the active persona file, and `data/preferences.md` before invoking the CLI.
+**LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and the runtime `data/preferences.md` file. That runtime file is git-ignored and auto-copied from tracked `data/preferences.template.md` on first bot startup. With `LLM_PROVIDER="openai_compat"`, the assembled prompt is sent directly in the API request. With `LLM_PROVIDER="kimi"`, the provider prepends file references for `AGENTS.md`, the active persona file, and the runtime `data/preferences.md` before invoking the CLI.
 
 ---
 
@@ -83,12 +83,14 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/skills/knowledge.md` | ~170 | Knowledge skill — topic/concept CRUD, casual Q&A, overlap detection (interactive + maintenance) |
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
 | `data/skills/taxonomy.md` | ~80 | Taxonomy skill — topic tree restructuring, grouping rules, rename criteria, suppressed-rename tracking (taxonomy mode only) |
+| `data/skills/preferences.md` | ~30 | Preference-edit skill — isolated fenced-output editor used by `/preference` text edits |
 | `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection, JSON output format (scheduled quiz P1 only) |
-| `data/preferences.md` | ~20 | User learning preferences (interests, style) |
+| `data/preferences.template.md` | ~30 | Tracked default preferences file copied to the runtime file on first bot startup |
+| `data/preferences.md` | ~20 | Runtime user preferences copy (git-ignored, injected into every LLM call) |
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
 | `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
-| `bot/commands.py` | ~435 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, etc.) |
+| `bot/commands.py` | ~545 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
@@ -122,7 +124,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/pipeline.py` | ~675 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation |
+| `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
 | `services/llm.py` | ~330 | LLM provider abstraction — kimi CLI integration and OpenAI-compatible chat-completions adapter |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
@@ -186,14 +188,14 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │
          ├─── Assemble prompt:
          │      build_system_prompt(mode)
-         │      → loads data/skills/* + active persona + preferences.md
+         │      → loads data/skills/* + active persona + runtime preferences.md
          │      + dynamic context (topics, due, chat history)
          │      + "User said: <text>"
          │
          ├─── llm_provider.send(prompt, system_prompt)       ← provider abstraction
          │         │
          │         ├── openai_compat: sends assembled prompt directly in API messages
-         │         └── kimi: prepends file refs (AGENTS.md + persona + preferences)
+         │         └── kimi: prepends file refs (AGENTS.md + persona + runtime preferences)
          │             before invoking the CLI subprocess
          │
          ├─── pipeline.extract_llm_action(raw_output)

@@ -875,3 +875,59 @@ async def _send_quiz_response(
         return
 
     await interaction.followup.send(truncate_for_discord(response))
+
+
+# ============================================================================
+# Preference update confirmation view
+# ============================================================================
+
+
+class PreferenceUpdateView(discord.ui.View):
+    """Apply / Reject buttons shown when the user proposes a preference edit.
+
+    Proposed content is held in-memory (self.proposed_content); no DB proposal
+    needed for a single-file write operation.
+    """
+
+    def __init__(self, proposed_content: str, execute_callback: Callable[..., Awaitable[str]]):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.proposed_content = proposed_content
+        self.execute_callback = execute_callback
+        self.decided = False
+
+    @discord.ui.button(label="Apply", style=discord.ButtonStyle.success, emoji="✅")
+    async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+        try:
+            result = await self.execute_callback(self.proposed_content)
+        except Exception as e:
+            logger.error(f"PreferenceUpdateView apply error: {e}", exc_info=True)
+            result = f"⚠️ Failed to update preferences: {e}"
+        try:
+            await interaction.response.edit_message(content=result, view=self)
+        except discord.errors.NotFound:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+        try:
+            await interaction.response.edit_message(content="Update discarded.", view=self)
+        except discord.errors.NotFound:
+            pass
+        self.stop()
+
+    def _disable_all(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    async def on_timeout(self):
+        self._disable_all()

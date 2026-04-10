@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shutil
 
 import discord
 from discord.ext import commands
@@ -30,6 +31,9 @@ logger = logging.getLogger("bot")
 
 @bot.event
 async def on_ready():
+    if not config.PREFERENCES_MD.exists() and config.PREFERENCES_TEMPLATE_MD.exists():
+        shutil.copy(config.PREFERENCES_TEMPLATE_MD, config.PREFERENCES_MD)
+        logger.info("Copied preferences.template.md → preferences.md")
     logger.info("=" * 50)
     logger.info("Learning Agent Bot is ONLINE!")
     logger.info("=" * 50)

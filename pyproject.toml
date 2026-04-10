@@ -4,7 +4,13 @@ requires-python = ">=3.10"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "--tb=short"
+addopts = "-n 4 --dist loadfile --tb=short"
+markers = [
+    "unit: pure logic, no DB or network",
+    "integration: requires DB or async infrastructure",
+    "slow: network or heavy I/O",
+    "xdist_group(name): keep related tests on the same xdist worker",
+]
 
 [tool.coverage.run]
 omit = ["tests/*", "scripts/*", "venv/*"]

@@ -13,8 +13,10 @@
 | `data/skills/knowledge.md` | Topic/concept CRUD, casual Q&A, overlap detection | Interactive + maintenance modes |
 | `data/skills/maintenance.md` | Maintenance mode behavioral rules, triage priorities | Maintenance mode only |
 | `data/skills/taxonomy.md` | Taxonomy reorganization rules — topic tree restructuring, grouping, rename criteria, suppression | Taxonomy mode only (`/reorganize`) |
+| `data/skills/preferences.md` | Preference editor instructions and fenced output format | `preference-edit` mode only (`/preference` with text) |
 | `data/skills/quiz_generator.md` | P1 question generation instructions for reasoning model | Scheduled quiz P1 only (not loaded via SKILL_SETS) |
-| `data/preferences.md` | User learning preferences | Every LLM call |
+| `data/preferences.template.md` | Tracked default preferences file copied on first startup | Repository only |
+| `data/preferences.md` | Runtime user preferences copy (git-ignored) | Every LLM call |
 | `data/personas/*.md` | Persona presets (mentor, coach, buddy) | Every LLM call (one active) |
 
 ## Developer Documentation
@@ -38,9 +40,10 @@ REVIEW-CHECK     → review         → core + quiz
 MAINTENANCE      → maintenance    → core + maintenance + knowledge
 quiz-packaging   → quiz-packaging → core + quiz  (P2 scheduled quiz packaging)
 TAXONOMY-MODE    → taxonomy       → taxonomy only   (/reorganize, weekly scheduler)
+preference-edit  → preference-edit → preferences only   (/preference text edit path)
 ```
 
-Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`.
+Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. The `/preference` edit path is the exception: it calls `_get_base_prompt("preference-edit")` directly and bypasses `_mode_to_skill_set()` and `_call_llm()`.
 
 ## Editing Guidelines
 

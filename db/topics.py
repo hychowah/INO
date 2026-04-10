@@ -2,6 +2,7 @@
 Topic CRUD operations, topic maps, and hierarchy queries.
 """
 
+import os
 import logging
 import sqlite3
 from typing import Dict, List, Optional
@@ -11,6 +12,11 @@ from db.core import _conn, _now_iso
 logger = logging.getLogger("learn.db.topics")
 
 
+def _vector_sync_disabled() -> bool:
+    """Allow tests to disable automatic vector sync to avoid heavy model loads."""
+    return os.environ.get("LEARN_DISABLE_VECTOR_SYNC") == "1"
+
+
 # ============================================================================
 # Vector store sync helpers (best-effort, non-fatal)
 # ============================================================================
@@ -18,6 +24,8 @@ logger = logging.getLogger("learn.db.topics")
 
 def _vector_upsert(topic_id: int, title: str, description: Optional[str] = None):
     """Sync a topic to the vector store. Silently skips on failure."""
+    if _vector_sync_disabled():
+        return
     try:
         from db.vectors import upsert_topic
 
@@ -28,6 +36,8 @@ def _vector_upsert(topic_id: int, title: str, description: Optional[str] = None)
 
 def _vector_delete(topic_id: int):
     """Remove a topic from the vector store. Silently skips on failure."""
+    if _vector_sync_disabled():
+        return
     try:
         from db.vectors import delete_topic
 

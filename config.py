@@ -46,6 +46,7 @@ DATA_DIR = BASE_DIR / "data"
 SKILLS_DIR = DATA_DIR / "skills"
 PERSONAS_DIR = DATA_DIR / "personas"
 PREFERENCES_MD = DATA_DIR / "preferences.md"
+PREFERENCES_TEMPLATE_MD = DATA_DIR / "preferences.template.md"
 
 # Max Discord message length
 MAX_MESSAGE_LENGTH = 1900

@@ -104,13 +104,16 @@ The application degrades gracefully if embeddings or vector storage are unavaila
 
 ```bash
 make test
-# equivalent to: python -m pytest tests/ -v --tb=short
+# runs `pytest tests/` with safe env defaults injected by the Makefile
 
-# Optional: parallel execution (~3x faster on multi-core machines)
-python -m pytest tests/ -n auto
+# Fast unit-only subset
+make test-fast
+
+# Single-threaded override if needed for debugging
+python -m pytest tests/ -n 0
 ```
 
-The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing.
+The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing. Parallel execution is the default through `pyproject.toml` (`-n 4 --dist loadfile --tb=short`), while `make test-fast` runs only tests marked `unit`.
 
 ---
 
@@ -178,6 +181,8 @@ INO/
 │   └── static/         # JS and CSS assets
 ├── data/
 │   ├── skills/         # LLM skill files (hot-reloadable)
+│   ├── preferences.template.md  # Tracked default copied to runtime preferences.md on first bot startup
+│   ├── preferences.md  # Runtime preferences file (local, git-ignored)
 │   └── personas/       # Persona presets (mentor, coach, buddy)
 ├── tests/              # pytest test suite
 ├── scripts/            # Operational scripts (migrations, manual tests)
@@ -204,6 +209,7 @@ INO/
 | `/topics` | Show the current topic hierarchy and knowledge map. |
 | `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |
 | `/maintain` | Run manual maintenance diagnostics and cleanup suggestions. |
+| `/preference [text]` | Show the current runtime `preferences.md`, or propose an LLM-generated edit with Apply/Reject buttons. |
 | `/backup` | Run an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's saved chat history. |
 | `/sync` | Admin command to sync slash commands with Discord. |

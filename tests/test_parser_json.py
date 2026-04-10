@@ -10,6 +10,8 @@ Covers:
 
 import json
 
+import pytest
+
 from services.parser import (
     _extract_json_object,
     _extract_json_str,
@@ -17,6 +19,8 @@ from services.parser import (
     parse_llm_response,
     process_output,
 )
+
+pytestmark = pytest.mark.unit
 
 # ============================================================================
 # _extract_json_object — basic cases
