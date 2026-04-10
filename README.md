@@ -159,15 +159,27 @@ For `kimi`, the CLI backend is used instead of the OpenAI-compatible settings ab
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `LEARN_API_HOST` | `0.0.0.0` | REST API bind host |
 | `LEARN_API_PORT` | `8080` | REST API port |
 | `LEARN_API_SECRET_KEY` | _(empty)_ | API authentication secret (for `api.py`) |
+| `LEARN_DB_PATH` | `data/knowledge.db` | Path to the main knowledge database |
+| `LEARN_CHAT_DB_PATH` | `data/chat_history.db` | Path to the chat/session database |
 | `LEARN_LLM_TEMPERATURE` | _(provider default)_ | LLM sampling temperature |
+| `LEARN_LLM_MAX_TOKENS` | `4096` | Max output tokens requested from the main LLM |
 | `LEARN_LLM_MAX_HISTORY_TOKENS` | `40000` | Max chat history tokens sent to LLM |
+| `LEARN_LLM_THINKING` | _(model default)_ | Optional thinking-mode override for models that support it |
+| `LEARN_QUIZ_STALENESS_TIMEOUT` | `15` | Minutes before stale active quiz context is auto-cleared |
+| `LEARN_REVIEW_REMINDER_MAX` | `3` | Max unanswered review reminders before moving to the next concept |
+| `LEARN_MAX_GRAPH_NODES` | `500` | Max concept nodes returned by graph views/endpoints before filtering |
+| `LEARN_SR_INTERVAL_EXPONENT` | `0.075` | Exponent for spaced-repetition interval growth |
 | `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |
+| `LEARN_VECTOR_SEARCH_LIMIT` | `10` | Default vector-search result count |
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
+| `LEARN_SIM_RELATION` | `0.5` | Cosine threshold for relation suggestions/search enrichment |
 | `LEARN_BACKUP_DIR` | `backups/` _(project root)_ | Directory for backup snapshots |
 | `LEARN_BACKUP_RETENTION_DAYS` | `7` | Days to retain backups (min: 1) |
 | `LEARN_VECTOR_STORE_PATH` | `data/vectors/` | Embedded Qdrant storage path |
+| `LOG_LEVEL` | `INFO` | Application log verbosity (set `DEBUG` for quiz/pipeline trace logs) |
 
 See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
 

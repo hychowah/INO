@@ -70,19 +70,38 @@ LEARN_LLM_PROVIDER=kimi
 LEARN_BOT_TOKEN=your-discord-bot-token
 LEARN_AUTHORIZED_USER_ID=your-discord-user-id   # numeric ID
 
-# REST API token (required for api.py)
+# REST API settings (required for api.py unless you use the defaults shown)
+# LEARN_API_HOST=0.0.0.0
+# LEARN_API_PORT=8080
 LEARN_API_SECRET_KEY=choose-a-secret-token
 
 # Database paths (optional — repo-relative or absolute)
 # LEARN_DB_PATH=data/knowledge.db
 # LEARN_CHAT_DB_PATH=data/chat_history.db
 
+# LLM output/tuning (optional)
+# LEARN_LLM_MAX_TOKENS=4096
+# LEARN_LLM_THINKING=disabled
+# LEARN_LLM_TEMPERATURE=0.7
+# LEARN_LLM_MAX_HISTORY_TOKENS=40000
+
+# Quiz/review safety knobs (optional)
+# LEARN_QUIZ_STALENESS_TIMEOUT=15
+# LEARN_REVIEW_REMINDER_MAX=3
+# LEARN_MAX_GRAPH_NODES=500
+
 # Backup settings (optional)
 # LEARN_BACKUP_DIR=backups              # Directory for timestamped backup snapshots (default: backups/)
 # LEARN_BACKUP_RETENTION_DAYS=7        # Number of days to keep old backups before pruning (minimum: 1)
 
 # Spaced repetition interval tuning (optional)
-# LEARN_SR_INTERVAL_EXPONENT=0.075   # interval = e^(score×K); tune cautiously because growth is exponential
+# LEARN_SR_INTERVAL_EXPONENT=0.075     # interval = e^(score×K); tune cautiously because growth is exponential
+
+# Embeddings / hybrid search (optional)
+# LEARN_EMBEDDING_MODEL=all-mpnet-base-v2
+# LEARN_VECTOR_SEARCH_LIMIT=10
+# LEARN_SIM_DEDUP=0.92
+# LEARN_SIM_RELATION=0.5
 
 # Logging (optional)
 # LOG_LEVEL=INFO    # Set to DEBUG to enable verbose [quiz_anchor] and pipeline trace logs
@@ -209,9 +228,11 @@ INO/
 | `/topics` | Show the current topic hierarchy and knowledge map. |
 | `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |
 | `/maintain` | Run manual maintenance diagnostics and cleanup suggestions. |
+| `/reorganize` | Run the taxonomy reorganization pass and review any proposed structural changes. |
 | `/preference [text]` | Show the current runtime `preferences.md`, or propose an LLM-generated edit with Apply/Reject buttons. |
 | `/backup` | Run an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's saved chat history. |
+| `/ping` | Check that the bot is alive and responding. |
 | `/sync` | Admin command to sync slash commands with Discord. |
 
 For endpoint and feature details, see [API.md](API.md).

@@ -133,7 +133,7 @@ Any other action returns HTTP **400**:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/persona` | Get the active persona name. |
+| `GET` | `/api/persona` | Get the current persona and the full list of available presets. |
 | `POST` | `/api/persona` | Set the active persona (`mentor`, `coach`, `buddy`). |
 
 ### Health
@@ -162,12 +162,13 @@ Running `python bot.py` also starts the same Web UI automatically after the Disc
 |------|-------------|
 | `/` | Dashboard — summary stats and recently due concepts |
 | `/topics` | Topic tree with mastery progress bars |
-| `/topics/{id}` | Topic detail — concepts, scores, remarks |
+| `/topic/{id}` | Topic detail — concepts, scores, remarks |
 | `/concepts` | Searchable concept list |
-| `/concepts/{id}` | Concept detail — score history, remarks, relations |
+| `/concept/{id}` | Concept detail — score history, remarks, relations |
 | `/reviews` | Review history |
 | `/actions` | Action log with filtering and time-range picker |
 | `/forecast` | Review forecast — due concepts bucketed by days / weeks / months |
+| `/api/actions?offset=&limit=&action=&source=` | JSON action log data for the Web UI filter controls |
 | `/api/forecast?range=` | JSON forecast data — overdue count + 7 rolling buckets with counts and avg mastery |
 | `/api/forecast/concepts?range=&bucket=` | JSON concept list for a specific bucket, sorted by mastery ASC |
 | `/graph` | Interactive D3.js force-directed knowledge graph |

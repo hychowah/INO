@@ -49,7 +49,19 @@ ROOT
 ├── AGENTS.md              # Pointer file — references data/skills/ (DO NOT put instructions here)
 ├── config.py              # All settings, loads .env via python-dotenv
 ├── bot.py                 # Entry point: Discord bot
+├── bot/                   # Discord bot package
+│   ├── app.py             # Shared discord.py bot instance and client setup
+│   ├── auth.py            # @authorized_only decorator for command gating
+│   ├── commands.py        # Slash/hybrid command implementations
+│   ├── events.py          # on_ready, on_message, and startup hooks
+│   ├── handler.py         # Shared message handler that bridges into pipeline.py
+│   └── messages.py        # Discord-safe message splitting and send helpers
 ├── api.py                 # Entry point: FastAPI REST API
+├── api/                   # FastAPI package
+│   ├── app.py             # App assembly and route registration
+│   ├── auth.py            # Bearer-token verification dependency
+│   ├── schemas.py         # Pydantic request/response models
+│   └── routes/            # REST route modules (chat, topics, concepts, relations, misc, ...)
 ├── requirements.txt
 │
 ├── data/
@@ -77,6 +89,7 @@ ROOT
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
 │   ├── state.py           # Shared mutable state (avoids circular imports)
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
+│   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
 │   └── kimi.py            # kimi-cli specific helpers
@@ -101,7 +114,7 @@ ROOT
 │   ├── server.py          # stdlib HTTP server, routing + Handler class
 │   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
 │   ├── pages/             # Page renderers package (dashboard, topics, concepts, reviews, activity, graph)
-│   └── static/            # CSS, JS (tree.js, concepts.js, forecast.js)
+│   └── static/            # CSS, JS (tree.js, concepts.js, forecast.js, graph.js)
 ├── docs/                  # Architecture, dev notes, plans (index.md for map)
 │   ├── ARCHITECTURE.md
 │   ├── API.md
@@ -113,6 +126,8 @@ ROOT
 ├── scripts/               # agent.py (maintenance CLI), utility scripts
 │   ├── taxonomy_shadow_rebuild.py # Operator taxonomy preview/apply workflow
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
+│   ├── test_prompts.py    # Prompt-debugging harness for maintenance/reorganize/quiz modes
+│   ├── test_quiz_generator.py # Manual test harness for the two-prompt scheduled-quiz pipeline
 │   └── test_similarity.py # Configurable similarity test harness (tune thresholds)
 └── .env                   # Secrets (git-ignored)
 ```

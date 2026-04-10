@@ -54,9 +54,10 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 │       │    Data Layer│                            │                    │
 │       ▼             ▼                            ▼                    │
 │   ┌────────────────────────────────────────────────────┐             │
-│   │                  db/ package                       │             │
-│   │  core.py · migrations.py · topics.py · concepts.py │             │
-│   │  reviews.py · chat.py · diagnostics.py             │             │
+│   │                  db/ package                               │      │
+│   │  core.py · migrations.py · topics.py · concepts.py        │      │
+│   │  reviews.py · chat.py · diagnostics.py · relations.py     │      │
+│   │  proposals.py · action_log.py · preferences.py            │      │
 │   └──────────┬────────────────────────┬────────────────┘             │
 │              ▼                        ▼                              │
 │   ┌──────────────────┐   ┌───────────────────┐  ┌────────────────┐  │
@@ -89,15 +90,20 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `data/preferences.md` | ~20 | Runtime user preferences copy (git-ignored, injected into every LLM call) |
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
+| `bot/auth.py` | ~20 | Authorization decorator that gates Discord commands to the configured user |
 | `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
 | `bot/commands.py` | ~545 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
+| `api/app.py` | ~55 | FastAPI app assembly and route registration |
+| `api/auth.py` | ~20 | Bearer-token dependency protecting REST endpoints except `/api/health` |
+| `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
+| `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
 | `webui/server.py` | ~220 | Zero-dependency HTTP server — routing, Handler class, static file serving, forecast routes |
@@ -111,8 +117,10 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `webui/pages/activity.py` | ~200 | `page_actions` |
 | `webui/pages/graph.py` | ~75 | `page_graph` |
 | `webui/static/style.css` | ~170 | Extracted CSS — dark theme, tree components, responsive layout |
+| `webui/static/concepts.js` | ~55 | Client-side concept list interactions and delete flow helpers |
 | `webui/static/tree.js` | ~150 | Vanilla JS — expand/collapse, search/filter, state persistence |
 | `webui/static/forecast.js` | ~245 | D3 v7 bar chart — bucketed review forecast with drill-down |
+| `webui/static/graph.js` | ~275 | D3 force-graph client for the interactive knowledge map |
 | **db/ package** | | |
 | `db/core.py` | ~230 | Connection helpers, `init_databases()`, datetime utils |
 | `db/migrations.py` | ~265 | Schema migration blocks extracted from `core.py` |
@@ -121,6 +129,10 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/reviews.py` | ~100 | Review log, remarks |
 | `db/chat.py` | ~105 | Chat history, session state |
 | `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity; vector nearest-neighbor for relation candidates |
+| `db/relations.py` | ~110 | Concept relation CRUD and graph assembly helpers |
+| `db/proposals.py` | ~95 | Pending proposal persistence for Discord confirmation views |
+| `db/action_log.py` | ~150 | Action log reads/writes and rename-suppression support |
+| `db/preferences.py` | ~55 | Active persona selection and available preset discovery |
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
@@ -136,10 +148,12 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
+| `scripts/test_prompts.py` | ~180 | Prompt-debugging harness for maintenance, reorganize, and quiz prompt assembly |
+| `scripts/test_quiz_generator.py` | ~120 | Manual test harness for the two-prompt quiz generation pipeline |
 | `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
 | **tests/** | | |
 | `tests/test_maintenance.py` | ~160 | Test maintenance diagnostics and dedup sub-agent |
-| `tests/test_dedup.py` | ~35 | Quick test for title similarity and duplicate detection |
+| `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 
 ---
@@ -354,16 +368,22 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ▼
   webui/server.py: BaseHTTPRequestHandler
          │
-         ├── /static/*      → Serves CSS/JS from webui/static/
-         ├── /              → Dashboard (stats, due concepts, topic tree)
-         ├── /topics        → Interactive topic tree (expand/collapse, search, subtree stats)
-         ├── /topic/<id>    → Topic detail + breadcrumb + child cards + concept table
-         ├── /concept/<id>  → Concept detail + remarks + review log
-         ├── /concepts      → All concepts sorted by next review
-         ├── /reviews       → Recent review history
-         ├── /api/stats     → JSON: review stats
-         ├── /api/topics    → JSON: full topic map
-         └── /api/due       → JSON: due concepts
+         ├── /static/*                → Serves CSS/JS from webui/static/
+         ├── /                        → Dashboard (stats, due concepts, topic tree)
+         ├── /topics                  → Interactive topic tree (expand/collapse, search, subtree stats)
+         ├── /topic/{id}              → Topic detail + breadcrumb + child cards + concept table
+         ├── /concepts                → Searchable concept list
+         ├── /concept/{id}            → Concept detail + remarks + review log
+         ├── /reviews                 → Recent review history
+         ├── /actions                 → Filterable action log
+         ├── /forecast                → Review forecast with bucket drill-down
+         ├── /graph                   → Interactive D3 force-directed knowledge graph
+         ├── /api/stats               → JSON: review stats
+         ├── /api/topics              → JSON: full topic map
+         ├── /api/due                 → JSON: due concepts
+         ├── /api/actions             → JSON: paginated action log
+         ├── /api/forecast?range=     → JSON: forecast bucket summary
+         └── /api/forecast/concepts   → JSON: concepts in one forecast bucket
          │
          └── All read directly from the db/ package
              (no pipeline, no LLM — pure DB ➜ HTML)
@@ -456,15 +476,13 @@ conversations
 
 ## Module Responsibilities
 
-### bot.py — Discord Interface
-- Creates the Discord bot with `commands.Bot`
-- Registers `/learn`, `/due`, `/topics`, `/review`, `/clear`, `/ping`, `/sync` hybrid commands (also work as `!` prefix)
-- Fast-path commands (`/due`, `/topics`, `/clear`) read DB directly — no LLM call
-- Routes **every** plain message from the authorized user through the learning pipeline
-- Handles message chunking for Discord's 2000-char limit
-- Single authorized user (config.AUTHORIZED_USER_ID)
-- Tracks `last_activity_at` for session awareness
-- Starts the scheduler on `on_ready`
+### bot.py + bot/ — Discord Interface
+- `bot.py` is a thin startup wrapper that loads env/config and launches the shared bot instance from `bot.app`
+- `bot/commands.py` registers the active hybrid commands: `/learn`, `/review`, `/due`, `/topics`, `/persona`, `/maintain`, `/reorganize`, `/preference`, `/backup`, `/clear`, `/ping`, and `/sync`
+- `bot/auth.py` provides the `@authorized_only()` decorator used to gate commands to the configured Discord user
+- Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
+- `bot/events.py` routes authorized plain messages through the learning pipeline, tracks `last_activity_at`, copies the runtime preferences file on startup if needed, and starts the scheduler on `on_ready`
+- `bot/messages.py` and `services/views.py` handle Discord-safe chunking plus persistent button views for confirmations, quiz navigation, and preference edits
 
 ### context.py — Prompt Construction
 | Function | Purpose |

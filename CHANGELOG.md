@@ -48,11 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_check_taxonomy()` in `services/scheduler.py` — runs taxonomy reorganization in the weekly cycle after `_check_maintenance()`
 - `_send_mode_report()` in `services/scheduler.py` — shared DM dispatcher used by both maintenance and taxonomy
 - `ProposedActionsView` in `services/views.py` — renamed from `MaintenanceConfirmView`; now shared by both maintenance and taxonomy approval flows
-
-### Fixed
-- `services/backup.py` — temp backup directory promotion now retries on transient Windows `PermissionError` file locks (common with OneDrive/Defender on freshly copied vector-store files) before failing the backup
-- Missing `QuizQuestionView` import in `bot/commands.py` (caused a `NameError` on skip-eligible `/learn` quiz deliveries)
-- Quiz deliveries via typed message (`on_message`) with `show_skip=False` fell through to `send_long_with_view` without metadata; guard widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py`
 - `CHANGELOG.md` — this file
 - `Makefile` — common developer commands
 - `requirements-dev.txt` — development/test/lint dependencies separated from runtime
@@ -62,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.github/workflows/lint.yml` — Ruff lint CI job
 
 ### Fixed
+- `services/backup.py` — temp backup directory promotion now retries on transient Windows `PermissionError` file locks (common with OneDrive/Defender on freshly copied vector-store files) before failing the backup
+- Missing `QuizQuestionView` import in `bot/commands.py` (caused a `NameError` on skip-eligible `/learn` quiz deliveries)
+- Quiz deliveries via typed message (`on_message`) with `show_skip=False` fell through to `send_long_with_view` without metadata; guard widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py`
 - `send_long_with_view()` (`bot/messages.py`) omits the `view=` kwarg entirely when `view` is `None`; Discord raises `TypeError` when `view=None` is passed explicitly
 - `assess` and `multi_assess` actions are now blocked when no quiz is active; `execute_action` in `pipeline.py` and `scripts/agent.py` returns a `REPLY:` message instead of mutating scores or logs
 - `/review` command now pre-sets `quiz_anchor_concept_id` before executing the LLM response, preventing anchor loss on the first assess turn
