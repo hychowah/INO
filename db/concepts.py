@@ -638,8 +638,9 @@ def search_concepts(query: str, limit: int = 20, *, user_id: Optional[str] = Non
                 tid_str = d.pop("topic_id_list", None)
                 d["topic_ids"] = [int(x) for x in tid_str.split(",")] if tid_str else []
                 results.append(d)
-            results.sort(key=lambda d: id_order.get(d["id"], 999))
-            return results
+            if results:
+                results.sort(key=lambda d: id_order.get(d["id"], 999))
+                return results
     except Exception:
         pass  # Fall through to FTS5
 

@@ -11,6 +11,7 @@ from typing import Awaitable, Callable
 import discord
 
 import db
+from services import state
 from services.dedup import execute_dedup_merges
 from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
 
@@ -252,30 +253,31 @@ class ProposedActionsView(discord.ui.View):
         rejected = [self.actions[i] for i, d in self.decisions.items() if d is False]
 
         result_parts = []
-        if approved:
-            summaries = await self.execute_fn(approved)
-            if summaries:
-                result_parts.append(
-                    f"✅ **Executed {len(summaries)} action(s):**\n"
-                    + "\n".join(f"• {s}" for s in summaries)
-                )
+        async with state.pipeline_serialized():
+            if approved:
+                summaries = await self.execute_fn(approved)
+                if summaries:
+                    result_parts.append(
+                        f"✅ **Executed {len(summaries)} action(s):**\n"
+                        + "\n".join(f"• {s}" for s in summaries)
+                    )
 
-        # Log rejected rename actions BEFORE deleting proposal (prevents log loss on crash)
-        for action in rejected:
-            if action.get("action") in ("update_topic", "update_concept"):
-                db.log_action(
-                    action=action["action"],
-                    params=action.get("params", {}),
-                    result_type="rejected",
-                    result="",
-                    source="maintenance",
-                )
+            # Log rejected rename actions BEFORE deleting proposal (prevents log loss on crash)
+            for action in rejected:
+                if action.get("action") in ("update_topic", "update_concept"):
+                    db.log_action(
+                        action=action["action"],
+                        params=action.get("params", {}),
+                        result_type="rejected",
+                        result="",
+                        source="maintenance",
+                    )
 
-        if rejected:
-            result_parts.append(f"❌ Rejected {len(rejected)} action(s).")
+            if rejected:
+                result_parts.append(f"❌ Rejected {len(rejected)} action(s).")
 
-        db.delete_proposal(self.proposal_id)
-        self._disable_all()
+            db.delete_proposal(self.proposal_id)
+            self._disable_all()
 
         result_text = "\n\n".join(result_parts) if result_parts else "No actions executed."
         try:
@@ -393,18 +395,19 @@ class AddConceptConfirmView(discord.ui.View):
 
         from services.tools import execute_action
 
-        action = self.action_data.get("action", "add_concept")
-        params = self.action_data.get("params", {})
-        msg_type, result = execute_action(action, params)
+        async with state.pipeline_serialized():
+            action = self.action_data.get("action", "add_concept")
+            params = self.action_data.get("params", {})
+            msg_type, result = execute_action(action, params)
 
-        if msg_type == "error":
-            note = f"\n\n⚠️ Could not add concept: {result}"
-        else:
-            note = f"\n\n✅ {result}"
-            # Persist confirmation to chat history so the LLM sees the
-            # concept_id on subsequent turns (fixes topic_id/concept_id confusion)
-            db.add_chat_message("user", "[confirmed: add concept]")
-            db.add_chat_message("assistant", f"✅ {result}")
+            if msg_type == "error":
+                note = f"\n\n⚠️ Could not add concept: {result}"
+            else:
+                note = f"\n\n✅ {result}"
+                # Persist confirmation to chat history so the LLM sees the
+                # concept_id on subsequent turns (fixes topic_id/concept_id confusion)
+                db.add_chat_message("user", "[confirmed: add concept]")
+                db.add_chat_message("assistant", f"✅ {result}")
 
         try:
             original = interaction.message.content or ""
@@ -424,8 +427,9 @@ class AddConceptConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        # Record decline so the LLM doesn't re-suggest the same concept
-        db.add_chat_message("user", "[declined: add concept]")
+        async with state.pipeline_serialized():
+            # Record decline so the LLM doesn't re-suggest the same concept
+            db.add_chat_message("user", "[declined: add concept]")
 
         try:
             original = interaction.message.content or ""
@@ -478,15 +482,16 @@ class SuggestTopicConfirmView(discord.ui.View):
 
         from services.tools import execute_suggest_topic_accept
 
-        success, summary, topic_id = execute_suggest_topic_accept(self.action_data)
+        async with state.pipeline_serialized():
+            success, summary, topic_id = execute_suggest_topic_accept(self.action_data)
 
-        title = self.action_data.get("params", {}).get("title", "topic")
-        if success:
-            db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
-            db.add_chat_message("assistant", summary)
-            note = f"\n\n{summary}"
-        else:
-            note = f"\n\n⚠️ {summary}"
+            title = self.action_data.get("params", {}).get("title", "topic")
+            if success:
+                db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
+                db.add_chat_message("assistant", summary)
+                note = f"\n\n{summary}"
+            else:
+                note = f"\n\n⚠️ {summary}"
 
         try:
             original = interaction.message.content or ""
@@ -506,8 +511,9 @@ class SuggestTopicConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        title = self.action_data.get("params", {}).get("title", "topic")
-        db.add_chat_message("user", f'[declined: add topic "{title}"]')
+        async with state.pipeline_serialized():
+            title = self.action_data.get("params", {}).get("title", "topic")
+            db.add_chat_message("user", f'[declined: add topic "{title}"]')
 
         try:
             original = interaction.message.content or ""
@@ -779,25 +785,26 @@ class _QuizSkipButton(discord.ui.Button):
         from services.tools_assess import skip_quiz
 
         try:
-            result = skip_quiz(
-                self.parent_view.concept_id,
-                user_id=str(interaction.user),
-            )
+            async with state.pipeline_serialized():
+                result = skip_quiz(
+                    self.parent_view.concept_id,
+                    user_id=str(interaction.user),
+                )
 
-            if "error" in result:
-                await interaction.followup.send(f"⚠️ {result['error']}")
-                self.parent_view.stop()
-                return
+                if "error" in result:
+                    await interaction.followup.send(f"⚠️ {result['error']}")
+                    self.parent_view.stop()
+                    return
 
-            confirmation = (
-                f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
-                f"next review in {result['interval_days']}d"
-            )
-            nav_view = QuizNavigationView(
-                concept_id=result["concept_id"],
-                quality=5,
-                message_handler=self.parent_view.message_handler,
-            )
+                confirmation = (
+                    f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
+                    f"next review in {result['interval_days']}d"
+                )
+                nav_view = QuizNavigationView(
+                    concept_id=result["concept_id"],
+                    quality=5,
+                    message_handler=self.parent_view.message_handler,
+                )
             await interaction.followup.send(confirmation, view=nav_view)
         except Exception as e:
             logger.error(f"QuizSkip callback error: {e}", exc_info=True)

@@ -221,6 +221,17 @@ class TestOpenAICompatibleProvider:
 
         asyncio.run(_test())
 
+    def test_get_messages_returns_copy_for_existing_session(self):
+        mock_client, _ = _make_mock_client()
+        p = _make_provider(mock_client)
+        p._sessions["sess1"] = ([{"role": "system", "content": "sys"}], 0.0)
+
+        messages = p._get_messages("sess1", "ignored")
+        messages.append({"role": "user", "content": "mutated"})
+
+        stored, _ = p._sessions["sess1"]
+        assert stored == [{"role": "system", "content": "sys"}]
+
     def test_no_session(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "one-shot resp"

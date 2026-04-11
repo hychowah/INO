@@ -5,7 +5,7 @@ import pytest
 
 import db
 from bot.messages import send_review_question
-from services import scheduler
+from services import scheduler, state
 from services.views import QuizQuestionView
 
 
@@ -119,3 +119,19 @@ async def test_send_review_question_attaches_skip_button_at_boundary(test_db):
     )
     assert isinstance(call.kwargs["view"], QuizQuestionView)
     assert call.kwargs["view"].concept_id == cid
+
+
+@pytest.mark.anyio
+async def test_check_reviews_skips_when_pipeline_lock_is_busy(test_db):
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+    state.PIPELINE_LOCK.acquire()
+
+    try:
+        with patch("services.scheduler.pipeline.handle_review_check") as mock_handle:
+            await scheduler._check_reviews()
+        mock_handle.assert_not_called()
+    finally:
+        if state.PIPELINE_LOCK.locked():
+            state.PIPELINE_LOCK.release()
+        state.last_activity_at = original_last_activity

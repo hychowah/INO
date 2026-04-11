@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import db
 from db import action_log
 from db import core as db_core
+from services import state
 
 # ============================================================================
 # Fixtures
@@ -72,6 +73,18 @@ class TestLogAction:
         action_log.log_action("quiz", "raw string", "success", "ok")
         entries = action_log.get_action_log(limit=1)
         assert entries[0]["params"] == "raw string"
+
+    def test_defaults_to_context_user(self):
+        previous_user = state.get_current_user()
+        state.set_current_user("ctx-user")
+        try:
+            action_log.log_action("add_concept", {}, "success", "ok")
+            entries = action_log.get_action_log()
+            assert len(entries) == 1
+            assert entries[0]["user_id"] == "ctx-user"
+            assert action_log.get_action_log(user_id="default") == []
+        finally:
+            state.set_current_user(previous_user)
 
 
 # ============================================================================

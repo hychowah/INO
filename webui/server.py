@@ -11,7 +11,6 @@ import json
 import mimetypes
 import signal
 import sys
-import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +19,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 import db  # noqa: E402
+from services.state import PIPELINE_LOCK  # noqa: E402
 from webui.chat_backend import (  # noqa: E402
     confirm_webui_action,
     decline_webui_action,
@@ -63,19 +63,13 @@ MIME_TYPES = {
     ".ico": "image/x-icon",
 }
 
-# Chat requests currently share process-global conversation/session state across
-# pipeline caches, scheduler suppression, and DB-backed quiz context keys.
-# Keep chat execution serialized until those boundaries are isolated.
-CHAT_PIPELINE_LOCK = threading.Lock()
-
-
 class InvalidJsonBodyError(ValueError):
     """Raised when a chat endpoint receives malformed JSON."""
 
 
 def _run_chat_request(coro):
     """Run a chat coroutine under the current serialization guard."""
-    with CHAT_PIPELINE_LOCK:
+    with PIPELINE_LOCK:
         return asyncio.run(coro)
 
 

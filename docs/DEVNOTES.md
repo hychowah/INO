@@ -33,6 +33,7 @@
 20. [Taxonomy Shadow Rebuild](#20-taxonomy-shadow-rebuild)
 21. [Preference-Edit Isolated Skill Path](#21-preference-edit-isolated-skill-path)
 22. [Multi-User DB Groundwork](#22-multi-user-db-groundwork)
+23. [Process-Local Lock Hardening](#23-process-local-lock-hardening)
 
 ---
 
@@ -445,3 +446,20 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 **Known limitation:** concept title uniqueness is still global. A future migration should replace the global title uniqueness with `UNIQUE(user_id, title COLLATE NOCASE)`.
 
 **Validation:** full suite green with `python -m pytest tests/ -x -q --tb=short -o "addopts="`.
+
+---
+
+## 23. Process-Local Lock Hardening
+
+**Goal:** Keep the runtime single-user and trustworthy across bot, WebUI, API, and scheduler paths that still share mutable in-process state.
+
+**Key decisions:**
+- `services/state.py` now owns the shared `PIPELINE_LOCK` plus `pipeline_serialized()` and `pipeline_serialized_nowait()` helpers. This replaced the old WebUI-only lock and made the process-local boundary explicit.
+- Bot message handling, manual review/maintenance/taxonomy/preference flows, reply-based confirmations, direct Discord button bypasses, and FastAPI chat/confirm/decline now all serialize through the same lock.
+- The scheduler does **not** block waiting for that lock. Review, maintenance, taxonomy, and dedup checks skip the current cycle when the pipeline is busy so background work yields to active chat turns.
+- `db.chat` session helpers and `db.action_log.log_action()` now resolve omitted `user_id` through `_uid()`. `clear_session(None)` intentionally still means clear all users.
+- `OpenAICompatibleProvider._get_messages()` must return a copy of stored session messages. Returning the live list let callers mutate provider state accidentally.
+
+**Vector-search lesson:** Qdrant-first helpers must not early-return empty results when vector hits point at stale ids. `db.search_concepts()` and `db.diagnostics._get_relationship_candidates()` now fall back to SQL/FTS when vector-derived ids do not map back to current SQLite rows.
+
+**Important scope rule:** This hardening is process-local only. The runtime is still single-user externally until entry points call `set_current_user()` with real identities.

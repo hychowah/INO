@@ -14,7 +14,7 @@ from bot.handler import (
 )
 from bot.messages import send_long, send_long_with_view, send_review_question
 from services import backup as backup_service
-from services import pipeline
+from services import pipeline, state
 from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
 from services.views import (
@@ -155,13 +155,13 @@ async def persona_command(ctx, *, name: str = ""):
         return
 
     try:
-        db.set_persona(target)
+        async with state.pipeline_serialized():
+            db.set_persona(target)
+            pipeline.invalidate_prompt_cache()
+            pipeline.reset_conversation_session()
     except ValueError:
         await ctx.send(f"Unknown persona `{target}`. Available: {', '.join(available)}")
         return
-
-    pipeline.invalidate_prompt_cache()
-    pipeline.reset_conversation_session()
 
     icons = {"mentor": "🎓", "coach": "🏋️", "buddy": "🤝"}
     icon = icons.get(target, "🎭")
@@ -215,7 +215,8 @@ async def topics_command(ctx):
 async def clear_command(ctx):
     """Clear learning agent chat history."""
     _ensure_db()
-    db.clear_chat_history()
+    async with state.pipeline_serialized():
+        db.clear_chat_history()
     await ctx.send("🗑️ Chat history cleared.")
 
 
@@ -237,42 +238,43 @@ async def maintain_command(ctx):
     parts = []
 
     proposed_actions = []
-    try:
-        maint_context = pipeline.handle_maintenance()
-        if maint_context:
-            async with ctx.channel.typing():
-                result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
-                msg = result
-                for pfx in ("REPLY: ", "REPLY:"):
-                    if msg.startswith(pfx):
-                        msg = msg[len(pfx) :]
-                if msg.strip():
-                    parts.append(f"🔧 **Maintenance**\n{msg.strip()}")
-        else:
-            parts.append("🔧 **Maintenance** — no issues found ✅")
-    except Exception as e:
-        logger.error(f"maintain_command maint error: {e}", exc_info=True)
-        parts.append(f"🔧 **Maintenance** — error: `{e}`")
-
-    try:
-        existing = db.get_pending_proposal("dedup")
-        if existing:
-            parts.append("🔄 **Dedup** — pending proposal already exists, check your DMs")
-        else:
-            async with ctx.channel.typing():
-                groups = await pipeline.handle_dedup_check()
-            if groups:
-                proposal_id = db.save_proposal("dedup", groups)
-                suggestion_text = format_dedup_suggestions(groups)
-                view = DedupConfirmView(proposal_id, groups)
-                parts.append(suggestion_text)
+    groups = None
+    async with state.pipeline_serialized():
+        try:
+            maint_context = pipeline.handle_maintenance()
+            if maint_context:
+                async with ctx.channel.typing():
+                    result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
+                    msg = result
+                    for pfx in ("REPLY: ", "REPLY:"):
+                        if msg.startswith(pfx):
+                            msg = msg[len(pfx) :]
+                    if msg.strip():
+                        parts.append(f"🔧 **Maintenance**\n{msg.strip()}")
             else:
-                groups = None
-                parts.append("🔄 **Dedup** — no duplicates found ✅")
-    except Exception as e:
-        logger.error(f"maintain_command dedup error: {e}", exc_info=True)
-        parts.append(f"🔄 **Dedup** — error: `{e}`")
-        groups = None
+                parts.append("🔧 **Maintenance** — no issues found ✅")
+        except Exception as e:
+            logger.error(f"maintain_command maint error: {e}", exc_info=True)
+            parts.append(f"🔧 **Maintenance** — error: `{e}`")
+
+        try:
+            existing = db.get_pending_proposal("dedup")
+            if existing:
+                parts.append("🔄 **Dedup** — pending proposal already exists, check your DMs")
+            else:
+                async with ctx.channel.typing():
+                    groups = await pipeline.handle_dedup_check()
+                if groups:
+                    proposal_id = db.save_proposal("dedup", groups)
+                    suggestion_text = format_dedup_suggestions(groups)
+                    view = DedupConfirmView(proposal_id, groups)
+                    parts.append(suggestion_text)
+                else:
+                    parts.append("🔄 **Dedup** — no duplicates found ✅")
+        except Exception as e:
+            logger.error(f"maintain_command dedup error: {e}", exc_info=True)
+            parts.append(f"🔄 **Dedup** — error: `{e}`")
+            groups = None
 
     main_text = "\n\n".join(parts)
 
@@ -320,69 +322,78 @@ async def review_command(ctx):
 
     _ensure_db()
 
-    review_lines = pipeline.handle_review_check()
-    if not review_lines:
-        msg = "✅ No concepts to review — add some topics first!"
-        if is_interaction:
-            await ctx.interaction.followup.send(msg)
-        else:
-            await ctx.send(msg)
-        return
-
-    payload = review_lines[0]
+    review_lines = None
+    cid = None
+    response = None
+    assess_meta = None
     try:
-        review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
+        async with state.pipeline_serialized():
+            review_lines = pipeline.handle_review_check()
+            if review_lines:
+                payload = review_lines[0]
+                review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
 
-        try:
-            cid = int(payload.split("|", 1)[0])
-        except (ValueError, IndexError):
-            cid = None
+                try:
+                    cid = int(payload.split("|", 1)[0])
+                except (ValueError, IndexError):
+                    cid = None
 
-        if cid:
-            db.set_session("active_concept_id", str(cid))
-            db.set_session("quiz_anchor_concept_id", str(cid))
+                try:
+                    if cid:
+                        db.set_session("active_concept_id", str(cid))
+                        db.set_session("quiz_anchor_concept_id", str(cid))
 
-        db.set_session("review_in_progress", str(cid) if cid else "1")
+                    db.set_session("review_in_progress", str(cid) if cid else "1")
 
-        async with ctx.channel.typing():
-            from services.llm import LLMError
+                    async with ctx.channel.typing():
+                        from services.llm import LLMError
 
-            try:
-                if cid:
-                    p1_result = await pipeline.generate_quiz_question(cid)
-                    llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
-                else:
-                    raise LLMError("No concept_id in payload", retryable=True)
-            except LLMError as e:
-                logger.warning(
-                    f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
-                )
-                llm_response = await pipeline.call_with_fetch_loop(
-                    mode="reply",
-                    text=review_text,
-                    author=str(ctx.author),
-                )
+                        try:
+                            if cid:
+                                p1_result = await pipeline.generate_quiz_question(cid)
+                                llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
+                            else:
+                                raise LLMError("No concept_id in payload", retryable=True)
+                        except LLMError as e:
+                            logger.warning(
+                                f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
+                            )
+                            llm_response = await pipeline.call_with_fetch_loop(
+                                mode="reply",
+                                text=review_text,
+                                author=str(ctx.author),
+                            )
 
-            final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
-            _msg_type, response = pipeline.process_output(final_result)
-            assess_meta = None
+                        final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
+                        _msg_type, response = pipeline.process_output(final_result)
+                        assess_meta = None
 
-            if _msg_type == "reply":
-                prefix, _msg, action_data = parse_llm_response(llm_response)
-                if (
-                    action_data
-                    and action_data.get("action", "").lower().strip() == "assess"
-                    and action_data.get("params", {}).get("quality") is not None
-                ):
-                    assess_meta = {
-                        "concept_id": action_data["params"].get("concept_id", cid),
-                        "quality": action_data["params"]["quality"],
-                    }
+                        if _msg_type == "reply":
+                            prefix, _msg, action_data = parse_llm_response(llm_response)
+                            if (
+                                action_data
+                                and action_data.get("action", "").lower().strip() == "assess"
+                                and action_data.get("params", {}).get("quality") is not None
+                            ):
+                                assess_meta = {
+                                    "concept_id": action_data["params"].get("concept_id", cid),
+                                    "quality": action_data["params"]["quality"],
+                                }
 
-        if not response or not response.strip():
-            response = "Could not generate a review quiz. Try again?"
-        else:
-            db.set_session("last_quiz_question", response.strip())
+                    if not response or not response.strip():
+                        response = "Could not generate a review quiz. Try again?"
+                    else:
+                        db.set_session("last_quiz_question", response.strip())
+                finally:
+                    db.set_session("review_in_progress", None)
+
+        if not review_lines:
+            msg = "✅ No concepts to review — add some topics first!"
+            if is_interaction:
+                await ctx.interaction.followup.send(msg)
+            else:
+                await ctx.send(msg)
+            return
 
         if assess_meta:
             response = f"📚 **Learning Review**\n{response}"
@@ -411,8 +422,6 @@ async def review_command(ctx):
             await ctx.interaction.followup.send(msg)
         else:
             await ctx.send(msg)
-    finally:
-        db.set_session("review_in_progress", None)
 
 
 @bot.hybrid_command(
@@ -451,17 +460,18 @@ async def reorganize_command(ctx):
     _ensure_db()
 
     try:
-        async with ctx.channel.typing():
-            taxonomy_context = pipeline.handle_taxonomy()
-            if not taxonomy_context:
-                msg = "🌿 **Taxonomy** — no topics found yet ✅"
-                if is_interaction:
-                    await ctx.interaction.followup.send(msg)
-                else:
-                    await ctx.send(msg)
-                return
+        async with state.pipeline_serialized():
+            async with ctx.channel.typing():
+                taxonomy_context = pipeline.handle_taxonomy()
+                if not taxonomy_context:
+                    msg = "🌿 **Taxonomy** — no topics found yet ✅"
+                    if is_interaction:
+                        await ctx.interaction.followup.send(msg)
+                    else:
+                        await ctx.send(msg)
+                    return
 
-            final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+                final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
 
         msg = final_result
         for pfx in ("REPLY: ", "REPLY:"):
@@ -520,8 +530,9 @@ async def preference_command(ctx, *, text: str = ""):
         await ctx.interaction.response.defer(ephemeral=False)
 
     try:
-        async with ctx.channel.typing():
-            preview_text, proposed_content = await pipeline.call_preference_edit(text)
+        async with state.pipeline_serialized():
+            async with ctx.channel.typing():
+                preview_text, proposed_content = await pipeline.call_preference_edit(text)
 
         view = PreferenceUpdateView(proposed_content, pipeline.execute_preference_update)
         msg = f"📝 **Proposed preference update**\n\n{preview_text}\n\n*Review the change and confirm below.*"

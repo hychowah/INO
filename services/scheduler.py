@@ -21,7 +21,7 @@ import config
 import db
 from bot.messages import send_review_question
 from services import backup as backup_service
-from services import pipeline
+from services import pipeline, state
 from services.dedup import format_dedup_suggestions
 from services.formatting import truncate_for_discord
 from services.views import DedupConfirmView
@@ -94,80 +94,73 @@ async def _check_reviews():
        d. Max reminders reached? → clear pending, fall through.
     3. No pending review → pick next due concept, send LLM-generated quiz.
     """
-    # Suppress during active session to avoid interrupting conversation
-    from services.state import last_activity_at
-
-    if last_activity_at:
-        cutoff = datetime.now() - timedelta(minutes=config.SESSION_TIMEOUT_MINUTES)
-        if last_activity_at > cutoff:
-            logger.debug("Skipping review check — user active in session")
+    with state.pipeline_serialized_nowait() as acquired:
+        if not acquired:
+            logger.debug("Skipping review check — pipeline busy")
             return
 
-    logger.debug("Running review-check...")
-
-    # Suppress if /review command is actively generating a quiz
-    if db.get_session("review_in_progress"):
-        logger.debug("Skipping review check — /review command in progress")
-        return
-
-    # --- Handle pending (unanswered) review ---
-    pending = _get_pending_review()
-    if pending:
-        cid = pending.get("concept_id")
-
-        # Guard: concept might have been deleted while pending
-        if cid and not db.get_concept(cid):
-            logger.info(f"Pending concept #{cid} no longer exists — clearing")
-            _clear_pending_review()
-            # Fall through to normal flow below
-        else:
-            # Check cooldown since last send/reminder
-            sent_at_str = pending.get("sent_at", "")
-            try:
-                sent_at = datetime.fromisoformat(sent_at_str)
-            except (ValueError, TypeError):
-                sent_at = datetime.now()
-
-            cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
-            elapsed = datetime.now() - sent_at
-
-            if elapsed < cooldown:
-                logger.debug(
-                    f"Pending review #{cid} — {elapsed.total_seconds() / 3600:.1f}h "
-                    f"< {config.REVIEW_NAG_COOLDOWN_HOURS}h cooldown, skipping"
-                )
+        if state.last_activity_at:
+            cutoff = datetime.now() - timedelta(minutes=config.SESSION_TIMEOUT_MINUTES)
+            if state.last_activity_at > cutoff:
+                logger.debug("Skipping review check — user active in session")
                 return
 
-            # Cooldown expired — check reminder count
-            reminder_count = pending.get("reminder_count", 0)
-            max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
+        logger.debug("Running review-check...")
 
-            if reminder_count >= max_reminders:
-                logger.info(
-                    f"Pending review #{cid} — {reminder_count} reminders sent, "
-                    f"giving up and moving to next concept"
-                )
+        # Suppress if /review command is actively generating a quiz
+        if db.get_session("review_in_progress"):
+            logger.debug("Skipping review check — /review command in progress")
+            return
+
+        pending = _get_pending_review()
+        if pending:
+            cid = pending.get("concept_id")
+            if cid and not db.get_concept(cid):
+                logger.info(f"Pending concept #{cid} no longer exists — clearing")
                 _clear_pending_review()
-                # Fall through to normal flow below
             else:
-                # Send a static reminder (no LLM call)
-                await _send_review_reminder(pending)
+                sent_at_str = pending.get("sent_at", "")
+                try:
+                    sent_at = datetime.fromisoformat(sent_at_str)
+                except (ValueError, TypeError):
+                    sent_at = datetime.now()
+
+                cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
+                elapsed = datetime.now() - sent_at
+
+                if elapsed < cooldown:
+                    logger.debug(
+                        f"Pending review #{cid} — {elapsed.total_seconds() / 3600:.1f}h "
+                        f"< {config.REVIEW_NAG_COOLDOWN_HOURS}h cooldown, skipping"
+                    )
+                    return
+
+                reminder_count = pending.get("reminder_count", 0)
+                max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
+
+                if reminder_count >= max_reminders:
+                    logger.info(
+                        f"Pending review #{cid} — {reminder_count} reminders sent, "
+                        f"giving up and moving to next concept"
+                    )
+                    _clear_pending_review()
+                else:
+                    await _send_review_reminder(pending)
+                    return
+
+        try:
+            review_lines = pipeline.handle_review_check()
+
+            if not review_lines:
+                logger.debug("No pending reviews")
                 return
 
-    # --- Normal flow: pick next due concept and send LLM-generated quiz ---
-    try:
-        review_lines = pipeline.handle_review_check()
+            line = review_lines[0]
+            logger.info(f"Review due: {line[:80]}")
+            await _send_review_quiz(line)
 
-        if not review_lines:
-            logger.debug("No pending reviews")
-            return
-
-        line = review_lines[0]
-        logger.info(f"Review due: {line[:80]}")
-        await _send_review_quiz(line)
-
-    except Exception as e:
-        logger.error(f"Error in review-check: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Error in review-check: {e}", exc_info=True)
 
 
 async def _send_review_reminder(pending: dict):
@@ -369,15 +362,19 @@ async def _send_mode_report(
 async def _check_maintenance():
     """Run DB diagnostics and send maintenance report if issues found."""
     logger.debug("Running maintenance check...")
-    try:
-        diagnostic_context = pipeline.handle_maintenance()
-        if not diagnostic_context:
-            logger.debug("Maintenance: no issues found")
+    with state.pipeline_serialized_nowait() as acquired:
+        if not acquired:
+            logger.debug("Skipping maintenance check — pipeline busy")
             return
-        logger.info("Maintenance issues found, sending to LLM for triage")
-        await _send_maintenance_report(diagnostic_context)
-    except Exception as e:
-        logger.error(f"Error in maintenance check: {e}", exc_info=True)
+        try:
+            diagnostic_context = pipeline.handle_maintenance()
+            if not diagnostic_context:
+                logger.debug("Maintenance: no issues found")
+                return
+            logger.info("Maintenance issues found, sending to LLM for triage")
+            await _send_maintenance_report(diagnostic_context)
+        except Exception as e:
+            logger.error(f"Error in maintenance check: {e}", exc_info=True)
 
 
 async def _send_maintenance_report(diagnostic_context: str):
@@ -401,23 +398,27 @@ async def _send_maintenance_report(diagnostic_context: str):
 async def _check_taxonomy():
     """Run taxonomy reorganization and DM the report if there are topics."""
     logger.debug("Running taxonomy check...")
-    try:
-        taxonomy_context = pipeline.handle_taxonomy()
-        if not taxonomy_context:
-            logger.debug("Taxonomy: no topics found")
+    with state.pipeline_serialized_nowait() as acquired:
+        if not acquired:
+            logger.debug("Skipping taxonomy check — pipeline busy")
             return
-        logger.info("Running taxonomy reorganization LLM loop")
-        final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
-        await _send_mode_report(
-            mode_label="Weekly Taxonomy Reorganization",
-            icon="🌿",
-            final_result=final_result,
-            proposed_actions=proposed_actions,
-            proposal_type="taxonomy",
-            execute_fn=pipeline.execute_maintenance_actions,
-        )
-    except Exception as e:
-        logger.error(f"Error in taxonomy check: {e}", exc_info=True)
+        try:
+            taxonomy_context = pipeline.handle_taxonomy()
+            if not taxonomy_context:
+                logger.debug("Taxonomy: no topics found")
+                return
+            logger.info("Running taxonomy reorganization LLM loop")
+            final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+            await _send_mode_report(
+                mode_label="Weekly Taxonomy Reorganization",
+                icon="🌿",
+                final_result=final_result,
+                proposed_actions=proposed_actions,
+                proposal_type="taxonomy",
+                execute_fn=pipeline.execute_maintenance_actions,
+            )
+        except Exception as e:
+            logger.error(f"Error in taxonomy check: {e}", exc_info=True)
 
 
 async def _check_backup():
@@ -431,28 +432,30 @@ async def _check_backup():
 async def _check_dedup():
     """Run the dedup sub-agent to find potential duplicates.
     Now proposal-only: stores suggestions in DB and DMs user with buttons."""
-    # Skip if there's already a pending dedup proposal
-    existing = db.get_pending_proposal("dedup")
-    if existing:
-        logger.debug("[DEDUP] Skipping — pending proposal exists")
-        return
-
-    logger.info("[DEDUP] Running dedup check...")
-    try:
-        groups = await pipeline.handle_dedup_check()
-        if not groups:
-            logger.debug("[DEDUP] No duplicates found")
+    with state.pipeline_serialized_nowait() as acquired:
+        if not acquired:
+            logger.debug("[DEDUP] Skipping — pipeline busy")
             return
 
-        # Save proposal to DB (survives restarts)
-        proposal_id = db.save_proposal("dedup", groups)
+        existing = db.get_pending_proposal("dedup")
+        if existing:
+            logger.debug("[DEDUP] Skipping — pending proposal exists")
+            return
 
-        # Send suggestion DM with buttons
-        if _bot and _authorized_user_id:
-            await _send_dedup_suggestions(proposal_id, groups)
+        logger.info("[DEDUP] Running dedup check...")
+        try:
+            groups = await pipeline.handle_dedup_check()
+            if not groups:
+                logger.debug("[DEDUP] No duplicates found")
+                return
 
-    except Exception as e:
-        logger.error(f"Error in dedup check: {e}", exc_info=True)
+            proposal_id = db.save_proposal("dedup", groups)
+
+            if _bot and _authorized_user_id:
+                await _send_dedup_suggestions(proposal_id, groups)
+
+        except Exception as e:
+            logger.error(f"Error in dedup check: {e}", exc_info=True)
 
 
 async def _send_dedup_suggestions(proposal_id: int, groups: list[dict]):

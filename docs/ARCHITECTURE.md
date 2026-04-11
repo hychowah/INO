@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-10
+> Last updated: 2026-04-11
 
 ## Overview
 
@@ -16,8 +16,8 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         User Interfaces                              │
 │   ┌──────────────┐              ┌──────────────────────────────┐    │
-│   │  Discord Bot  │              │  Web UI (read-only browser)  │    │
-│   │  (bot.py)     │              │  (webui/server.py :8050)      │    │
+│   │  Discord Bot  │              │  Web UI (local dashboard +   │    │
+│   │  (bot.py)     │              │   chat via webui/server.py)   │    │
 │   └──────┬───────┘              └──────────────┬───────────────┘    │
 │          │                                      │                    │
 ├──────────┼──────────────────────────────────────┼────────────────────┤
@@ -103,6 +103,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
+| `services/chat_actions.py` | ~60 | Shared confirmation helpers and action whitelists used by FastAPI and Web UI chat flows |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
@@ -139,14 +140,13 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
 | `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
-| `services/llm.py` | ~330 | LLM provider abstraction — kimi CLI integration and OpenAI-compatible chat-completions adapter |
+| `services/llm.py` | ~330 | LLM provider abstraction — owns Kimi CLI subprocess integration and the OpenAI-compatible chat-completions adapter |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
-| `services/kimi.py` | ~83 | Thin subprocess wrapper around kimi-cli (the only subprocess in the system) |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
 | `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
-| `services/state.py` | ~25 | Shared mutable state between bot and scheduler, plus ContextVar-based current-user identity (`get_current_user`, `set_current_user`) |
+| `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, `last_activity_at`, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
@@ -362,7 +362,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   db.cleanup_expired_proposals()
 ```
 
-### Flow 4: Web UI (read-only)
+### Flow 4: Web UI (local dashboard + chat)
 
 ```
   Browser → http://localhost:8050
@@ -381,6 +381,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /forecast                → Review forecast with bucket drill-down
          ├── /graph                   → Interactive D3 force-directed knowledge graph
          ├── /chat                    → Chat interface (served via `webui/chat_backend.py`)
+         ├── /api/chat                → Local in-process chat POST route
+         ├── /api/chat/confirm        → Confirm WebUI pending action
+         ├── /api/chat/decline        → Decline WebUI pending action
+         ├── /api/concept/{id}/delete → Delete concept from concepts page
          ├── /api/stats               → JSON: review stats
          ├── /api/topics              → JSON: full topic map
          ├── /api/due                 → JSON: due concepts
@@ -388,9 +392,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /api/forecast?range=     → JSON: forecast bucket summary
          └── /api/forecast/concepts   → JSON: concepts in one forecast bucket
          │
-         └── All routes except /chat read directly from the db/ package
-             (no pipeline, no LLM — pure DB ➜ HTML)
-             /chat routes through webui/chat_backend.py → pipeline → LLM
+         └── Dashboard routes read directly from the db/ package
+           (no pipeline, no LLM — pure DB ➜ HTML / JSON)
+           Chat and chat-confirmation routes go through
+           webui/chat_backend.py → pipeline → LLM / action execution
 ```
 
 ---
@@ -493,7 +498,7 @@ session_state
   └── PK(user_id, key)
 ```
 
-Current runtime behavior is still single-user because the Discord bot, REST API, Web UI, and scheduler do not yet set a non-default current user. The db layer is prepared for that future activation via `services/state.py` + `db.core._uid()`, so all existing callers continue to resolve to `user_id='default'` until Phase 3C is implemented.
+Current runtime behavior is still single-user because the Discord bot, REST API, Web UI, and scheduler do not yet set a non-default current user. The db layer is prepared for future activation via `services/state.py` + `db.core._uid()`, so all existing callers continue to resolve to `user_id='default'` until entry points start calling `set_current_user()`.
 
 ---
 
@@ -506,6 +511,7 @@ Current runtime behavior is still single-user because the Discord bot, REST API,
 - Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
 - `bot/events.py` routes authorized plain messages through the learning pipeline, tracks `last_activity_at`, copies the runtime preferences file on startup if needed, and starts the scheduler on `on_ready`
 - `bot/messages.py` and `services/views.py` handle Discord-safe chunking plus persistent button views for confirmations, quiz navigation, and preference edits
+- Interactive bot entry points serialize against the shared process-local pipeline lock in `services/state.py` so the Discord path does not interleave with WebUI/API chat state
 
 ### context.py — Prompt Construction
 | Function | Purpose |
@@ -563,15 +569,22 @@ The core brain of the system. Coordinates everything:
 11. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
 12. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
-### services/kimi.py — LLM Subprocess (the only one)
-- Wraps `kimi-cli` as a subprocess via `asyncio.to_thread(subprocess.run, ...)`
-- Handles encoding (UTF-8), timeout, stderr filtering
-- This is the **single point** where the system crosses a process boundary
+### services/llm.py — Provider Integration
+- Owns both provider modes: OpenAI-compatible chat completions and Kimi CLI subprocess execution
+- For `openai_compat`, session history is provider-managed and existing session reads return a copy to avoid accidental live-list mutation
+- For `kimi`, this module is the **single point** where the system crosses a subprocess boundary
+
+### services/state.py + services/chat_actions.py — Shared Runtime Coordination
+- `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, `last_activity_at`, and the ContextVar-backed current-user identity
+- Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
+- `services/scheduler.py` uses the non-blocking helper so review, maintenance, taxonomy, and dedup checks skip a cycle when the pipeline is busy rather than interleave with active chat work
+- `services/chat_actions.py` centralizes confirmation whitelists and history-entry formatting for the FastAPI and WebUI chat surfaces
 
 ### services/scheduler.py — Background Tasks
 - Starts as a `bot.loop.create_task` on bot ready
 - Review check: every 15 minutes (configurable), calls `pipeline.handle_review_check()` → sends quiz DMs
 - **Suppresses reviews** when user has been active within `SESSION_TIMEOUT_MINUTES` to avoid interrupting conversations
+- Review, maintenance, taxonomy, and dedup checks now skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
 - Maintenance: every 168 hours (weekly), calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
 - Taxonomy: every 168 hours (same weekly cycle, after maintenance), calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM
 - Backup: every 168 hours (same weekly cycle, after dedup), calls `backup_service.run_backup_cycle()` via thread executor — runs after dedup, before proposal cleanup
@@ -585,10 +598,11 @@ The core brain of the system. Coordinates everything:
 ### webui/ — Web Dashboard
 - Zero-dependency HTTP server on port 8050 (`webui/server.py`)
 - Static file serving for extracted CSS and JS (`webui/static/`)
+- Local chat surface at `/chat` backed by `webui/chat_backend.py`, plus local POST routes for confirm/decline and concept deletion
 - Interactive topic tree with expand/collapse, search/filter, and subtree stats
 - Topic detail pages with breadcrumb navigation and child topic cards
 - Computes aggregated subtree stats (own + total concepts) via post-order DFS
-- Imports the `db/` package directly — completely independent of the bot/pipeline
+- Dashboard pages import the `db/` package directly; WebUI chat and confirmation routes share the same in-process learning pipeline and serialization boundary as the bot
 
 ---
 

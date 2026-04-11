@@ -163,7 +163,7 @@ make run-bot
 ```
 
 The bot connects to Discord and registers slash commands on startup. Use `/sync` (in Discord) the first time you run it to publish commands to your server.
-It also starts the read-only Web UI on `http://localhost:8050` after the bot reaches `on_ready()`.
+It also starts the local Web UI on `http://localhost:8050` after the bot reaches `on_ready()`.
 
 ### FastAPI Backend
 
@@ -196,7 +196,7 @@ INO/
 ├── backups/            # Runtime-generated — timestamped backup snapshots (git-ignored)
 ├── db/                 # SQLite database access layer
 ├── services/           # Core business logic (pipeline, tools, tools_assess, context, …)
-├── webui/              # Read-only web dashboard
+├── webui/              # Local web dashboard + in-process chat
 │   ├── server.py       # HTTP server + routing
 │   ├── helpers.py      # HTML helpers (extracted from server.py)
 │   ├── pages/          # Page renderer package (dashboard, topics, concepts, reviews, activity, graph)

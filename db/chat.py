@@ -63,34 +63,37 @@ def clear_chat_history(session_id: str = "learn", *, user_id: Optional[str] = No
 # ============================================================================
 
 
-def set_session(key: str, value: Optional[str], *, user_id: str = "default"):
+def set_session(key: str, value: Optional[str], *, user_id: Optional[str] = None):
     """Set a session state key. Pass None to delete."""
+    uid = user_id or _uid()
     conn = sqlite3.connect(CHAT_DB)
     if value is None:
-        conn.execute("DELETE FROM session_state WHERE key = ? AND user_id = ?", (key, user_id))
+        conn.execute("DELETE FROM session_state WHERE key = ? AND user_id = ?", (key, uid))
     else:
         conn.execute(
             "INSERT INTO session_state (user_id, key, value, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
             "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, "
             "updated_at = excluded.updated_at",
-            (user_id, key, value),
+            (uid, key, value),
         )
     conn.commit()
     conn.close()
 
 
-def get_session(key: str, *, user_id: str = "default") -> Optional[str]:
+def get_session(key: str, *, user_id: Optional[str] = None) -> Optional[str]:
     """Get a session state value, or None if not set."""
+    uid = user_id or _uid()
     conn = sqlite3.connect(CHAT_DB)
-    row = conn.execute("SELECT value FROM session_state WHERE key = ? AND user_id = ?", (key, user_id)).fetchone()
+    row = conn.execute("SELECT value FROM session_state WHERE key = ? AND user_id = ?", (key, uid)).fetchone()
     conn.close()
     return row[0] if row else None
 
 
-def get_session_updated_at(key: str, *, user_id: str = "default") -> Optional[str]:
+def get_session_updated_at(key: str, *, user_id: Optional[str] = None) -> Optional[str]:
     """Get the updated_at timestamp for a session state key, or None."""
+    uid = user_id or _uid()
     conn = sqlite3.connect(CHAT_DB)
-    row = conn.execute("SELECT updated_at FROM session_state WHERE key = ? AND user_id = ?", (key, user_id)).fetchone()
+    row = conn.execute("SELECT updated_at FROM session_state WHERE key = ? AND user_id = ?", (key, uid)).fetchone()
     conn.close()
     return row[0] if row else None
 

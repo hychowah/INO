@@ -302,7 +302,7 @@ class OpenAICompatibleProvider:
         """Return the message list for this session (creating if needed)."""
         if session and session in self._sessions:
             msgs, _ = self._sessions[session]
-            return msgs
+            return [dict(msg) for msg in msgs]
 
         msgs: list[dict] = []
         if system_prompt:

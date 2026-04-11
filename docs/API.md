@@ -1,12 +1,12 @@
 # API Reference
 
-This document describes all public API surfaces exposed by the Learning Agent: the Discord bot commands, the FastAPI REST backend, and the read-only Web UI.
+This document describes all public API surfaces exposed by the Learning Agent: the Discord bot commands, the FastAPI REST backend, and the local Web UI.
 
 ---
 
 ## 1. Discord Bot (`bot.py` + `bot/` package)
 
-The bot is the primary user-facing interface. All commands require the calling user to be listed in `LEARN_AUTHORIZED_USER_ID`.
+The bot is the primary user-facing interface. All interactive commands except `/ping` require the calling user to match `LEARN_AUTHORIZED_USER_ID`.
 
 Current shipped behavior is still single-user at the interface layer. Internally, the database layer is now prepared for per-user scoping, but no entry point sets a non-default user identity yet, so all requests still resolve to the default user.
 
@@ -45,7 +45,7 @@ on_message → _handle_user_message → services/pipeline.py → LLM → tools/a
 
 ### Authentication
 
-Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Discord user ID). All commands include an `@authorized_only()` check.
+Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Discord user ID). All user-facing commands except `/ping` include an `@authorized_only()` check.
 
 ---
 
@@ -70,9 +70,9 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional pending action. |
-| `POST` | `/api/chat/confirm` | Confirm a pending action returned by a previous `/api/chat` call. |
-| `POST` | `/api/chat/decline` | Decline a pending action returned by a previous `/api/chat` call. |
+| `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional `pending_confirm` for intercepted confirmation flows. |
+| `POST` | `/api/chat/confirm` | Confirm a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
+| `POST` | `/api/chat/decline` | Decline a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
 
 #### `POST /api/chat/confirm` — confirmable actions
 
@@ -85,6 +85,8 @@ Only a fixed whitelist of actions may be confirmed via this endpoint:
 | `add_topic` | Create a new topic |
 | `link_concept` | Link a concept to topic(s) |
 
+In the normal `/api/chat` flow, the API only emits `pending_confirm` for the intercepted actions `add_concept` and `suggest_topic`. The broader whitelist exists so trusted callers can confirm compatible action payloads directly.
+
 Any other action returns HTTP **400**:
 ```json
 {"detail": "Action '<action>' cannot be confirmed via this endpoint"}
@@ -92,7 +94,7 @@ Any other action returns HTTP **400**:
 
 #### `POST /api/chat/decline`
 
-Declines a pending action previously returned by `/api/chat`. Uses the same `ConfirmRequest` schema and validates against the same `API_CONFIRMABLE_ACTIONS` whitelist as `/confirm`.
+Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and validates against the same `API_CONFIRMABLE_ACTIONS` whitelist as `/confirm`.
 
 - Returns `{"type": "reply", "message": "Declined."}` on success.
 - Returns HTTP **400** for any action type not in the whitelist.
@@ -156,7 +158,7 @@ Declines a pending action previously returned by `/api/chat`. Uses the same `Con
 
 ## 3. Web UI (`webui/server.py`)
 
-A read-only dashboard served on port `8050` (default) using Python's built-in HTTP server. No authentication is required (LAN/localhost use only by design).
+A local-only dashboard and chat surface served on port `8050` (default) using Python's built-in HTTP server. No authentication is required for page loads (LAN/localhost use only by design).
 
 Start with:
 
@@ -185,7 +187,18 @@ Running `python bot.py` also starts the same Web UI automatically after the Disc
 | `/graph` | Interactive D3.js force-directed knowledge graph |
 | `/static/*` | Static assets (JS, CSS) |
 
-The Web UI reads directly from the same SQLite databases used by the bot and API.
+### Local JSON Routes
+
+These routes are served by the Web UI's built-in HTTP server on port `8050`. They are local Web UI routes, not FastAPI routes on port `8080`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/chat` | In-process Web UI chat endpoint backed by `webui/chat_backend.py`. |
+| `POST` | `/api/chat/confirm` | Confirm a Web UI pending action (`add_concept`, `suggest_topic`, `preference_update`, `maintenance_review`, `taxonomy_review`). |
+| `POST` | `/api/chat/decline` | Decline a Web UI pending action. |
+| `POST` | `/api/concept/{id}/delete` | Delete a concept from the concepts page. |
+
+The Web UI reads directly from the same SQLite databases used by the bot and API for dashboard pages, and routes local chat through the same in-process learning pipeline.
 
 ---
 

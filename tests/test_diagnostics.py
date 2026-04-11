@@ -1,5 +1,7 @@
 """Tests for Phase 6: maintenance diagnostics — relationship candidates + cluttered roots."""
 
+from unittest.mock import patch
+
 import db
 
 
@@ -69,6 +71,24 @@ class TestRelationshipCandidates:
             cand = diag["relationship_candidates"][0]
             assert "similarity" in cand
             assert 0.0 < cand["similarity"] <= 1.0
+
+    def test_candidates_fall_back_when_vector_neighbors_are_stale(self, test_db):
+        tid = db.add_topic("Steel", "")
+        c1 = db.add_concept("Stainless Steel Grades", "Types of stainless steel", [tid])
+        c2 = db.add_concept(
+            "Stainless Steel Corrosion", "Corrosion resistance of stainless steel", [tid]
+        )
+
+        with patch("db.vectors.find_nearest_concepts", return_value=[{"id": 999999, "title": "stale", "score": 0.95}]):
+            diag = db.get_maintenance_diagnostics()
+
+        ids_in_candidates = set()
+        for cand in diag["relationship_candidates"]:
+            ids_in_candidates.add(cand["concept_a"]["id"])
+            ids_in_candidates.add(cand["concept_b"]["id"])
+
+        assert c1 in ids_in_candidates
+        assert c2 in ids_in_candidates
 
 
 class TestClutteredRootTopics:

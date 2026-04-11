@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import db
 from db import core
+from services import state
 
 
 def _create_old_schema_chat_db(chat_path):
@@ -174,6 +175,17 @@ class TestMigration12:
         assert db.get_session("shared_key", user_id="user_b") == "val_b"
         # Default user doesn't see either
         assert db.get_session("shared_key") is None
+
+    def test_helpers_resolve_context_user_by_default(self, test_db):
+        """Omitted user_id uses the current ContextVar-backed user."""
+        previous_user = state.get_current_user()
+        state.set_current_user("ctx_user")
+        try:
+            db.set_session("ctx_key", "ctx_value")
+            assert db.get_session("ctx_key") == "ctx_value"
+            assert db.get_session("ctx_key", user_id="default") is None
+        finally:
+            state.set_current_user(previous_user)
 
     def test_get_session_updated_at_with_user(self, test_db):
         """get_session_updated_at respects user_id scoping."""

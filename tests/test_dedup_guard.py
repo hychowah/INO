@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -265,3 +266,14 @@ class TestConceptCountIntegrity:
         # Should only have 1 concept, not 5
         all_concepts = db.search_concepts("Rapid Fire Concept", limit=10)
         assert len(all_concepts) == 1
+
+    def test_search_concepts_falls_back_when_vector_hits_are_stale(self):
+        """Stale vector hits should not suppress the SQL fallback path."""
+        tid = db.add_topic(title="TestTopic")
+        cid = db.add_concept(title="Vector Fallback Concept", topic_ids=[tid])
+
+        with patch("db.vectors.search_similar_concepts", return_value=[{"id": 999999, "title": "stale", "score": 0.9}]):
+            matches = db.search_concepts("Vector Fallback Concept", limit=10)
+
+        assert len(matches) == 1
+        assert matches[0]["id"] == cid

@@ -13,9 +13,9 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Hybrid search** — Qdrant vector store (768-dim, `all-mpnet-base-v2`) + SQLite FTS5, with graceful degradation if Qdrant is unavailable
 - **Multi-concept synthesis quizzes** — Semantically clusters related concepts for cross-topic questions
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
-- **Dual interfaces** — Discord bot (`bot.py` wrapper + `bot/` package) and REST API (`api.py`) share the same pipeline
+- **Multiple interfaces** — Discord bot, FastAPI REST API, and the local Web UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard** — Zero-dependency read-only HTTP UI with interactive D3.js topic tree and force-directed graph
+- **Web dashboard + chat** — Zero-dependency local HTTP UI with interactive dashboard pages, in-process chat, and D3.js topic tree / force-directed graph
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -28,7 +28,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 ┌─────────────────────────────────────────────────────────────────┐
 │  User Interfaces                                                │
 │  ┌────────────┐  ┌────────────┐  ┌──────────────────────────┐  │
-│  │ Discord Bot │  │  REST API  │  │  Web UI (read-only :8050)│  │
+│  │ Discord Bot │  │  REST API  │  │   Web UI (local :8050)  │  │
 │  │  bot.py     │  │  api.py    │  │  webui/server.py         │  │
 │  └──────┬──────┘  └──────┬─────┘  └────────────┬─────────────┘  │
 ├─────────┼────────────────┼─────────────────────┼────────────────┤

@@ -30,32 +30,32 @@ async def chat(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    state.last_activity_at = datetime.now()
-
-    set_action_source("api")
-
     try:
-        llm_response = await pipeline.call_with_fetch_loop(
-            "command", req.message.strip(), "solo_user"
-        )
+        async with state.pipeline_serialized():
+            state.last_activity_at = datetime.now()
+            set_action_source("api")
 
-        prefix, message, action_data = parse_llm_response(llm_response)
-        if action_data and is_intercepted_action(action_data):
-            display_msg = action_data.get("message", message or "")
-            db.add_chat_message("user", req.message.strip())
-            if display_msg:
-                db.add_chat_message("assistant", display_msg)
-            return ChatResponse(
-                type="pending_confirm",
-                message=display_msg,
-                pending_action=action_data,
+            llm_response = await pipeline.call_with_fetch_loop(
+                "command", req.message.strip(), "solo_user"
             )
 
-        final_result = await pipeline.execute_llm_response(
-            req.message.strip(), llm_response, "command"
-        )
-        msg_type, message = process_output(final_result)
-        return ChatResponse(type=msg_type, message=message)
+            prefix, message, action_data = parse_llm_response(llm_response)
+            if action_data and is_intercepted_action(action_data):
+                display_msg = action_data.get("message", message or "")
+                db.add_chat_message("user", req.message.strip())
+                if display_msg:
+                    db.add_chat_message("assistant", display_msg)
+                return ChatResponse(
+                    type="pending_confirm",
+                    message=display_msg,
+                    pending_action=action_data,
+                )
+
+            final_result = await pipeline.execute_llm_response(
+                req.message.strip(), llm_response, "command"
+            )
+            msg_type, message = process_output(final_result)
+            return ChatResponse(type=msg_type, message=message)
     except Exception as e:
         logger.exception("Chat endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
@@ -65,8 +65,6 @@ async def chat(req: ChatRequest):
 async def confirm_action(req: ConfirmRequest):
     """Confirm a pending add_concept (or other intercepted action) from /api/chat."""
     from services.tools import execute_action, execute_suggest_topic_accept
-
-    set_action_source("api")
 
     action = req.action_data.get("action", "")
     params = req.action_data.get("params", {})
@@ -83,19 +81,21 @@ async def confirm_action(req: ConfirmRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
-        display_msg = req.action_data.get("message", "")
-        if action == "suggest_topic":
-            success, summary, _topic_id = execute_suggest_topic_accept(req.action_data)
-            if not success:
-                return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {summary}")
-            db.add_chat_message("user", confirmation_history_entry(req.action_data))
-            db.add_chat_message("assistant", summary)
-            return ChatResponse(type="reply", message=f"{display_msg}\n\n{summary}")
+        async with state.pipeline_serialized():
+            set_action_source("api")
+            display_msg = req.action_data.get("message", "")
+            if action == "suggest_topic":
+                success, summary, _topic_id = execute_suggest_topic_accept(req.action_data)
+                if not success:
+                    return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {summary}")
+                db.add_chat_message("user", confirmation_history_entry(req.action_data))
+                db.add_chat_message("assistant", summary)
+                return ChatResponse(type="reply", message=f"{display_msg}\n\n{summary}")
 
-        msg_type, result = execute_action(action, params)
-        if msg_type == "error":
-            return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {result}")
-        else:
+            msg_type, result = execute_action(action, params)
+            if msg_type == "error":
+                return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {result}")
+
             db.add_chat_message("user", confirmation_history_entry(req.action_data))
             db.add_chat_message("assistant", f"✅ {result}")
             return ChatResponse(type="reply", message=f"{display_msg}\n\n✅ {result}")
@@ -107,17 +107,17 @@ async def confirm_action(req: ConfirmRequest):
 @router.post("/api/chat/decline", response_model=ChatResponse, dependencies=[Depends(verify_token)])
 async def decline_action(req: ConfirmRequest):
     """Decline a pending add_concept or suggest_topic from /api/chat."""
-    set_action_source("api")
-
     try:
-        require_confirmable_action(
-            req.action_data,
-            API_CONFIRMABLE_ACTIONS,
-            "declined via this endpoint",
-        )
-        entry = decline_history_entry(req.action_data)
+        async with state.pipeline_serialized():
+            set_action_source("api")
+            require_confirmable_action(
+                req.action_data,
+                API_CONFIRMABLE_ACTIONS,
+                "declined via this endpoint",
+            )
+            entry = decline_history_entry(req.action_data)
+            db.add_chat_message("user", entry)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    db.add_chat_message("user", entry)
     return ChatResponse(type="reply", message="Declined.")

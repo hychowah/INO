@@ -64,7 +64,7 @@ def _title_similarity(a: str, b: str) -> float:
     return max(jaccard, containment)
 
 
-def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
+def _get_relationship_candidates(conn, limit: int = 20, *, user_id: Optional[str] = None) -> List[Dict]:
     """Find semantically related concept pairs that don't have a relation yet.
 
     Uses vector store nearest-neighbor search when available (semantic matching).
@@ -72,13 +72,18 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
     Returns up to `limit` candidate pairs.
     """
     # Try vector-based discovery first
+    uid = user_id or _uid()
+
     try:
         from config import SIMILARITY_THRESHOLD_RELATION
         from db.vectors import find_nearest_concepts
 
-        all_concepts = conn.execute("SELECT id, title FROM concepts ORDER BY id").fetchall()
+        all_concepts = conn.execute(
+            "SELECT id, title FROM concepts WHERE user_id = ? ORDER BY id", (uid,)
+        ).fetchall()
         if len(all_concepts) < 2:
             return []
+        concept_map = {concept["id"]: concept["title"] for concept in all_concepts}
 
         # Get existing relations to exclude
         try:
@@ -99,6 +104,9 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
                 score_threshold=SIMILARITY_THRESHOLD_RELATION,
             )
             for neighbor in neighbors:
+                neighbor_title = concept_map.get(neighbor["id"])
+                if neighbor_title is None:
+                    continue
                 low = min(concept["id"], neighbor["id"])
                 high = max(concept["id"], neighbor["id"])
                 if (low, high) in existing_pairs or (low, high) in seen_pairs:
@@ -106,7 +114,7 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
                 candidates.append(
                     {
                         "concept_a": {"id": concept["id"], "title": concept["title"]},
-                        "concept_b": {"id": neighbor["id"], "title": neighbor["title"]},
+                        "concept_b": {"id": neighbor["id"], "title": neighbor_title},
                         "similarity": neighbor["score"],
                     }
                 )
@@ -116,7 +124,8 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
             if len(candidates) >= limit:
                 break
 
-        return candidates
+        if candidates:
+            return candidates
     except Exception:
         pass  # Fall through to FTS5-based approach
 
@@ -276,7 +285,7 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
 
     # 8. Relationship candidates — FTS5-based concept pairs that share keywords
     #    but don't yet have a relation.
-    relationship_candidates = _get_relationship_candidates(conn, limit=DIAG_LIMIT)
+    relationship_candidates = _get_relationship_candidates(conn, limit=DIAG_LIMIT, user_id=uid)
 
     # 9. Cluttered root topics — roots with >10 direct concepts and no subtopics
     cluttered_roots = conn.execute(

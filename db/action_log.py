@@ -27,7 +27,7 @@ def log_action(
     result_type: str,
     result: str,
     source: str = "discord",
-    user_id: str = "default",
+    user_id: Optional[str] = None,
 ) -> int:
     """Insert an action log entry. Returns the log entry ID.
 
@@ -48,13 +48,14 @@ def log_action(
     result_str = str(result) if result is not None else ""
     if len(result_str) > _MAX_RESULT_LEN:
         result_str = result_str[: _MAX_RESULT_LEN - 1] + "…"
+    uid = user_id or _uid()
 
     conn = _conn()
     cursor = conn.execute(
         """INSERT INTO action_log
            (action, params, result_type, result, source, user_id, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (action, params_str, result_type, result_str, source, user_id, _now_iso()),
+        (action, params_str, result_type, result_str, source, uid, _now_iso()),
     )
     entry_id = cursor.lastrowid
     conn.commit()

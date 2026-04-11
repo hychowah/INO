@@ -15,6 +15,7 @@ import config
 import db
 from db.preferences import get_persona, get_persona_content
 from services import context as ctx
+from services import state
 from services import tools
 from services.llm import LLMError, get_provider, get_reasoning_provider
 from services.parser import (
@@ -233,13 +234,14 @@ def _get_conv_session() -> tuple[str, bool]:
     Returns (session_name, is_new) — is_new=True means first call needs full context."""
     global _conv_session_name, _conv_session_last_used
     now = datetime.now()
+    user_id = state.get_current_user()
     timeout = getattr(config, "SESSION_TIMEOUT_MINUTES", 5)
     if (
         _conv_session_name is None
         or _conv_session_last_used is None
         or (now - _conv_session_last_used).total_seconds() > timeout * 60
     ):
-        _conv_session_name = f"learn_{now.strftime('%H%M%S')}"
+        _conv_session_name = f"learn_{user_id}_{now.strftime('%H%M%S')}"
         _conv_session_last_used = now
         logger.info(f"New conversation session: {_conv_session_name}")
         return _conv_session_name, True
