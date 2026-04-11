@@ -1,10 +1,11 @@
 import json
 import asyncio
 from io import BytesIO
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import db
 
+import webui.server as webui_server
 from webui.chat_backend import handle_webui_message
 from webui.pages.chat import page_chat
 from webui.server import Handler
@@ -189,6 +190,40 @@ def test_chat_decline_unknown_action_returns_400_chat_error_shape(test_db):
         "message": "Action 'assess' cannot be declined in WebUI",
         "pending_action": None,
     }
+
+
+def test_webui_main_registers_signal_handlers_in_main_thread(test_db):
+    server = MagicMock()
+    current = object()
+
+    with (
+        patch("webui.server.ThreadingHTTPServer", return_value=server),
+        patch("webui.server.signal.signal") as mock_signal,
+        patch("webui.server.threading.current_thread", return_value=current),
+        patch("webui.server.threading.main_thread", return_value=current),
+    ):
+        webui_server.main(skip_init=True)
+
+    server.serve_forever.assert_called_once_with(poll_interval=0.25)
+    server.server_close.assert_called_once_with()
+    assert mock_signal.call_count == 1 + int(hasattr(webui_server.signal, "SIGTERM"))
+    assert mock_signal.call_args_list[0].args[0] == webui_server.signal.SIGINT
+
+
+def test_webui_main_skips_signal_handlers_off_main_thread(test_db):
+    server = MagicMock()
+
+    with (
+        patch("webui.server.ThreadingHTTPServer", return_value=server),
+        patch("webui.server.signal.signal") as mock_signal,
+        patch("webui.server.threading.current_thread", return_value=object()),
+        patch("webui.server.threading.main_thread", return_value=object()),
+    ):
+        webui_server.main(skip_init=True)
+
+    server.serve_forever.assert_called_once_with(poll_interval=0.25)
+    server.server_close.assert_called_once_with()
+    mock_signal.assert_not_called()
 
 
 def test_handle_webui_message_ping_records_history(test_db):

@@ -11,6 +11,7 @@ import json
 import mimetypes
 import signal
 import sys
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path

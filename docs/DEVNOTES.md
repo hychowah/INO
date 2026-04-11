@@ -155,7 +155,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 **`view=None` rejection:** Discord raises `TypeError` when `view=None` is passed explicitly as a keyword argument to `send_fn`. `send_long_with_view()` omits the `view=` kwarg entirely when `view` is `None` — calls `await send_fn(chunks[-1])` without it rather than `await send_fn(chunks[-1], view=None)`.
 
-**Signal handler crash:** `webui/server.py` signal handler must guard with `threading.current_thread() is threading.main_thread()` since bot.py spawns webui in a background thread.
+**WebUI threading trap:** `bot.py` spawns `webui/server.py` in a background thread, so `webui/server.py` must keep `import threading` when using `threading.current_thread()`, `threading.main_thread()`, or `threading.Thread()`, and signal registration must stay guarded behind `threading.current_thread() is threading.main_thread()`.
 
 **SVG/D3:** Set visual properties as inline SVG `.attr()` calls, not CSS classes — avoids specificity issues. CSS only for interactive states.
 
