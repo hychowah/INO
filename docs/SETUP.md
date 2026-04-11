@@ -70,6 +70,9 @@ LEARN_LLM_PROVIDER=kimi
 LEARN_BOT_TOKEN=your-discord-bot-token
 LEARN_AUTHORIZED_USER_ID=your-discord-user-id   # numeric ID
 
+# Current shipped runtime is still single-user at the interface layer.
+# The internal DB user_id scaffolding is present but not yet activated at entry points.
+
 # REST API settings (required for api.py unless you use the defaults shown)
 # LEARN_API_HOST=0.0.0.0
 # LEARN_API_PORT=8080

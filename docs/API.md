@@ -8,6 +8,8 @@ This document describes all public API surfaces exposed by the Learning Agent: t
 
 The bot is the primary user-facing interface. All commands require the calling user to be listed in `LEARN_AUTHORIZED_USER_ID`.
 
+Current shipped behavior is still single-user at the interface layer. Internally, the database layer is now prepared for per-user scoping, but no entry point sets a non-default user identity yet, so all requests still resolve to the default user.
+
 ### Commands
 
 | Command | Description |
@@ -194,6 +196,8 @@ The Web UI reads directly from the same SQLite databases used by the bot and API
 | Discord bot | Discord user ID allowlist | `LEARN_AUTHORIZED_USER_ID` |
 | REST API | Bearer token header | `LEARN_API_SECRET_KEY` |
 | Web UI | None (localhost-only by design) | — |
+
+Internally, db functions now accept an optional `user_id` and default to a ContextVar-backed lookup, but that is not yet activated at the Discord/API/Web UI entry points. From an operator perspective, the app still behaves as a single-user system.
 
 ---
 

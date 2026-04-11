@@ -26,6 +26,9 @@ Thumbs.db
 # Backups
 backups/
 
+# Local planning scratch docs
+docs/plans/
+
 # Manual prompt inspection logs
 scripts/prompt_logs/
 

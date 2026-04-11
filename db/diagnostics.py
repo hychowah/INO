@@ -5,9 +5,9 @@ Maintenance diagnostics and duplicate detection.
 import re
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from db.core import _conn
+from db.core import _conn, _uid
 
 DIAG_LIMIT = 20
 
@@ -183,9 +183,10 @@ def _get_relationship_candidates(conn, limit: int = 20) -> List[Dict]:
     return candidates
 
 
-def get_maintenance_diagnostics() -> Dict[str, Any]:
+def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Run diagnostic queries for the maintenance agent. Surfaces issues like
     untagged concepts, empty topics, oversized topics, stale concepts, etc."""
+    uid = user_id or _uid()
     conn = _conn()
 
     # 1. Untagged concepts (no topic link)
@@ -193,10 +194,10 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         SELECT c.id, c.title, c.mastery_level, c.review_count, c.created_at
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-        WHERE ct.topic_id IS NULL
+        WHERE ct.topic_id IS NULL AND c.user_id = ?
         ORDER BY c.created_at DESC
         LIMIT 20
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # 2. Empty topics (no concepts linked AND no child topics)
     empty_topics = conn.execute("""
@@ -204,21 +205,22 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         FROM topics t
         LEFT JOIN concept_topics ct ON t.id = ct.topic_id
         LEFT JOIN topic_relations tr ON t.id = tr.parent_id
-        WHERE ct.concept_id IS NULL AND tr.child_id IS NULL
+        WHERE ct.concept_id IS NULL AND tr.child_id IS NULL AND t.user_id = ?
         ORDER BY t.created_at DESC
         LIMIT 20
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # 3. Oversized topics (>15 concepts)
     oversized = conn.execute("""
         SELECT t.id, t.title, COUNT(ct.concept_id) as concept_count
         FROM topics t
         JOIN concept_topics ct ON t.id = ct.topic_id
+        WHERE t.user_id = ?
         GROUP BY t.id
         HAVING concept_count > 15
         ORDER BY concept_count DESC
         LIMIT 20
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # 4. Stale concepts (created >14 days ago, never reviewed)
     fourteen_days_ago = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
@@ -226,35 +228,36 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         """
         SELECT c.id, c.title, c.created_at, c.review_count
         FROM concepts c
-        WHERE c.review_count = 0 AND c.created_at <= ?
+        WHERE c.review_count = 0 AND c.created_at <= ? AND c.user_id = ?
         ORDER BY c.created_at ASC
         LIMIT 20
     """,
-        (fourteen_days_ago,),
+        (fourteen_days_ago, uid),
     ).fetchall()
 
     # 5. Low score concepts with many reviews (struggling)
     struggling = conn.execute("""
         SELECT c.id, c.title, c.mastery_level, c.ease_factor, c.review_count
         FROM concepts c
-        WHERE c.review_count >= 5 AND c.mastery_level <= 25
+        WHERE c.review_count >= 5 AND c.mastery_level <= 25 AND c.user_id = ?
         ORDER BY c.review_count DESC
         LIMIT 20
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # 6. Concepts in many topics (>3 — potential over-tagging)
     over_tagged = conn.execute("""
         SELECT c.id, c.title, COUNT(ct.topic_id) as topic_count
         FROM concepts c
         JOIN concept_topics ct ON c.id = ct.concept_id
+        WHERE c.user_id = ?
         GROUP BY c.id
         HAVING topic_count > 3
         ORDER BY topic_count DESC
         LIMIT 20
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # 7. Potential duplicate concepts (word-overlap similarity)
-    all_concepts = conn.execute("SELECT id, title FROM concepts ORDER BY id").fetchall()
+    all_concepts = conn.execute("SELECT id, title FROM concepts WHERE user_id = ? ORDER BY id", (uid,)).fetchall()
     potential_dupes = []
     concept_list = [dict(c) for c in all_concepts]
     for i, a in enumerate(concept_list):
@@ -283,12 +286,13 @@ def get_maintenance_diagnostics() -> Dict[str, Any]:
         JOIN concept_topics ct ON t.id = ct.topic_id
         WHERE t.id NOT IN (SELECT child_id FROM topic_relations)
           AND t.id NOT IN (SELECT parent_id FROM topic_relations)
+          AND t.user_id = ?
         GROUP BY t.id
         HAVING concept_count > 10
         ORDER BY concept_count DESC
         LIMIT ?
     """,
-        (DIAG_LIMIT,),
+        (uid, DIAG_LIMIT),
     ).fetchall()
 
     conn.close()

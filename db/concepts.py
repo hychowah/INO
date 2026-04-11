@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from db.core import _conn, _normalize_dt_str, _now_iso
+from db.core import _conn, _normalize_dt_str, _now_iso, _uid
 
 logger = logging.getLogger("learn.db.concepts")
 
@@ -57,13 +57,13 @@ def add_concept(
     description: Optional[str] = None,
     topic_ids: Optional[List[int]] = None,
     next_review_at: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> int:
     """Create a concept and optionally link it to topic(s).
     If next_review_at is None, defaults to tomorrow.
-    Returns the new concept ID.
-
-    # TODO: Phase 3 — accept user_id, validate topic ownership before cross-table links
-    """
+    Returns the new concept ID."""
+    uid = user_id or _uid()
     conn = _conn()
     now = _now_iso()
 
@@ -76,15 +76,16 @@ def add_concept(
     try:
         cursor = conn.execute(
             """INSERT INTO concepts
-               (title, description, next_review_at, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (title, description, next_review_at, now, now),
+               (title, description, next_review_at, created_at, updated_at, user_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (title, description, next_review_at, now, now, uid),
         )
     except sqlite3.IntegrityError:
         # UNIQUE constraint on title — concept already exists.
         # Return the existing concept's ID instead of creating a duplicate.
+        # NOTE: UNIQUE index is on title alone; future migration will make it (user_id, title)
         row = conn.execute(
-            "SELECT id FROM concepts WHERE LOWER(title) = LOWER(?)", (title,)
+            "SELECT id FROM concepts WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)
         ).fetchone()
         conn.close()
         if row:
@@ -112,10 +113,11 @@ def add_concept(
     return concept_id
 
 
-def find_concept_by_title(title: str) -> Optional[Dict]:
+def find_concept_by_title(title: str, *, user_id: Optional[str] = None) -> Optional[Dict]:
     """Find a concept by exact title (case-insensitive). Returns concept with topic_ids or None."""
+    uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM concepts WHERE LOWER(title) = LOWER(?)", (title,)).fetchone()
+    row = conn.execute("SELECT * FROM concepts WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)).fetchone()
     if not row:
         conn.close()
         return None
@@ -128,10 +130,11 @@ def find_concept_by_title(title: str) -> Optional[Dict]:
     return d
 
 
-def get_concept(concept_id: int) -> Optional[Dict]:
+def get_concept(concept_id: int, *, user_id: Optional[str] = None) -> Optional[Dict]:
     """Get a single concept by ID with its topic IDs."""
+    uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM concepts WHERE id = ?", (concept_id,)).fetchone()
+    row = conn.execute("SELECT * FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)).fetchone()
     if not row:
         conn.close()
         return None
@@ -145,11 +148,12 @@ def get_concept(concept_id: int) -> Optional[Dict]:
     return concept
 
 
-def update_concept(concept_id: int, **kwargs) -> bool:
+def update_concept(concept_id: int, *, user_id: Optional[str] = None, **kwargs) -> bool:
     """Update concept fields. Returns True if concept was found.
     Accepts: title, description, mastery_level, ease_factor, interval_days,
              next_review_at, last_reviewed_at, review_count,
              last_quiz_generator_output."""
+    uid = user_id or _uid()
     allowed = {
         "title",
         "description",
@@ -171,10 +175,10 @@ def update_concept(concept_id: int, **kwargs) -> bool:
 
     fields["updated_at"] = _now_iso()
     set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [concept_id]
+    values = list(fields.values()) + [concept_id, uid]
 
     conn = _conn()
-    cursor = conn.execute(f"UPDATE concepts SET {set_clause} WHERE id = ?", values)
+    cursor = conn.execute(f"UPDATE concepts SET {set_clause} WHERE id = ? AND user_id = ?", values)
     conn.commit()
     updated = cursor.rowcount > 0
     conn.close()
@@ -188,9 +192,17 @@ def update_concept(concept_id: int, **kwargs) -> bool:
     return updated
 
 
-def delete_concept(concept_id: int) -> bool:
+def delete_concept(concept_id: int, *, user_id: Optional[str] = None) -> bool:
     """Delete a concept and all its relations, remarks, and review logs."""
+    uid = user_id or _uid()
     conn = _conn()
+    # Verify ownership before cascading deletes
+    owner_check = conn.execute(
+        "SELECT 1 FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)
+    ).fetchone()
+    if not owner_check:
+        conn.close()
+        return False
     conn.execute("DELETE FROM concept_topics WHERE concept_id = ?", (concept_id,))
     conn.execute("DELETE FROM concept_remarks WHERE concept_id = ?", (concept_id,))
     conn.execute("DELETE FROM review_log WHERE concept_id = ?", (concept_id,))
@@ -198,7 +210,7 @@ def delete_concept(concept_id: int) -> bool:
         "DELETE FROM concept_relations WHERE concept_id_low = ? OR concept_id_high = ?",
         (concept_id, concept_id),
     )
-    cursor = conn.execute("DELETE FROM concepts WHERE id = ?", (concept_id,))
+    cursor = conn.execute("DELETE FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid))
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()
@@ -241,8 +253,9 @@ def unlink_concept(concept_id: int, topic_id: int) -> bool:
     return deleted
 
 
-def get_concepts_for_topic(topic_id: int) -> List[Dict]:
+def get_concepts_for_topic(topic_id: int, *, user_id: Optional[str] = None) -> List[Dict]:
     """Get all concepts linked to a topic, with latest remark."""
+    uid = user_id or _uid()
     conn = _conn()
     rows = conn.execute(
         """
@@ -250,17 +263,18 @@ def get_concepts_for_topic(topic_id: int) -> List[Dict]:
                c.remark_summary AS latest_remark
         FROM concepts c
         JOIN concept_topics ct ON c.id = ct.concept_id
-        WHERE ct.topic_id = ?
+        WHERE ct.topic_id = ? AND c.user_id = ?
         ORDER BY c.next_review_at ASC NULLS LAST
     """,
-        (topic_id,),
+        (topic_id, uid),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_due_concepts(limit: int = 10, offset: int = 0) -> List[Dict]:
+def get_due_concepts(limit: int = 10, offset: int = 0, *, user_id: Optional[str] = None) -> List[Dict]:
     """Get concepts due for review (next_review_at <= now), ordered by most overdue."""
+    uid = user_id or _uid()
     conn = _conn()
     now = _now_iso()
     rows = conn.execute(
@@ -270,12 +284,12 @@ def get_due_concepts(limit: int = 10, offset: int = 0) -> List[Dict]:
                GROUP_CONCAT(ct.topic_id) as topic_id_list
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-        WHERE c.next_review_at IS NOT NULL AND c.next_review_at <= ?
+        WHERE c.next_review_at IS NOT NULL AND c.next_review_at <= ? AND c.user_id = ?
         GROUP BY c.id
         ORDER BY c.next_review_at ASC
         LIMIT ? OFFSET ?
     """,
-        (now, limit, offset),
+        (now, uid, limit, offset),
     ).fetchall()
     conn.close()
 
@@ -288,10 +302,11 @@ def get_due_concepts(limit: int = 10, offset: int = 0) -> List[Dict]:
     return results
 
 
-def get_next_review_concept() -> Optional[Dict]:
+def get_next_review_concept(*, user_id: Optional[str] = None) -> Optional[Dict]:
     """Get the single concept with the nearest next_review_at, regardless
     of whether it's overdue or upcoming. Returns None if no concepts have
     a scheduled review."""
+    uid = user_id or _uid()
     conn = _conn()
     row = conn.execute("""
         SELECT c.*,
@@ -299,11 +314,11 @@ def get_next_review_concept() -> Optional[Dict]:
                GROUP_CONCAT(ct.topic_id) as topic_id_list
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-        WHERE c.next_review_at IS NOT NULL
+        WHERE c.next_review_at IS NOT NULL AND c.user_id = ?
         GROUP BY c.id
         ORDER BY c.next_review_at ASC
         LIMIT 1
-    """).fetchone()
+    """, (uid,)).fetchone()
     conn.close()
 
     if not row:
@@ -314,10 +329,11 @@ def get_next_review_concept() -> Optional[Dict]:
     return d
 
 
-def get_all_concepts_summary(limit: int | None = None, offset: int = 0) -> List[Dict]:
+def get_all_concepts_summary(limit: int | None = None, offset: int = 0, *, user_id: Optional[str] = None) -> List[Dict]:
     """Get all concepts with title, description, review count, topic names/IDs,
     and scheduling fields. Used by dedup agent and graph visualization.
     Optional limit/offset for paginated access."""
+    uid = user_id or _uid()
     conn = _conn()
     sql = """
         SELECT c.id, c.title, c.description, c.review_count, c.mastery_level,
@@ -327,13 +343,14 @@ def get_all_concepts_summary(limit: int | None = None, offset: int = 0) -> List[
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
         LEFT JOIN topics t ON ct.topic_id = t.id
+        WHERE c.user_id = ?
         GROUP BY c.id
         ORDER BY c.id
     """
-    params: list = []
+    params: list = [uid]
     if limit is not None:
         sql += " LIMIT ? OFFSET ?"
-        params = [limit, offset]
+        params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
     conn.close()
 
@@ -346,28 +363,34 @@ def get_all_concepts_summary(limit: int | None = None, offset: int = 0) -> List[
     return results
 
 
-def get_concept_topic_edges() -> List[Dict]:
+def get_concept_topic_edges(*, user_id: Optional[str] = None) -> List[Dict]:
     """All concept→topic membership edges for graph visualization."""
+    uid = user_id or _uid()
     conn = _conn()
-    rows = conn.execute("SELECT concept_id, topic_id FROM concept_topics").fetchall()
+    rows = conn.execute(
+        "SELECT ct.concept_id, ct.topic_id FROM concept_topics ct "
+        "JOIN concepts c ON c.id = ct.concept_id WHERE c.user_id = ?",
+        (uid,),
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_due_count() -> int:
+def get_due_count(*, user_id: Optional[str] = None) -> int:
     """Count concepts currently due for review."""
+    uid = user_id or _uid()
     conn = _conn()
     now = _now_iso()
     row = conn.execute(
         "SELECT COUNT(*) as cnt FROM concepts "
-        "WHERE next_review_at IS NOT NULL AND next_review_at <= ?",
-        (now,),
+        "WHERE next_review_at IS NOT NULL AND next_review_at <= ? AND user_id = ?",
+        (now, uid),
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
 
 
-def get_due_forecast(range_type: str = "weeks") -> Dict:
+def get_due_forecast(range_type: str = "weeks", *, user_id: Optional[str] = None) -> Dict:
     """Return counts of concepts due per upcoming time bucket, plus an Overdue bucket.
 
     Uses rolling windows (not calendar week numbers) so bucket boundaries are
@@ -400,6 +423,7 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
     window_days = window_sizes[range_type]
     num_buckets = 7
 
+    uid = user_id or _uid()
     conn = _conn()
     today = datetime.now().date().isoformat()
 
@@ -409,7 +433,8 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
         FROM concepts
         WHERE next_review_at IS NOT NULL
           AND DATE(next_review_at) < DATE(?)
-    """, (today,)).fetchone()
+          AND user_id = ?
+    """, (today, uid)).fetchone()
     overdue_count = overdue_row["cnt"] if overdue_row else 0
     # Not included in main buckets list — returned separately for chart rendering
 
@@ -426,8 +451,9 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
             WHERE next_review_at IS NOT NULL
                             AND DATE(next_review_at) >= DATE(?, ? || ' days')
                             AND DATE(next_review_at) < DATE(?, ? || ' days')
+                            AND user_id = ?
                         """,
-                        (today, str(start_offset), today, str(end_offset)),
+                        (today, str(start_offset), today, str(end_offset), uid),
         ).fetchone()
 
         count = row["cnt"] if row else 0
@@ -474,7 +500,7 @@ def get_due_forecast(range_type: str = "weeks") -> Dict:
     }
 
 
-def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]:
+def get_forecast_bucket_concepts(range_type: str, bucket_key: str, *, user_id: Optional[str] = None) -> List[Dict]:
     """Return full concept list for one forecast bucket (for on-click detail).
 
     bucket_key "overdue" → concepts where next_review_at < today
@@ -492,6 +518,7 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
 
     window_days = window_sizes[range_type]
     conn = _conn()
+    uid = user_id or _uid()
     today = datetime.now().date().isoformat()
 
     if bucket_key == "overdue":
@@ -501,8 +528,9 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
             FROM concepts c
             WHERE c.next_review_at IS NOT NULL
               AND DATE(c.next_review_at) < DATE(?)
+              AND c.user_id = ?
             ORDER BY c.mastery_level ASC
-        """, (today,)).fetchall()
+        """, (today, uid)).fetchall()
     else:
         try:
             i = int(bucket_key)
@@ -519,27 +547,30 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str) -> List[Dict]
             WHERE c.next_review_at IS NOT NULL
               AND DATE(c.next_review_at) >= DATE(?, ? || ' days')
               AND DATE(c.next_review_at) < DATE(?, ? || ' days')
+              AND c.user_id = ?
             ORDER BY c.mastery_level ASC
             """,
-            (today, str(start_offset), today, str(end_offset)),
+            (today, str(start_offset), today, str(end_offset), uid),
         ).fetchall()
 
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_all_concepts_with_topics() -> List[Dict]:
+def get_all_concepts_with_topics(*, user_id: Optional[str] = None) -> List[Dict]:
     """Get all concepts with structured topic data and latest remark.
     Returns list of dicts, each with a 'topics' list of {id, title} dicts.
     Used by the web UI concepts page."""
+    uid = user_id or _uid()
     conn = _conn()
     # Main concept query
     rows = conn.execute("""
         SELECT c.*,
                c.remark_summary AS latest_remark
         FROM concepts c
+        WHERE c.user_id = ?
         ORDER BY c.next_review_at ASC NULLS LAST
-    """).fetchall()
+    """, (uid,)).fetchall()
 
     # Topic links — fetch all at once (faster than N+1)
     topic_links = conn.execute("""
@@ -570,12 +601,13 @@ def get_all_concepts_with_topics() -> List[Dict]:
     return results
 
 
-def search_concepts(query: str, limit: int = 20) -> List[Dict]:
+def search_concepts(query: str, limit: int = 20, *, user_id: Optional[str] = None) -> List[Dict]:
     """Search concepts by title or description.
 
     Uses vector similarity search when available (semantic matching),
     falls back to FTS5 keyword search, then LIKE as last resort.
     """
+    uid = user_id or _uid()
     # Try vector search first
     try:
         from db.vectors import search_similar_concepts
@@ -591,10 +623,10 @@ def search_concepts(query: str, limit: int = 20) -> List[Dict]:
                        GROUP_CONCAT(ct.topic_id) as topic_id_list
                 FROM concepts c
                 LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-                WHERE c.id IN ({placeholders})
+                WHERE c.id IN ({placeholders}) AND c.user_id = ?
                 GROUP BY c.id
             """,
-                ids,
+                ids + [uid],
             ).fetchall()
             conn.close()
 
@@ -622,12 +654,12 @@ def search_concepts(query: str, limit: int = 20) -> List[Dict]:
             FROM concepts c
             JOIN concepts_fts fts ON c.id = fts.rowid
             LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-            WHERE concepts_fts MATCH ?
+            WHERE concepts_fts MATCH ? AND c.user_id = ?
             GROUP BY c.id
             ORDER BY rank
             LIMIT ?
         """,
-            (fts_query, limit),
+            (fts_query, uid, limit),
         ).fetchall()
     except sqlite3.OperationalError:
         pattern = f"%{query}%"
@@ -637,12 +669,12 @@ def search_concepts(query: str, limit: int = 20) -> List[Dict]:
                    GROUP_CONCAT(ct.topic_id) as topic_id_list
             FROM concepts c
             LEFT JOIN concept_topics ct ON c.id = ct.concept_id
-            WHERE c.title LIKE ? OR c.description LIKE ?
+            WHERE (c.title LIKE ? OR c.description LIKE ?) AND c.user_id = ?
             GROUP BY c.id
             ORDER BY c.title
             LIMIT ?
         """,
-            (pattern, pattern, limit),
+            (pattern, pattern, uid, limit),
         ).fetchall()
     conn.close()
 
@@ -660,10 +692,10 @@ def search_concepts(query: str, limit: int = 20) -> List[Dict]:
 # ============================================================================
 
 
-def get_concept_detail(concept_id: int) -> Optional[Dict]:
+def get_concept_detail(concept_id: int, *, user_id: Optional[str] = None) -> Optional[Dict]:
     """Get full concept detail: all fields + all remarks + last 5 reviews.
     This is the 'deep dive' query used by the fetch loop."""
-    concept = get_concept(concept_id)
+    concept = get_concept(concept_id, user_id=user_id)
     if not concept:
         return None
 

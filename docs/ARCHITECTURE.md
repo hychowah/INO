@@ -146,7 +146,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/kimi.py` | ~83 | Thin subprocess wrapper around kimi-cli (the only subprocess in the system) |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
 | `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
-| `services/state.py` | ~10 | Shared mutable state (e.g. `last_activity_at`) between bot and scheduler |
+| `services/state.py` | ~25 | Shared mutable state between bot and scheduler, plus ContextVar-based current-user identity (`get_current_user`, `set_current_user`) |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
@@ -404,6 +404,7 @@ topics
   ├── id (PK)
   ├── title
   ├── description
+  ├── user_id
   ├── created_at
   └── updated_at
 
@@ -425,6 +426,7 @@ concepts
   ├── remark_summary
   ├── remark_updated_at
   ├── last_quiz_generator_output
+  ├── user_id
   ├── created_at
   └── updated_at
 
@@ -436,6 +438,7 @@ concept_remarks (LLM's persistent memory per concept)
   ├── id (PK)
   ├── concept_id → concepts.id
   ├── content       ← strategy notes, user observations, next-quiz plans
+  ├── user_id
   └── created_at
 
 review_log (audit trail of every quiz interaction)
@@ -445,6 +448,7 @@ review_log (audit trail of every quiz interaction)
   ├── user_response
   ├── quality        (0–5, LLM-assessed)
   ├── llm_assessment
+  ├── user_id
   └── reviewed_at
 
 concept_relations (symmetric concept-to-concept edges)
@@ -452,7 +456,6 @@ concept_relations (symmetric concept-to-concept edges)
   ├── concept_id_low  → concepts.id
   ├── concept_id_high → concepts.id
   ├── relation_type
-  ├── strength
   ├── note
   └── created_at
 
@@ -463,6 +466,12 @@ pending_proposals (DB-backed confirmation queue)
   ├── discord_message_id
   ├── created_at
   └── expires_at
+
+users
+  ├── id (PK)
+  ├── display_name
+  ├── discord_id
+  └── created_at
 ```
 
 ### chat_history.db
@@ -473,8 +482,18 @@ conversations
   ├── session_id  (always 'learn')
   ├── role        ('user' | 'assistant')
   ├── content
-  └── created_at
+  ├── user_id
+  └── timestamp
+
+session_state
+  ├── user_id
+  ├── key
+  ├── value
+  ├── updated_at
+  └── PK(user_id, key)
 ```
+
+Current runtime behavior is still single-user because the Discord bot, REST API, Web UI, and scheduler do not yet set a non-default current user. The db layer is prepared for that future activation via `services/state.py` + `db.core._uid()`, so all existing callers continue to resolve to `user_id='default'` until Phase 3C is implemented.
 
 ---
 

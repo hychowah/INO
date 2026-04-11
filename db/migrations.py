@@ -288,5 +288,44 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 11: last_quiz_generator_output column on concepts")
 
+    # --- Migration 12: session_state composite PK (user_id, key) ---
+    if current < 12:
+        conn = sqlite3.connect(CHAT_DB)
+        if not _core._has_column("session_state", "user_id", db_path=CHAT_DB):
+            conn.executescript("""
+                CREATE TABLE session_state_new (
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    key TEXT NOT NULL,
+                    value TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(user_id, key)
+                );
+                INSERT INTO session_state_new (user_id, key, value, updated_at)
+                    SELECT 'default', key, value, updated_at FROM session_state;
+                DROP TABLE session_state;
+                ALTER TABLE session_state_new RENAME TO session_state;
+            """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 12: session_state composite PK (user_id, key)")
+
+    # --- Migration 13: users table for multi-user identity ---
+    if current < 13:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                display_name TEXT,
+                discord_id TEXT UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, display_name) VALUES ('default', 'Default User')"
+        )
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 13: users table")
+
     _core._set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

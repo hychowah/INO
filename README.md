@@ -63,6 +63,8 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 
 The **fetch loop** is the key architectural pattern: the LLM can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before composing its response. This keeps the LLM in control of what data it needs, without sending everything upfront.
 
+Current runtime behavior is still single-user end-to-end: Discord access is gated by one `LEARN_AUTHORIZED_USER_ID`, the REST API uses one bearer token, and the Web UI is local-only. The DB layer now contains dormant per-user scaffolding (`user_id` columns, `users` table, ContextVar-based lookup), but entry points still resolve to the default user until that activation work is done.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture documentation with data flow diagrams, schema definitions, and module responsibilities.
 
 ## Tech Stack
@@ -142,7 +144,7 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | Variable | Purpose |
 |----------|---------|
 | `LEARN_BOT_TOKEN` | Discord bot token |
-| `LEARN_AUTHORIZED_USER_ID` | Your Discord user ID (restricts access to you) |
+| `LEARN_AUTHORIZED_USER_ID` | Your Discord user ID (current runtime remains single-user at the interface layer) |
 
 **Required (LLM provider):**
 

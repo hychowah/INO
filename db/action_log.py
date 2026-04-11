@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from db.core import _conn, _connection, _now_iso
+from db.core import _conn, _connection, _now_iso, _uid
 
 logger = logging.getLogger("db.action_log")
 
@@ -74,10 +74,13 @@ def get_action_log(
     source_filter: Optional[str] = None,
     since: Optional[datetime] = None,
     search: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Query action log with optional filters, ordered by created_at DESC."""
-    clauses: list[str] = []
-    params: list[Any] = []
+    uid = user_id or _uid()
+    clauses: list[str] = ["user_id = ?"]
+    params: list[Any] = [uid]
 
     if action_filter:
         clauses.append("action = ?")
@@ -108,10 +111,13 @@ def get_action_log_count(
     source_filter: Optional[str] = None,
     since: Optional[datetime] = None,
     search: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> int:
     """Count action log entries matching the given filters."""
-    clauses: list[str] = []
-    params: list[Any] = []
+    uid = user_id or _uid()
+    clauses: list[str] = ["user_id = ?"]
+    params: list[Any] = [uid]
 
     if action_filter:
         clauses.append("action = ?")
@@ -136,8 +142,9 @@ def get_action_log_count(
     return count
 
 
-def get_action_summary(days: int = 7) -> Dict[str, Any]:
+def get_action_summary(days: int = 7, *, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Aggregate action counts by type for the last N days."""
+    uid = user_id or _uid()
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     today_start = datetime.now().replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -146,25 +153,25 @@ def get_action_summary(days: int = 7) -> Dict[str, Any]:
     # Counts for the period
     rows = conn.execute(
         "SELECT action, COUNT(*) as cnt FROM action_log "
-        "WHERE created_at >= ? GROUP BY action ORDER BY cnt DESC",
-        (since,),
+        "WHERE created_at >= ? AND user_id = ? GROUP BY action ORDER BY cnt DESC",
+        (since, uid),
     ).fetchall()
     by_action = {r["action"]: r["cnt"] for r in rows}
 
     # Today's counts
     today_rows = conn.execute(
         "SELECT action, COUNT(*) as cnt FROM action_log "
-        "WHERE created_at >= ? GROUP BY action ORDER BY cnt DESC",
-        (today_start,),
+        "WHERE created_at >= ? AND user_id = ? GROUP BY action ORDER BY cnt DESC",
+        (today_start, uid),
     ).fetchall()
     today_by_action = {r["action"]: r["cnt"] for r in today_rows}
 
     # Total count
     total = conn.execute(
-        "SELECT COUNT(*) FROM action_log WHERE created_at >= ?", (since,)
+        "SELECT COUNT(*) FROM action_log WHERE created_at >= ? AND user_id = ?", (since, uid)
     ).fetchone()[0]
     today_total = conn.execute(
-        "SELECT COUNT(*) FROM action_log WHERE created_at >= ?", (today_start,)
+        "SELECT COUNT(*) FROM action_log WHERE created_at >= ? AND user_id = ?", (today_start, uid)
     ).fetchone()[0]
 
     conn.close()

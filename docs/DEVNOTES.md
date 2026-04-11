@@ -28,8 +28,11 @@
 15. [Quiz Intent Detection & Context Lifecycle](#15-quiz-intent-detection--context-lifecycle)
 16. [Quiz Anchor Concept ID](#16-quiz-anchor-concept-id)
 17. [Context Enrichment & Qdrant Migration](#17-context-enrichment--qdrant-migration)
+18. [Quiz Skip ("I know this") Button](#18-quiz-skip-i-know-this-button)
+19. [SQLite Timestamp Timezone Trap](#19-sqlite-timestamp-timezone-trap)
 20. [Taxonomy Shadow Rebuild](#20-taxonomy-shadow-rebuild)
 21. [Preference-Edit Isolated Skill Path](#21-preference-edit-isolated-skill-path)
+22. [Multi-User DB Groundwork](#22-multi-user-db-groundwork)
 
 ---
 
@@ -423,3 +426,22 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 **Rule:** SQLite `CURRENT_TIMESTAMP` and `datetime('now')` always return **UTC**. Any Python comparison against these columns must use `datetime.now(timezone.utc).replace(tzinfo=None)`, never bare `datetime.now()`. Other DB timestamps in this codebase are written by Python's `datetime.now()` (local) and compared locally — that is consistent. Only `session_state.updated_at` is written by SQLite directly.
 
 **Affected file:** `services/context.py` (`_is_quiz_stale`).
+
+---
+
+## 22. Multi-User DB Groundwork
+
+**Goal:** Make the storage layer multi-user-ready without changing existing single-user runtime behavior.
+
+**What changed:**
+- `Migration 12` rebuilt `session_state` to use composite PK `(user_id, key)` in `chat_history.db`.
+- `Migration 13` added a `users` table in `knowledge.db`.
+- `services/state.py` now owns `_current_user_id` as a ContextVar, with `set_current_user()` / `get_current_user()`.
+- `db.core._uid()` lazily reads that ContextVar so db functions can accept `*, user_id=None` and default safely.
+- `db/concepts.py`, `db/topics.py`, `db/reviews.py`, `db/chat.py`, `db/action_log.py`, and `db/diagnostics.py` now scope reads/writes by `user_id`.
+
+**Important behavior rule:** The app is still single-user externally until entry points call `set_current_user()`. Right now all callers fall back to `user_id='default'`, which keeps old data and old behavior intact.
+
+**Known limitation:** concept title uniqueness is still global. A future migration should replace the global title uniqueness with `UNIQUE(user_id, title COLLATE NOCASE)`.
+
+**Validation:** full suite green with `python -m pytest tests/ -x -q --tb=short -o "addopts="`.

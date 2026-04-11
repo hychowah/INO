@@ -15,6 +15,17 @@ BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 
+def _uid() -> str:
+    """Get the current user_id from the ContextVar (default='default').
+
+    Lazy import to avoid circular dependency between db and services layers.
+    Used as the default user_id in db functions that accept *, user_id=None.
+    """
+    from services.state import get_current_user
+
+    return get_current_user()
+
+
 def _resolve_repo_path(env_name: str, default_path: Path) -> Path:
     """Resolve an optional repo-relative path override from the environment."""
     raw = os.environ.get(env_name)
@@ -36,7 +47,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 13
 
 
 # ============================================================================
@@ -77,6 +88,7 @@ def _init_knowledge_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             description TEXT,
+            user_id TEXT NOT NULL DEFAULT 'default',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -98,6 +110,7 @@ def _init_knowledge_db():
             next_review_at DATETIME,
             last_reviewed_at DATETIME,
             review_count INTEGER DEFAULT 0,
+            user_id TEXT NOT NULL DEFAULT 'default',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -112,6 +125,7 @@ def _init_knowledge_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
             content TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'default',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -122,6 +136,7 @@ def _init_knowledge_db():
             user_response TEXT,
             quality INTEGER,
             llm_assessment TEXT,
+            user_id TEXT NOT NULL DEFAULT 'default',
             reviewed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -138,6 +153,10 @@ def _init_knowledge_db():
         CREATE INDEX IF NOT EXISTS idx_remarks_concept ON concept_remarks(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_concept ON review_log(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_reviewed ON review_log(reviewed_at);
+        CREATE INDEX IF NOT EXISTS idx_topics_user_id ON topics(user_id);
+        CREATE INDEX IF NOT EXISTS idx_concepts_user_id ON concepts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_review_log_user_id ON review_log(user_id);
+        CREATE INDEX IF NOT EXISTS idx_concept_remarks_user_id ON concept_remarks(user_id);
 
         CREATE TABLE IF NOT EXISTS pending_proposals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,7 +166,18 @@ def _init_knowledge_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             expires_at DATETIME NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            display_name TEXT,
+            discord_id TEXT UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """)
+    # Ensure the default user exists for single-user / backward-compat operation
+    conn.execute(
+        "INSERT OR IGNORE INTO users (id, display_name) VALUES ('default', 'Default User')"
+    )
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     conn.close()
@@ -162,18 +192,21 @@ def _init_chat_db():
             session_id TEXT DEFAULT 'learn',
             role TEXT,
             content TEXT,
+            user_id TEXT NOT NULL DEFAULT 'default',
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_conversations_lookup
         ON conversations(session_id, timestamp DESC);
 
-        -- TODO: Phase 3 — session_state PK is (key), needs user scoping
-        -- (prefix keys with user_id or rebuild as composite PK)
+        CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+
         CREATE TABLE IF NOT EXISTS session_state (
-            key TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
             value TEXT,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(user_id, key)
         );
     """)
     conn.commit()
