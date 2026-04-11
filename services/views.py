@@ -6,6 +6,7 @@ See DEVNOTES.md §4 for design rationale.
 """
 
 import logging
+from datetime import datetime
 from typing import Awaitable, Callable
 
 import discord
@@ -643,6 +644,13 @@ class _QuizNextDueButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
+        if db.get_session("pending_review"):
+            await interaction.followup.send(
+                "⏳ A scheduled review was just sent — reply to that one first."
+            )
+            self.parent_view.stop()
+            return
+
         text = "[BUTTON] Quiz me on the next due concept"
         try:
             async with interaction.channel.typing():
@@ -796,6 +804,7 @@ class _QuizSkipButton(discord.ui.Button):
                     self.parent_view.stop()
                     return
 
+                state.last_activity_at = datetime.now()
                 confirmation = (
                     f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
                     f"next review in {result['interval_days']}d"
