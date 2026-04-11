@@ -334,7 +334,83 @@ class TestProviderFactory:
 
 
 # ============================================================================
-# 5. Live Smoke Test (optional — pass --live to enable)
+# 5. Import pre-warming regression
+# ============================================================================
+
+
+def test_openai_submodules_pre_imported():
+    """All openai submodules that would block the event loop must already be
+    in sys.modules by the time services.llm is imported.
+
+    If this test fails it means the module-level 'import openai.resources.chat'
+    pre-warm was removed from services/llm.py, which will cause the Discord
+    heartbeat-blocked crash on the first /review command.
+    """
+    import sys
+
+    import services.llm  # noqa: F401 — ensure module is loaded
+
+    blocking_modules = [
+        "openai.resources.chat",
+        "openai.resources",
+        "openai.resources.beta",
+        "openai.resources.beta.realtime",
+        "openai.types.beta.realtime",
+    ]
+    for mod in blocking_modules:
+        assert mod in sys.modules, (
+            f"{mod!r} not in sys.modules after 'import services.llm' — "
+            "first AsyncOpenAI().chat access will block the asyncio event loop"
+        )
+
+
+class TestOpenAIClientConstructionPath:
+    """Regression: provider must work without overwriting ._client post-init.
+
+    The original test helper _make_provider() replaced p._client with a
+    MagicMock immediately after construction, which meant AsyncOpenAI.chat
+    (a @cached_property) was never accessed and its deferred import chain was
+    never triggered.  These tests patch services.llm._AsyncOpenAI at the
+    module level so construction goes through the real attribute-access path.
+    """
+
+    def test_send_without_client_bypass(self):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = "real-path reply"
+        response.usage = None
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create = AsyncMock(return_value=response)
+
+        async def _test():
+            with patch("services.llm._AsyncOpenAI", return_value=mock_instance):
+                p = OpenAICompatibleProvider(
+                    base_url="https://api.test.com/v1",
+                    api_key="test-key",
+                    model="test-model",
+                )
+                # Deliberately do NOT set p._client — that was the coverage gap
+                result = await p.send("hello", session=None)
+            mock_instance.chat.completions.create.assert_awaited_once()
+            assert result == "real-path reply"
+
+        asyncio.run(_test())
+
+    def test_openai_unavailable_raises_llm_error(self):
+        with patch("services.llm._OPENAI_AVAILABLE", False):
+            with pytest.raises(LLMError) as exc_info:
+                OpenAICompatibleProvider(
+                    base_url="https://api.test.com/v1",
+                    api_key="test-key",
+                    model="test-model",
+                )
+            assert not exc_info.value.retryable
+            assert "openai package not installed" in str(exc_info.value)
+
+
+# ============================================================================
+# 6. Live Smoke Test (optional — pass --live to enable)
 # ============================================================================
 
 

@@ -25,6 +25,7 @@ Key changes, newest first.
 
 ### Fixed
 
+- **OpenAI blocking-import fix** (`services/llm.py`) — `from openai import AsyncOpenAI` and `import openai.resources.chat` moved to module level; pre-warms the full lazy-import cascade at Python startup so the asyncio event loop is never blocked on the first LLM call; `_OPENAI_AVAILABLE` flag also promoted to module level; regression tests added in `TestOpenAIClientConstructionPath` and `test_openai_submodules_pre_imported`
 - **Quiz staleness UTC mismatch** — `_is_quiz_stale()` compared local `datetime.now()` against SQLite `CURRENT_TIMESTAMP` (UTC); in UTC+8 this made every quiz appear ~8 hours stale immediately, clearing the quiz anchor and blocking all `assess` actions — fixed by switching to `datetime.now(timezone.utc).replace(tzinfo=None)`
 - **`assess`/`multi_assess` guard** — both actions are now blocked when no quiz is active; `execute_action` returns a `REPLY:` message instead of mutating scores
 - **`/review` quiz anchor loss** — command now pre-sets `quiz_anchor_concept_id` before executing the LLM response, preventing anchor loss on the first assess turn

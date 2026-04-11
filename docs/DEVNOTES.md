@@ -34,6 +34,7 @@
 21. [Preference-Edit Isolated Skill Path](#21-preference-edit-isolated-skill-path)
 22. [Multi-User DB Groundwork](#22-multi-user-db-groundwork)
 23. [Process-Local Lock Hardening](#23-process-local-lock-hardening)
+24. [OpenAI Blocking-Import Fix](#24-openai-blocking-import-fix)
 
 ---
 
@@ -463,3 +464,28 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 **Vector-search lesson:** Qdrant-first helpers must not early-return empty results when vector hits point at stale ids. `db.search_concepts()` and `db.diagnostics._get_relationship_candidates()` now fall back to SQL/FTS when vector-derived ids do not map back to current SQLite rows.
 
 **Important scope rule:** This hardening is process-local only. The runtime is still single-user externally until entry points call `set_current_user()` with real identities.
+
+---
+
+## 24. OpenAI Blocking-Import Fix
+
+**Bug:** `OpenAICompatibleProvider.__init__` contained a deferred `try: from openai import AsyncOpenAI` inner import. On the first `/review` or any LLM call after a cold start, Python ran a chain of ~20 synchronous `importlib` loads (`openai.resources.chat` → `openai.resources.beta` → `openai.resources.beta.realtime` → `openai.types.beta.realtime` → …) entirely inside the asyncio event loop thread. This blocked the loop long enough (~10 s) to trigger Discord's heartbeat watchdog and log a `"heartbeat blocked for more than 10 seconds"` critical warning.
+
+**Root cause detail:** `AsyncOpenAI.chat` is a `@cached_property`. The first attribute access — not the constructor call — triggers the import cascade. The constructor was called at startup (safe), but `.chat` was only accessed inside `await provider.send()` which runs on the event loop thread.
+
+**Fix (`services/llm.py`):** Promoted imports to module level so the full chain resolves at Python startup before the event loop starts:
+```python
+from openai import AsyncOpenAI as _AsyncOpenAI   # replaces deferred inner import
+import openai.resources.chat                      # pre-warms full lazy sub-import cascade
+_OPENAI_AVAILABLE: bool = True                    # replaces per-instance try/except
+```
+`OpenAICompatibleProvider.__init__` now uses `_AsyncOpenAI` and checks `_OPENAI_AVAILABLE` directly.
+
+**Why `import openai.resources.chat`:** Importing just `openai` or `AsyncOpenAI` leaves the resource submodules unloaded. `openai.resources.chat` is the entry point that cascades into all the `beta.realtime` modules shown in the traceback.
+
+**Why tests missed it:** `_make_provider()` in `test_llm.py` set `p._client = MagicMock` immediately after construction, so the real `AsyncOpenAI` instance's `.chat` cached_property was never read. The blocking import path was never exercised.
+
+**Regression tests added** (`tests/test_llm.py`):
+- `test_openai_submodules_pre_imported` — asserts all blocking submodules are in `sys.modules` after `import services.llm`; fails immediately if the pre-warm is removed
+- `TestOpenAIClientConstructionPath.test_send_without_client_bypass` — patches `services.llm._AsyncOpenAI` at module level; constructs `OpenAICompatibleProvider` without overwriting `._client`, exercising the real attribute-access path
+- `TestOpenAIClientConstructionPath.test_openai_unavailable_raises_llm_error` — patches `_OPENAI_AVAILABLE = False` and asserts non-retryable `LLMError`

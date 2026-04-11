@@ -23,6 +23,23 @@ import config
 
 logger = logging.getLogger("llm")
 
+# Pre-import the openai resource submodules at module load time.
+# AsyncOpenAI.chat is a @cached_property: on first access it triggers a
+# synchronous chain of ~20 importlib calls (openai.resources.chat →
+# openai.resources.beta → openai.resources.beta.realtime → …).  If that
+# first access happens inside the asyncio event loop (e.g. on the first
+# /review command) it blocks the loop long enough to kill the Discord
+# heartbeat.  Importing openai.resources.chat here cascades through the
+# full chain at startup — before the event loop starts — so every
+# subsequent .chat access is an instant sys.modules hit.
+try:
+    from openai import AsyncOpenAI as _AsyncOpenAI
+    import openai.resources.chat  # noqa: F401 — triggers full lazy-import cascade
+    _OPENAI_AVAILABLE = True
+except ImportError:
+    _AsyncOpenAI = None  # type: ignore[assignment,misc]
+    _OPENAI_AVAILABLE = False
+
 
 # ============================================================================
 # Shared types
@@ -218,15 +235,13 @@ class OpenAICompatibleProvider:
         max_history_tokens: int = 40_000,
         thinking: str | None = None,
     ):
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
+        if not _OPENAI_AVAILABLE:
             raise LLMError(
                 "openai package not installed.  pip install 'openai>=1.0,<2.0'",
                 retryable=False,
             )
 
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._client = _AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
         self._temperature = temperature
         self._max_history_tokens = max_history_tokens
