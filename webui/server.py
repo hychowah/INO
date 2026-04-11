@@ -6,19 +6,25 @@ Run:  python -m webui.server     (from learning_agent/)
   or: python webui/server.py     (from learning_agent/)
 """
 
+import asyncio
 import json
 import mimetypes
 import signal
 import sys
 import threading
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # Add project root (learning_agent/) to path so we can import db
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 import db  # noqa: E402
+from webui.chat_backend import (  # noqa: E402
+    confirm_webui_action,
+    decline_webui_action,
+    handle_webui_message,
+)
 
 PORT = 8050
 STATIC_DIR = Path(__file__).parent / "static"
@@ -33,6 +39,7 @@ from webui.helpers import (  # noqa: E402,F401
 from webui.pages import (  # noqa: E402
     page_404,
     page_actions,
+    page_chat,
     page_concept_detail,
     page_concepts,
     page_dashboard,
@@ -56,6 +63,21 @@ MIME_TYPES = {
     ".ico": "image/x-icon",
 }
 
+# Chat requests currently share process-global conversation/session state across
+# pipeline caches, scheduler suppression, and DB-backed quiz context keys.
+# Keep chat execution serialized until those boundaries are isolated.
+CHAT_PIPELINE_LOCK = threading.Lock()
+
+
+class InvalidJsonBodyError(ValueError):
+    """Raised when a chat endpoint receives malformed JSON."""
+
+
+def _run_chat_request(coro):
+    """Run a chat coroutine under the current serialization guard."""
+    with CHAT_PIPELINE_LOCK:
+        return asyncio.run(coro)
+
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -77,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
                 html = page_topic_detail(tid)
             elif path == "/concepts":
                 html = page_concepts()
+            elif path == "/chat":
+                html = page_chat()
             elif path == "/graph":
                 html = page_graph()
             elif path.startswith("/concept/"):
@@ -161,15 +185,26 @@ class Handler(BaseHTTPRequestHandler):
             self._json_response({"ok": False, "error": "Forbidden"}, status=403)
             return
 
-        # Read body (for future extensibility)
         try:
-            length = int(self.headers.get("Content-Length", 0))
-        except (ValueError, TypeError):
-            length = 0
-        if length > 0:
-            self.rfile.read(length)  # consume body
+            if path == "/api/chat":
+                payload = self._read_json_body()
+                message = payload.get("message", "")
+                if not isinstance(message, str):
+                    raise ValueError("Field 'message' must be a string")
+                data = _run_chat_request(handle_webui_message(message))
+                self._json_response(data)
+                return
+            if path == "/api/chat/confirm":
+                payload = self._read_json_body()
+                data = _run_chat_request(confirm_webui_action(payload.get("action_data", {})))
+                self._json_response(data)
+                return
+            if path == "/api/chat/decline":
+                payload = self._read_json_body()
+                data = _run_chat_request(decline_webui_action(payload.get("action_data", {})))
+                self._json_response(data)
+                return
 
-        try:
             # DELETE concept: POST /api/concept/<id>/delete
             parts = path.split("/")
             if (
@@ -192,8 +227,24 @@ class Handler(BaseHTTPRequestHandler):
 
             self._json_response({"ok": False, "error": "Not found"}, status=404)
 
+        except InvalidJsonBodyError:
+            return
+        except ValueError as e:
+            if path.startswith("/api/chat"):
+                self._json_response(
+                    {"type": "error", "message": str(e), "pending_action": None},
+                    status=400,
+                )
+            else:
+                self._json_response({"ok": False, "error": str(e)}, status=400)
         except Exception as e:
-            self._json_response({"ok": False, "error": str(e)}, status=500)
+            if path.startswith("/api/chat"):
+                self._json_response(
+                    {"type": "error", "message": str(e), "pending_action": None},
+                    status=500,
+                )
+            else:
+                self._json_response({"ok": False, "error": str(e)}, status=500)
 
     def _serve_static(self, rel_path: str):
         """Serve a file from the static/ directory."""
@@ -225,6 +276,28 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             self.send_error(500, "Error reading static file")
 
+    def _read_request_body(self) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            length = 0
+        if length <= 0:
+            return b""
+        return self.rfile.read(length)
+
+    def _read_json_body(self) -> dict:
+        body = self._read_request_body()
+        if not body:
+            return {}
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._json_response(
+                {"type": "error", "message": "Invalid JSON body.", "pending_action": None},
+                status=400,
+            )
+            raise InvalidJsonBodyError("Invalid JSON body")
+
     def _html_response(self, html: str, status: int = 200):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -250,7 +323,7 @@ class Handler(BaseHTTPRequestHandler):
 def main(skip_init: bool = False):
     if not skip_init:
         db.init_databases()
-    server = HTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"Learning Agent DB UI running at http://localhost:{PORT}")
     print("Press Ctrl+C to stop.")
 

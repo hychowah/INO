@@ -108,8 +108,10 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
 | `webui/server.py` | ~220 | Zero-dependency HTTP server — routing, Handler class, static file serving, forecast routes |
 | `webui/helpers.py` | ~145 | HTML helpers (`score_bar`, `layout`, `_esc`, etc.) extracted from `server.py` |
+| `webui/chat_backend.py` | ~430 | In-process Web UI chat backend — `handle_webui_message`, `confirm_webui_action`, `decline_webui_action`; parallels FastAPI chat routes but runs without the REST server |
 | **webui/pages/** | | Page renderers split into package modules (~950 total lines) |
-| `webui/pages/__init__.py` | ~25 | Re-exports all 10 page functions |
+| `webui/pages/__init__.py` | ~25 | Re-exports all 11 page functions |
+| `webui/pages/chat.py` | ~? | `page_chat` — chat interface page renderer |
 | `webui/pages/dashboard.py` | ~190 | `page_dashboard`, `compute_subtree_stats`, `render_tree_node` |
 | `webui/pages/topics.py` | ~160 | `page_topics`, `page_topic_detail`, `build_breadcrumb` |
 | `webui/pages/concepts.py` | ~230 | `page_concepts`, `page_concept_detail` |
@@ -378,6 +380,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /actions                 → Filterable action log
          ├── /forecast                → Review forecast with bucket drill-down
          ├── /graph                   → Interactive D3 force-directed knowledge graph
+         ├── /chat                    → Chat interface (served via `webui/chat_backend.py`)
          ├── /api/stats               → JSON: review stats
          ├── /api/topics              → JSON: full topic map
          ├── /api/due                 → JSON: due concepts
@@ -385,8 +388,9 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /api/forecast?range=     → JSON: forecast bucket summary
          └── /api/forecast/concepts   → JSON: concepts in one forecast bucket
          │
-         └── All read directly from the db/ package
+         └── All routes except /chat read directly from the db/ package
              (no pipeline, no LLM — pure DB ➜ HTML)
+             /chat routes through webui/chat_backend.py → pipeline → LLM
 ```
 
 ---

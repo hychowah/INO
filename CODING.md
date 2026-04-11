@@ -113,7 +113,10 @@ ROOT
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, routing + Handler class
 │   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
-│   ├── pages/             # Page renderers package (dashboard, topics, concepts, reviews, activity, graph)
+│   ├── chat_backend.py    # In-process WebUI chat backend (handle_webui_message, confirm_webui_action, decline_webui_action)
+│   ├── pages/             # Page renderers package
+│   │   ├── chat.py        # page_chat — chat interface
+│   │   └── ...            # dashboard, topics, concepts, reviews, activity, graph
 │   └── static/            # CSS, JS (tree.js, concepts.js, forecast.js, graph.js)
 ├── docs/                  # Architecture, dev notes, plans (index.md for map)
 │   ├── ARCHITECTURE.md
@@ -122,7 +125,7 @@ ROOT
 │   ├── SETUP.md
 │   ├── TAXONOMY_REBUILD.md
 │   ├── index.md
-│   └── plans/             # Feature plans (mobile-conversion.md, concept-relations.md)
+│   └── plans/             # Feature design plans
 ├── scripts/               # agent.py (maintenance CLI), utility scripts
 │   ├── taxonomy_shadow_rebuild.py # Operator taxonomy preview/apply workflow
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant

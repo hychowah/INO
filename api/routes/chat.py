@@ -5,9 +5,17 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
+import db
 from api.auth import verify_token
 from api.schemas import ChatRequest, ChatResponse, ConfirmRequest
 from services import pipeline, state
+from services.chat_actions import (
+    API_CONFIRMABLE_ACTIONS,
+    confirmation_history_entry,
+    decline_history_entry,
+    is_intercepted_action,
+    require_confirmable_action,
+)
 from services.parser import parse_llm_response, process_output
 from services.tools import set_action_source
 
@@ -32,8 +40,11 @@ async def chat(req: ChatRequest):
         )
 
         prefix, message, action_data = parse_llm_response(llm_response)
-        if action_data and action_data.get("action", "").lower().strip() == "add_concept":
+        if action_data and is_intercepted_action(action_data):
             display_msg = action_data.get("message", message or "")
+            db.add_chat_message("user", req.message.strip())
+            if display_msg:
+                db.add_chat_message("assistant", display_msg)
             return ChatResponse(
                 type="pending_confirm",
                 message=display_msg,
@@ -53,32 +64,60 @@ async def chat(req: ChatRequest):
 @router.post("/api/chat/confirm", response_model=ChatResponse, dependencies=[Depends(verify_token)])
 async def confirm_action(req: ConfirmRequest):
     """Confirm a pending add_concept (or other intercepted action) from /api/chat."""
-    from services.tools import execute_action
+    from services.tools import execute_action, execute_suggest_topic_accept
 
     set_action_source("api")
 
     action = req.action_data.get("action", "")
     params = req.action_data.get("params", {})
-    if not action:
-        raise HTTPException(status_code=400, detail="Missing 'action' in action_data")
-
-    # Whitelist: only user-confirmation flows are allowed through this endpoint.
-    # Actions that mutate scores (assess, multi_assess) must go through the
-    # full pipeline so the quiz-active guard and audit trail apply correctly.
-    _CONFIRMABLE_ACTIONS = frozenset({"add_concept", "suggest_topic", "add_topic", "link_concept"})
-    if action not in _CONFIRMABLE_ACTIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Action '{action}' cannot be confirmed via this endpoint",
+    try:
+        # Whitelist: only user-confirmation flows are allowed through this endpoint.
+        # Actions that mutate scores (assess, multi_assess) must go through the
+        # full pipeline so the quiz-active guard and audit trail apply correctly.
+        action = require_confirmable_action(
+            req.action_data,
+            API_CONFIRMABLE_ACTIONS,
+            "confirmed via this endpoint",
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
-        msg_type, result = execute_action(action, params)
         display_msg = req.action_data.get("message", "")
+        if action == "suggest_topic":
+            success, summary, _topic_id = execute_suggest_topic_accept(req.action_data)
+            if not success:
+                return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {summary}")
+            db.add_chat_message("user", confirmation_history_entry(req.action_data))
+            db.add_chat_message("assistant", summary)
+            return ChatResponse(type="reply", message=f"{display_msg}\n\n{summary}")
+
+        msg_type, result = execute_action(action, params)
         if msg_type == "error":
             return ChatResponse(type="error", message=f"{display_msg}\n\n⚠️ {result}")
         else:
+            db.add_chat_message("user", confirmation_history_entry(req.action_data))
+            db.add_chat_message("assistant", f"✅ {result}")
             return ChatResponse(type="reply", message=f"{display_msg}\n\n✅ {result}")
     except Exception as e:
         logger.exception("Confirm endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/chat/decline", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+async def decline_action(req: ConfirmRequest):
+    """Decline a pending add_concept or suggest_topic from /api/chat."""
+    set_action_source("api")
+
+    try:
+        require_confirmable_action(
+            req.action_data,
+            API_CONFIRMABLE_ACTIONS,
+            "declined via this endpoint",
+        )
+        entry = decline_history_entry(req.action_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    db.add_chat_message("user", entry)
+    return ChatResponse(type="reply", message="Declined.")

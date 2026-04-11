@@ -69,7 +69,8 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional pending action. |
-| `POST` | `/api/chat/confirm` | Confirm or reject a pending action returned by a previous `/api/chat` call. |
+| `POST` | `/api/chat/confirm` | Confirm a pending action returned by a previous `/api/chat` call. |
+| `POST` | `/api/chat/decline` | Decline a pending action returned by a previous `/api/chat` call. |
 
 #### `POST /api/chat/confirm` — confirmable actions
 
@@ -86,6 +87,13 @@ Any other action returns HTTP **400**:
 ```json
 {"detail": "Action '<action>' cannot be confirmed via this endpoint"}
 ```
+
+#### `POST /api/chat/decline`
+
+Declines a pending action previously returned by `/api/chat`. Uses the same `ConfirmRequest` schema and validates against the same `API_CONFIRMABLE_ACTIONS` whitelist as `/confirm`.
+
+- Returns `{"type": "reply", "message": "Declined."}` on success.
+- Returns HTTP **400** for any action type not in the whitelist.
 
 ### Topics
 
@@ -168,6 +176,7 @@ Running `python bot.py` also starts the same Web UI automatically after the Disc
 | `/reviews` | Review history |
 | `/actions` | Action log with filtering and time-range picker |
 | `/forecast` | Review forecast — due concepts bucketed by days / weeks / months |
+| `/chat` | Chat interface — in-process LLM chat via `webui/chat_backend.py` |
 | `/api/actions?offset=&limit=&action=&source=` | JSON action log data for the Web UI filter controls |
 | `/api/forecast?range=` | JSON forecast data — overdue count + 7 rolling buckets with counts and avg mastery |
 | `/api/forecast/concepts?range=&bucket=` | JSON concept list for a specific bucket, sorted by mastery ASC |

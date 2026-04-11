@@ -5,7 +5,7 @@ Covers all CRUD endpoints: concepts, topics, relations, reviews, actions, graph.
 Uses the shared test_db fixture for DB isolation and httpx AsyncClient for requests.
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -46,6 +46,187 @@ def _make_topic(title="Test Topic", description=None, parent_ids=None):
 def _make_concept(title="Test Concept", description=None, topic_id=None):
     topic_ids = [topic_id] if topic_id else None
     return db.add_concept(title=title, description=description, topic_ids=topic_ids)
+
+
+# ============================================================================
+# Chat
+# ============================================================================
+
+
+class TestChat:
+    @pytest.mark.anyio
+    async def test_chat_empty_message_400(self, client):
+        resp = await client.post("/api/chat", json={"message": "   "})
+        assert resp.status_code == 400
+        assert "Message cannot be empty" in resp.json()["detail"]
+
+    @pytest.mark.anyio
+    async def test_chat_normal_reply(self, client):
+        with (
+            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="REPLY: raw")),
+            patch("api.routes.chat.parse_llm_response", return_value=("REPLY", "raw", None)),
+            patch(
+                "api.routes.chat.pipeline.execute_llm_response",
+                new=AsyncMock(return_value="REPLY: Final answer"),
+            ),
+        ):
+            resp = await client.post("/api/chat", json={"message": "hello"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Final answer",
+            "pending_action": None,
+        }
+
+    @pytest.mark.anyio
+    async def test_chat_add_concept_returns_pending_confirm(self, client):
+        action_data = {
+            "action": "add_concept",
+            "message": "Add this concept?",
+            "params": {"title": "Rust", "topic_titles": ["Programming"]},
+        }
+        with (
+            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
+            patch(
+                "api.routes.chat.parse_llm_response",
+                return_value=("FETCH", "Add this concept?", action_data),
+            ),
+        ):
+            resp = await client.post("/api/chat", json={"message": "teach me rust"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "pending_confirm",
+            "message": "Add this concept?",
+            "pending_action": action_data,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-2]["role"] == "user"
+        assert history[-2]["content"] == "teach me rust"
+        assert history[-1]["role"] == "assistant"
+        assert history[-1]["content"] == "Add this concept?"
+
+    @pytest.mark.anyio
+    async def test_chat_suggest_topic_returns_pending_confirm(self, client):
+        action_data = {
+            "action": "suggest_topic",
+            "message": "Want me to add this topic?",
+            "params": {"title": "Compilers"},
+        }
+        with (
+            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
+            patch(
+                "api.routes.chat.parse_llm_response",
+                return_value=("FETCH", "Want me to add this topic?", action_data),
+            ),
+        ):
+            resp = await client.post("/api/chat", json={"message": "I want to learn compilers"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "pending_confirm",
+            "message": "Want me to add this topic?",
+            "pending_action": action_data,
+        }
+
+    @pytest.mark.anyio
+    async def test_confirm_whitelisted_action_succeeds(self, client):
+        action_data = {
+            "action": "add_concept",
+            "message": "Add this concept?",
+            "params": {"title": "Ownership"},
+        }
+        with patch("services.tools.execute_action", return_value=("reply", "Added concept #7")):
+            resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Add this concept?\n\n✅ Added concept #7",
+            "pending_action": None,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-2]["content"] == "[confirmed: add concept]"
+        assert history[-1]["content"] == "✅ Added concept #7"
+
+    @pytest.mark.anyio
+    async def test_confirm_suggest_topic_uses_accept_flow(self, client):
+        action_data = {
+            "action": "suggest_topic",
+            "message": "Want me to add this topic?",
+            "params": {"title": "Compilers"},
+        }
+        with patch(
+            "services.tools.execute_suggest_topic_accept",
+            return_value=(True, "✅ Created topic **Compilers** (#3)", 3),
+        ):
+            resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Want me to add this topic?\n\n✅ Created topic **Compilers** (#3)",
+            "pending_action": None,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-2]["content"] == '[confirmed: add topic "Compilers"]'
+        assert history[-1]["content"] == "✅ Created topic **Compilers** (#3)"
+
+    @pytest.mark.anyio
+    async def test_confirm_non_whitelisted_action_400(self, client):
+        resp = await client.post(
+            "/api/chat/confirm",
+            json={"action_data": {"action": "assess", "params": {"concept_id": 1}}},
+        )
+        assert resp.status_code == 400
+        assert "cannot be confirmed" in resp.json()["detail"]
+
+    @pytest.mark.anyio
+    async def test_decline_add_concept_writes_user_history(self, client):
+        resp = await client.post(
+            "/api/chat/decline",
+            json={"action_data": {"action": "add_concept", "params": {"title": "Borrow checker"}}},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Declined.",
+            "pending_action": None,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-1]["role"] == "user"
+        assert history[-1]["content"] == "[declined: add concept]"
+
+    @pytest.mark.anyio
+    async def test_decline_suggest_topic_writes_user_history(self, client):
+        resp = await client.post(
+            "/api/chat/decline",
+            json={"action_data": {"action": "suggest_topic", "params": {"title": "Compilers"}}},
+        )
+
+        assert resp.status_code == 200
+        history = db.get_chat_history(limit=5)
+        assert history[-1]["role"] == "user"
+        assert history[-1]["content"] == '[declined: add topic "Compilers"]'
+
+    @pytest.mark.anyio
+    async def test_decline_unknown_action_400(self, client):
+        resp = await client.post(
+            "/api/chat/decline",
+            json={"action_data": {"action": "assess", "params": {"concept_id": 1}}},
+        )
+        assert resp.status_code == 400
+        assert "cannot be declined" in resp.json()["detail"]
+
+    @pytest.mark.anyio
+    async def test_chat_401_missing_token_when_auth_enabled(self, test_db):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                resp = await ac.post("/api/chat", json={"message": "hello"})
+                assert resp.status_code == 401
 
 
 # ============================================================================

@@ -37,6 +37,7 @@ def layout(
 ) -> str:
     nav_items = [
         ("", "Dashboard"),
+        ("chat", "Chat"),
         ("topics", "Topics"),
         ("concepts", "Concepts"),
         ("graph", "Graph"),
@@ -49,16 +50,20 @@ def layout(
         cls = ' class="active"' if active == href else ""
         nav_html += f'<a href="/{href}"{cls}>{label}</a>'
 
+    container_class = "container"
+    if body_class:
+        container_class += f" {body_class}"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} — Learning Agent</title>
-<link rel="stylesheet" href="/static/style.css?v=2">
+<link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
-<div class="container{" graph-page" if body_class else ""}">
+<div class="{container_class}">
 <nav class="nav">
   <span class="brand">📚 Learning Agent</span>
   {nav_html}

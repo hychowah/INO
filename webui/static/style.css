@@ -258,6 +258,307 @@ tr:hover { background: rgba(88,166,255,.06); }
 .concepts-toolbar select:focus { border-color: var(--accent); }
 .concepts-toolbar select option { background: var(--surface); color: var(--text); }
 
+/* ============================================================================
+   Chat Page
+   ============================================================================ */
+
+.container.chat-layout {
+  max-width: 1180px;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-page {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.chat-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-subtitle {
+  color: var(--text2);
+  font-size: 14px;
+}
+
+.chat-thread {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 12px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(88,166,255,.12), transparent 35%),
+    linear-gradient(180deg, rgba(22,27,34,.98), rgba(13,17,23,.98));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.chat-empty {
+  margin: auto;
+  color: var(--text2);
+  text-align: center;
+  max-width: 320px;
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(80%, 720px);
+}
+
+.chat-message-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-message-assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.chat-message-action {
+  max-width: 60%;
+}
+
+.chat-bubble {
+  padding: 12px 16px;
+  border-radius: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.55;
+  box-shadow: 0 8px 18px rgba(0,0,0,.12);
+}
+
+.chat-message-user .chat-bubble {
+  background: linear-gradient(135deg, rgba(88,166,255,.95), rgba(47,129,247,.9));
+  color: #06131f;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-message-assistant .chat-bubble {
+  background: rgba(22,27,34,.95);
+  border: 1px solid rgba(139,148,158,.22);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-message-action .chat-bubble {
+  background: rgba(63,185,80,.12);
+  border: 1px solid rgba(63,185,80,.3);
+  color: var(--text);
+}
+
+.chat-message-error .chat-bubble {
+  background: rgba(248,81,73,.12);
+  border: 1px solid rgba(248,81,73,.35);
+  color: #ffd7d5;
+}
+
+.chat-meta {
+  color: var(--text2);
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+.chat-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 6px 0 0;
+  background: linear-gradient(180deg, rgba(13,17,23,0), rgba(13,17,23,.92) 24%, rgba(13,17,23,1));
+}
+
+.chat-pending-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(210,153,34,.4);
+  background: rgba(210,153,34,.08);
+  border-radius: 12px;
+}
+
+.chat-pending-title {
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.chat-pending-summary {
+  white-space: pre-wrap;
+  font-size: 14px;
+  max-height: clamp(120px, 30vh, 260px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.chat-pending-error {
+  color: #ffd7d5;
+  background: rgba(248,81,73,.12);
+  border: 1px solid rgba(248,81,73,.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.chat-pending-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-bubble p {
+  margin: 0;
+}
+
+.chat-bubble p + p,
+.chat-bubble p + .chat-list,
+.chat-bubble .chat-list + p,
+.chat-bubble .chat-list + .chat-list {
+  margin-top: 10px;
+}
+
+.chat-heading {
+  font-weight: 700;
+}
+
+.chat-heading-1,
+.chat-heading-2 {
+  font-size: 16px;
+}
+
+.chat-heading-3 {
+  font-size: 15px;
+}
+
+.chat-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.chat-inline-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.chat-inline-link:hover {
+  text-decoration: underline;
+}
+
+.chat-bubble code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  background: rgba(240,246,252,.08);
+  border: 1px solid rgba(240,246,252,.12);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 16px 30px rgba(0,0,0,.18);
+}
+
+.chat-input {
+  width: 100%;
+  min-height: 26px;
+  max-height: 220px;
+  resize: none;
+  overflow-y: auto;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+  font-family: inherit;
+}
+
+.chat-input:focus {
+  outline: none;
+}
+
+.chat-composer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.chat-status {
+  color: var(--text2);
+  font-size: 12px;
+  min-height: 18px;
+}
+
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .container.chat-layout {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .chat-thread {
+    padding: 12px;
+  }
+
+  .chat-message,
+  .chat-message-action {
+    max-width: 100%;
+  }
+
+  .chat-shell {
+    gap: 12px;
+  }
+
+  .chat-composer-actions,
+  .chat-pending-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chat-status {
+    width: 100%;
+  }
+}
+
 /* Status filter pill buttons */
 .filter-btn-group {
   display: inline-flex; gap: 0;
@@ -362,6 +663,7 @@ tr:hover .btn-delete { opacity: 1; }
 .tag.source-maintenance { background: rgba(210,153,34,.18); color: var(--yellow); }
 .tag.source-scheduler { background: rgba(63,185,80,.18); color: var(--green); }
 .tag.source-api { background: rgba(219,109,40,.18); color: var(--orange); }
+.tag.source-webui { background: rgba(88,166,255,.18); color: var(--accent); }
 .tag.source-cli { background: rgba(139,148,158,.18); color: var(--text2); }
 
 /* Status badges */

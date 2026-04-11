@@ -31,6 +31,7 @@ _SOURCE_CLASSES = {
     "maintenance": "source-maintenance",
     "scheduler": "source-scheduler",
     "api": "source-api",
+    "webui": "source-webui",
     "cli": "source-cli",
 }
 
