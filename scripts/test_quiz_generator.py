@@ -4,12 +4,14 @@ Debug script — test the two-prompt scheduled quiz pipeline.
 
 Usage:
   python scripts/test_quiz_generator.py --list-due             # pick a concept ID
+    python scripts/test_quiz_generator.py                        # auto-pick top due concept
   python scripts/test_quiz_generator.py <concept_id>           # context + P1
   python scripts/test_quiz_generator.py <concept_id> --p2      # context + P1 + P2
   python scripts/test_quiz_generator.py <concept_id> --context-only  # just show context
 
 Examples:
   python scripts/test_quiz_generator.py --list-due
+    python scripts/test_quiz_generator.py
   python scripts/test_quiz_generator.py 12
   python scripts/test_quiz_generator.py 12 --p2
   python scripts/test_quiz_generator.py 12 --context-only
@@ -43,6 +45,21 @@ def list_due():
     for c in due:
         print(f"{c['id']:>5}  {c['mastery_level']:>5}  {c['review_count']:>7}  {c['title']}")
     print()
+
+
+def resolve_concept_id(concept_id: int | None) -> int | None:
+    """Return the requested concept id or auto-pick the top due concept."""
+    if concept_id is not None:
+        return concept_id
+
+    due = db.get_due_concepts(limit=1)
+    if not due:
+        print("No concepts due for review. Use --list-due to browse or pass a concept_id.")
+        return None
+
+    selected = due[0]
+    print(f"Auto-selected concept #{selected['id']} - {selected['title']}")
+    return selected["id"]
 
 
 def show_context(concept_id: int):
@@ -94,7 +111,10 @@ async def run_p2(p1_result: dict, concept_id: int):
 def main():
     parser = argparse.ArgumentParser(description="Test quiz question generator")
     parser.add_argument(
-        "concept_id", nargs="?", type=int, help="Concept ID to generate question for"
+        "concept_id",
+        nargs="?",
+        type=int,
+        help="Concept ID to generate question for (omit to auto-pick top due concept)",
     )
     parser.add_argument("--p2", action="store_true", help="Also run Prompt 2 (packaging)")
     parser.add_argument(
@@ -103,24 +123,25 @@ def main():
     parser.add_argument("--list-due", action="store_true", help="List concepts due for review")
     args = parser.parse_args()
 
-    db.init_db()
+    db.init_databases()
 
     if args.list_due:
         list_due()
         return
 
-    if not args.concept_id:
-        parser.error("concept_id is required (or use --list-due)")
+    concept_id = resolve_concept_id(args.concept_id)
+    if concept_id is None:
+        return
 
-    show_context(args.concept_id)
+    show_context(concept_id)
 
     if args.context_only:
         return
 
     async def run():
-        p1_result = await run_p1(args.concept_id)
+        p1_result = await run_p1(concept_id)
         if p1_result and args.p2:
-            await run_p2(p1_result, args.concept_id)
+            await run_p2(p1_result, concept_id)
 
     asyncio.run(run())
 

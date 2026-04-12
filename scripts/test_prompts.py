@@ -32,7 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 import db
 from services import context as ctx
+from services import tools
 from services.llm import get_provider
+from services.parser import extract_fetch_params
 from services.pipeline import (
     MAX_MAINTENANCE_ACTIONS,
     MAX_TAXONOMY_ACTIONS,
@@ -235,7 +237,11 @@ def _list_concepts() -> None:
 
 
 async def run_quiz(concept_id: int | None) -> None:
-    """Show the interactive quiz prompt and first LLM response for a concept."""
+    """Show the interactive quiz prompt and first LLM response for a concept.
+
+    Mirrors the real fetch loop: if the first LLM response is a fetch action,
+    the fetch is executed and a second prompt+response pair is shown.
+    """
     # Auto-pick the top due concept if none specified
     if concept_id is None:
         due = db.get_due_concepts(limit=1)
@@ -262,15 +268,79 @@ async def run_quiz(concept_id: int | None) -> None:
     # Pre-set active concept so context builder includes concept detail
     db.set_session("active_concept_id", str(concept_id))
 
+    session_name = "test_quiz_prompt"
+    provider = get_provider()
+    provider.clear_session(session_name)
+
     try:
         system_prompt, user_prompt = _build_full_prompt("command", quiz_text)
 
         _section("SYSTEM PROMPT  (core + quiz + knowledge skills + persona + prefs)", system_prompt)
-        _section("USER PROMPT  (dynamic context + quiz request)", user_prompt)
+        _section("USER PROMPT 1  (dynamic context + quiz request)", user_prompt)
 
-        await _call_and_print(system_prompt, user_prompt, session_name="test_quiz_prompt")
+        # ── Prompt 1 ──────────────────────────────────────────────────────────
+        print(f"\n{SEP}")
+        print("  → Calling LLM (prompt 1)…")
+        print(SEP)
+        try:
+            raw1 = await provider.send(
+                user_prompt,
+                session=session_name,
+                system_prompt=system_prompt,
+                timeout=config.COMMAND_TIMEOUT,
+            )
+        except Exception as exc:
+            print(f"\n❌  LLM error (prompt 1): {exc}")
+            return
+
+        _section("LLM OUTPUT 1  (raw, before action extraction)", raw1)
+
+        # ── Fetch loop ────────────────────────────────────────────────────────
+        fetch_params = extract_fetch_params(raw1)
+        if not fetch_params:
+            # No fetch needed — single-prompt flow, done.
+            return
+
+        print(f"\n{SEP_THIN}")
+        print(f"  ↳ Fetch action detected: {fetch_params}")
+        print(f"  ↳ Executing fetch and calling LLM again (prompt 2)…")
+        print(SEP_THIN)
+
+        msg_type, fetch_data = tools.execute_action("fetch", fetch_params)
+        if msg_type == "fetch":
+            formatted_fetch = ctx.format_fetch_result(fetch_data)
+        else:
+            formatted_fetch = f"## Fetch Error\n{fetch_data}"
+
+        followup_prompt = (
+            f"Here is the data you requested:\n\n"
+            f"{formatted_fetch}\n\n"
+            f'Now process the original request: "{quiz_text}"\n'
+            f"Respond with a JSON action, FETCH for more data, ASK:, or REPLY:."
+        )
+
+        _section("USER PROMPT 2  (fetch result + follow-up)", followup_prompt)
+
+        # ── Prompt 2 ──────────────────────────────────────────────────────────
+        print(f"\n{SEP}")
+        print("  → Calling LLM (prompt 2)…")
+        print(SEP)
+        try:
+            raw2 = await provider.send(
+                followup_prompt,
+                session=session_name,
+                system_prompt=system_prompt,
+                timeout=config.COMMAND_TIMEOUT,
+            )
+        except Exception as exc:
+            print(f"\n❌  LLM error (prompt 2): {exc}")
+            return
+
+        _section("LLM OUTPUT 2  (raw, before action extraction)", raw2)
+
     finally:
         db.set_session("active_concept_id", None)
+        provider.clear_session(session_name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

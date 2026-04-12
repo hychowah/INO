@@ -9,6 +9,7 @@ Collections:
   - topics:   topic title + description embeddings
 """
 
+import atexit
 import logging
 from typing import Dict, List, Optional
 
@@ -38,6 +39,7 @@ def _get_client():
     path = str(VECTOR_STORE_PATH)
     logger.info(f"Initializing Qdrant (embedded) at: {path}")
     _client = QdrantClient(path=path)
+    atexit.register(close_client)
     return _client
 
 
