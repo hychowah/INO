@@ -1,23 +1,10 @@
-"""
-LLM provider abstraction layer.
-
-Two backends:
-  - KimiCliProvider: shells out to kimi-cli (existing behaviour)
-  - OpenAICompatibleProvider: calls any OpenAI-compatible API
-    (Grok / DeepSeek / OpenAI / local vLLM / etc.)
-
-Provider is selected via config.LLM_PROVIDER and instantiated once
-by get_provider().
-"""
+"""LLM provider abstraction layer for OpenAI-compatible chat completions."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
-import subprocess
 import time
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import config
 
@@ -35,6 +22,7 @@ logger = logging.getLogger("llm")
 try:
     from openai import AsyncOpenAI as _AsyncOpenAI
     import openai.resources.chat  # noqa: F401 — triggers full lazy-import cascade
+
     _OPENAI_AVAILABLE = True
 except ImportError:
     _AsyncOpenAI = None  # type: ignore[assignment,misc]
@@ -64,6 +52,7 @@ class LLMProvider(Protocol):
         *,
         session: str | None = None,
         system_prompt: str | None = None,
+        response_format: dict[str, Any] | None = None,
         timeout: int = 120,
     ) -> str:
         """Send a prompt and return the assistant's response text.
@@ -78,143 +67,6 @@ class LLMProvider(Protocol):
     def clear_session(self, session: str) -> None:
         """Drop all stored state for *session*."""
         ...
-
-
-# ============================================================================
-# KimiCliProvider
-# ============================================================================
-
-
-class KimiCliProvider:
-    """Wraps the kimi-cli binary (subprocess, stdin→stdout)."""
-
-    def __init__(
-        self,
-        cli_path: str,
-        agents_md_path: str | None = None,
-        preferences_path: str | None = None,
-        personas_dir: str | None = None,
-    ):
-        self._cli_path = cli_path
-        self._agents_md_path = agents_md_path
-        self._preferences_path = preferences_path
-        self._personas_dir = personas_dir
-
-    # ---- public interface --------------------------------------------------
-
-    async def send(
-        self,
-        prompt: str,
-        *,
-        session: str | None = None,
-        system_prompt: str | None = None,
-        timeout: int = 120,
-    ) -> str:
-        """Build a kimi-cli command and pipe *prompt* via stdin.
-
-        *system_prompt* is **ignored** — the kimi-cli prompt already
-        references AGENTS.md / preferences.md / persona by file path
-        (the CLI reads them from disk).
-        """
-        # Prepend file-path references when the provider knows the paths
-        if self._agents_md_path and self._preferences_path:
-            # Resolve active persona file path
-            persona_line = ""
-            if self._personas_dir:
-                try:
-                    from db.preferences import get_persona
-
-                    persona_name = get_persona()
-                    import os
-
-                    persona_path = os.path.join(self._personas_dir, f"{persona_name}.md")
-                    if os.path.exists(persona_path):
-                        persona_line = f"2. {persona_path}\n"
-                except Exception:
-                    pass  # Fallback: no persona file reference
-
-            if persona_line:
-                header = (
-                    "Follow the instructions in these files "
-                    "(do NOT summarize or acknowledge them):\n"
-                    f"1. {self._agents_md_path}\n"
-                    f"{persona_line}"
-                    f"3. {self._preferences_path}\n\n"
-                )
-            else:
-                header = (
-                    "Follow the instructions in these two files "
-                    "(do NOT summarize or acknowledge them):\n"
-                    f"1. {self._agents_md_path}\n"
-                    f"2. {self._preferences_path}\n\n"
-                )
-            prompt = header + prompt
-
-        flags = "--print --final-message-only --input-format text"
-        if session:
-            flags = f"--session {session} {flags}"
-
-        raw = await self._run(flags, stdin_text=prompt, timeout=timeout)
-        return raw
-
-    def clear_session(self, session: str) -> None:
-        """No-op — kimi-cli manages sessions on disk."""
-        pass
-
-    # ---- internals ---------------------------------------------------------
-
-    async def _run(
-        self,
-        command: str,
-        *,
-        stdin_text: str | None = None,
-        timeout: int = 120,
-    ) -> str:
-        cli = self._cli_path
-        if " " in cli and not (cli.startswith('"') or cli.startswith("'")):
-            cli = f'"{cli}"'
-
-        full_command = f"{cli} {command}".strip()
-
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-
-        kwargs: dict = dict(
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(config.BASE_DIR.parent),
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-        if stdin_text is not None:
-            kwargs["input"] = stdin_text
-
-        preview = command[:100].replace("\n", " ")
-        logger.info(f"Running kimi: {preview!r} (timeout={timeout}s)")
-
-        result = await asyncio.to_thread(subprocess.run, full_command, **kwargs)
-
-        logger.debug(
-            f"Kimi exit={result.returncode}, "
-            f"stdout={len(result.stdout)} chars, "
-            f"stderr={len(result.stderr)} chars"
-        )
-
-        if result.returncode != 0:
-            filtered = _filter_stderr(result.stderr)
-            if filtered:
-                logger.warning(f"Kimi stderr: {filtered[:300]}")
-            if not result.stdout.strip():
-                raise LLMError(
-                    f"kimi-cli exited {result.returncode}: {filtered[:200] or '(no stderr)'}",
-                    retryable=True,
-                )
-
-        return result.stdout.strip() if result.stdout else ""
 
 
 # ============================================================================
@@ -258,6 +110,7 @@ class OpenAICompatibleProvider:
         *,
         session: str | None = None,
         system_prompt: str | None = None,
+        response_format: dict[str, Any] | None = None,
         timeout: int = 120,
     ) -> str:
         messages = self._get_messages(session, system_prompt)
@@ -282,6 +135,8 @@ class OpenAICompatibleProvider:
                 kwargs["max_tokens"] = config.LLM_MAX_TOKENS
             if self._thinking:
                 kwargs["extra_body"] = {"thinking": {"type": self._thinking}}
+            if response_format is not None:
+                kwargs["response_format"] = response_format
 
             response = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:
@@ -368,28 +223,6 @@ class OpenAICompatibleProvider:
 
 
 # ============================================================================
-# Helpers
-# ============================================================================
-
-
-def _filter_stderr(stderr: str) -> str:
-    """Filter out kimi's decorative box-drawing output from stderr."""
-    if not stderr:
-        return ""
-    filtered = [
-        line
-        for line in stderr.strip().split("\n")
-        if line.strip()
-        and not line.startswith("┌")
-        and not line.startswith("│")
-        and not line.startswith("└")
-        and "✓" not in line
-        and "✗" not in line
-    ]
-    return "\n".join(filtered)
-
-
-# ============================================================================
 # Provider factory (singleton)
 # ============================================================================
 
@@ -403,21 +236,9 @@ def get_provider() -> LLMProvider:
     if _provider_instance is not None:
         return _provider_instance
 
-    provider_name = getattr(config, "LLM_PROVIDER", "kimi")
+    provider_name = getattr(config, "LLM_PROVIDER", "openai_compat")
 
-    if provider_name == "kimi":
-        agents_path = str((config.BASE_DIR / "AGENTS.md").resolve())
-        prefs_path = str(config.PREFERENCES_MD.resolve())
-        personas_dir = str(config.PERSONAS_DIR.resolve())
-        _provider_instance = KimiCliProvider(
-            cli_path=config.KIMI_CLI_PATH,
-            agents_md_path=agents_path,
-            preferences_path=prefs_path,
-            personas_dir=personas_dir,
-        )
-        logger.info("LLM provider: kimi-cli")
-
-    elif provider_name == "openai_compat":
+    if provider_name == "openai_compat":
         base_url = getattr(config, "LLM_API_BASE_URL", None)
         api_key = getattr(config, "LLM_API_KEY", None)
         model = getattr(config, "LLM_MODEL", None)
@@ -444,7 +265,7 @@ def get_provider() -> LLMProvider:
 
     else:
         raise LLMError(
-            f"Unknown LLM_PROVIDER: {provider_name!r}. Valid: 'kimi', 'openai_compat'.",
+            f"Unknown LLM_PROVIDER: {provider_name!r}. Valid: 'openai_compat'.",
             retryable=False,
         )
 

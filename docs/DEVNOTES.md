@@ -196,7 +196,6 @@ Split monolithic `AGENTS.md` (~690 lines) into `data/skills/` (mode-specific fil
 interactive (COMMAND/REPLY) → core + quiz + knowledge
 review (REVIEW-CHECK)       → core + quiz
 maintenance (MAINTENANCE)   → core + maintenance + knowledge
-quiz-packaging              → core + quiz
 taxonomy (TAXONOMY-MODE)    → taxonomy
 ```
 
@@ -252,19 +251,20 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 ---
 
-## 14. Two-Prompt Scheduled Quiz Pipeline (Migration 11)
+## 14. Structured Scheduled Quiz Flow (Migrations 11 + 14)
 
-**Problem:** Single-prompt quiz generation gave the LLM too many competing responsibilities: analyze concept data, pick the right question type/difficulty, AND format output with persona voice.
+**Problem:** Single-prompt quiz generation gave the LLM too many competing responsibilities: analyze concept data, pick the right question type/difficulty, track rotation, and produce delivery-ready phrasing that respects persona and user preferences.
 
-**Fix:** Split into two prompts:
-- **P1 (Reasoning model):** Stateless question generation. Uses `data/skills/quiz_generator.md` as system prompt. Receives concept detail + related concepts, outputs structured JSON (`question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`). Uses `REASONING_LLM_*` provider if configured, otherwise falls back to main provider.
-- **P2 (Fast model):** Packages P1 output with persona voice for Discord. Uses skill set `"quiz-packaging"` (core + quiz). Receives P1 JSON, outputs standard `quiz` action.
+**Current design:**
+- **P1 (Reasoning model):** `generate_quiz_question()` uses `data/skills/quiz_generator.md` plus injected Active Persona and runtime User Preferences. It receives concept detail + related concepts + recent structured review metadata and returns JSON: `question`, `formatted_question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`, and optional `choices`. Calls use `response_format={"type": "json_object"}`.
+- **Delivery stage:** `package_quiz_for_discord()` is now a deterministic compatibility wrapper over `format_quiz_action()`. It uses `formatted_question` (or `question` as fallback) and returns the final `REPLY:` string. No LLM packaging stage remains in the scheduled-quiz flow.
+- **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler and chat review commands fall back to single-prompt `call_with_fetch_loop(mode="review-check")`.
 
-**Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler falls back to single-prompt `call_with_fetch_loop()` — same behavior as before the change.
+**Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` to store raw P1 JSON for debugging/inspection.
 
-**Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` table. Stores raw P1 JSON output for debugging/inspection. Exposed in concept detail tooling for transparency. Non-functional — purely for transparency.
+**Migration 14:** Added `question_type`, `target_facet`, and `question_difficulty` columns on `review_log`. These are fed back into `build_quiz_generator_context()` so P1 can avoid repeating recent quiz facets and question types.
 
-**Key files:** `services/pipeline.py` (`generate_quiz_question`, `package_quiz_for_discord`), `services/scheduler.py` (`_send_review_quiz`), `services/llm.py` (`get_reasoning_provider`), `services/context.py` (`build_quiz_generator_context`), `config.py` (REASONING_LLM_* vars).
+**Key files:** `services/pipeline.py` (`generate_quiz_question`, `_quiz_generator_system_prompt`, `format_quiz_action`), `services/tools_assess.py` (review metadata persistence), `services/context.py` (`build_quiz_generator_context`), `db/reviews.py`, `db/migrations.py`, `services/scheduler.py`, `services/chat_session.py`, `config.py` (REASONING_LLM_* vars).
 
 ---
 

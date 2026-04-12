@@ -115,11 +115,8 @@ SIMILARITY_THRESHOLD_RELATION = float(os.environ.get("LEARN_SIM_RELATION", "0.5"
 # LLM PROVIDER SETTINGS
 # ============================================================================
 
-# Provider: "kimi" (default) or "openai_compat" (Grok, DeepSeek, OpenAI, …)
-LLM_PROVIDER = os.environ.get("LEARN_LLM_PROVIDER", "kimi")
-
-# --- kimi-cli backend ---
-KIMI_CLI_PATH = "kimi"
+# Provider: "openai_compat" (Grok, DeepSeek, OpenAI, …)
+LLM_PROVIDER = os.environ.get("LEARN_LLM_PROVIDER", "openai_compat")
 
 # --- OpenAI-compatible backend ---
 # Required when LLM_PROVIDER = "openai_compat"
@@ -136,13 +133,13 @@ LLM_MAX_TOKENS = (
     int(os.environ["LEARN_LLM_MAX_TOKENS"]) if os.environ.get("LEARN_LLM_MAX_TOKENS") else 4096
 )
 LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "40000"))
-# Thinking mode for models that support it (e.g. kimi-k2.5): "enabled" | "disabled" | None
+# Thinking mode for models that support it: "enabled" | "disabled" | None
 # (use model default)
 LLM_THINKING = os.environ.get("LEARN_LLM_THINKING")  # e.g. "disabled"
 
 # --- Reasoning provider (optional, for scheduled quiz question generation) ---
 # If set, the reasoning model is used for Prompt 1 (question analysis/generation)
-# while the main provider handles Prompt 2 (personality packaging).
+# while deterministic code handles the final delivery formatting.
 # Falls back to the main provider if not configured.
 REASONING_LLM_BASE_URL = os.environ.get("LEARN_REASONING_LLM_BASE_URL")
 REASONING_LLM_API_KEY = os.environ.get("LEARN_REASONING_LLM_API_KEY")
@@ -169,7 +166,7 @@ def validate_config():
             errors.append("LLM_API_KEY required when LLM_PROVIDER=openai_compat")
         if not LLM_MODEL:
             errors.append("LLM_MODEL required when LLM_PROVIDER=openai_compat")
-    elif LLM_PROVIDER not in ("kimi", "openai_compat"):
+    else:
         errors.append(f"Unknown LLM_PROVIDER: {LLM_PROVIDER!r}")
 
     return errors
@@ -181,13 +178,10 @@ def print_config():
     print(f"  Base Dir       : {BASE_DIR}")
     print(f"  Data Dir       : {DATA_DIR}")
     print(f"  LLM Provider   : {LLM_PROVIDER}")
-    if LLM_PROVIDER == "kimi":
-        print(f"  kimi Path      : {KIMI_CLI_PATH}")
-    else:
-        print(f"  LLM Model      : {LLM_MODEL}")
-        print(f"  LLM Base URL   : {LLM_API_BASE_URL}")
-        _key = "***" + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else "(not set)"
-        print(f"  LLM API Key    : {_key}")
+    print(f"  LLM Model      : {LLM_MODEL}")
+    print(f"  LLM Base URL   : {LLM_API_BASE_URL}")
+    _key = "***" + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else "(not set)"
+    print(f"  LLM API Key    : {_key}")
     if REASONING_LLM_MODEL:
         print(f"  Reasoning Model: {REASONING_LLM_MODEL}")
         print(f"  Reasoning URL  : {REASONING_LLM_BASE_URL}")

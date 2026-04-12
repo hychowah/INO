@@ -204,6 +204,28 @@ class TestAssessAllowedWithQuiz:
         # quiz_anchor_concept_id should now be cleared
         assert db.get_session("quiz_anchor_concept_id") is None
 
+    def test_quiz_answered_marked_after_assess(self, test_db):
+        """A successful assess marks the quiz answered for stale button guards."""
+        cid = db.add_concept("LSM Tree", "Write-optimized index")
+
+        quiz_action(
+            "quiz", {"concept_id": cid, "message": "How do LSM trees trade reads for writes?"}
+        )
+
+        action_data = {
+            "action": "assess",
+            "params": {
+                "concept_id": cid,
+                "quality": 4,
+                "question_difficulty": 35,
+            },
+            "message": "Nice work.",
+        }
+
+        _run(_pipeline_execute(action_data))
+
+        assert db.get_session("quiz_answered") == "1"
+
     def test_second_assess_blocked_after_first_succeeds(self, test_db):
         """After a quiz is answered, a second assess on the same concept is blocked."""
         cid = db.add_concept("B-Tree Indexing", "Index structure")

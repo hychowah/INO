@@ -173,7 +173,7 @@ async def persona_command(ctx, *, name: str = ""):
 @bot.hybrid_command(name="due", description="Show concepts due for review")
 @authorized_only()
 async def due_command(ctx):
-    """Show due concepts and review stats without calling kimi-cli."""
+    """Show due concepts and review stats without calling the LLM."""
     _ensure_db()
     stats = db.get_review_stats()
     due = db.get_due_concepts(limit=10)
@@ -351,7 +351,9 @@ async def review_command(ctx):
                         try:
                             if cid:
                                 p1_result = await pipeline.generate_quiz_question(cid)
-                                llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
+                                llm_response = await pipeline.package_quiz_for_discord(
+                                    p1_result, cid
+                                )
                             else:
                                 raise LLMError("No concept_id in payload", retryable=True)
                         except LLMError as e:
@@ -364,7 +366,9 @@ async def review_command(ctx):
                                 author=str(ctx.author),
                             )
 
-                        final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
+                        final_result = await pipeline.execute_llm_response(
+                            review_text, llm_response, "reply"
+                        )
                         _msg_type, response = pipeline.process_output(final_result)
                         assess_meta = None
 
@@ -476,9 +480,12 @@ async def reorganize_command(ctx):
         msg = final_result
         for pfx in ("REPLY: ", "REPLY:"):
             if msg.startswith(pfx):
-                msg = msg[len(pfx):]
-        main_text = f"🌿 **Taxonomy Reorganization**\n\n{msg.strip()}" if msg.strip() else \
-            "🌿 **Taxonomy Reorganization** — complete ✅"
+                msg = msg[len(pfx) :]
+        main_text = (
+            f"🌿 **Taxonomy Reorganization**\n\n{msg.strip()}"
+            if msg.strip()
+            else "🌿 **Taxonomy Reorganization** — complete ✅"
+        )
 
         if proposed_actions:
             proposal_id = db.save_proposal("taxonomy", proposed_actions)

@@ -47,7 +47,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 # ============================================================================

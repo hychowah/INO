@@ -3,10 +3,9 @@ Tests for the LLM provider abstraction layer.
 
 Covers:
   1. LLMError — retryable / non-retryable
-  2. KimiCliProvider — instantiation, file-path injection
-  3. OpenAICompatibleProvider — session management, token truncation
-  4. Provider factory — config-based selection
-  5. Live smoke test — optional, requires real API credentials (--live flag)
+    2. OpenAICompatibleProvider — session management, token truncation
+    3. Provider factory — config-based selection
+    4. Live smoke test — optional, requires real API credentials (--live flag)
 """
 
 import asyncio
@@ -18,7 +17,6 @@ import pytest
 import config
 import services.llm as llm_module
 from services.llm import (
-    KimiCliProvider,
     LLMError,
     OpenAICompatibleProvider,
     get_provider,
@@ -77,75 +75,7 @@ class TestLLMError:
 
 
 # ============================================================================
-# 2. KimiCliProvider
-# ============================================================================
-
-
-class TestKimiCliProvider:
-    def test_instantiation_with_paths(self):
-        kp = KimiCliProvider(
-            cli_path="kimi",
-            agents_md_path="/fake/AGENTS.md",
-            preferences_path="/fake/preferences.md",
-        )
-        assert kp._cli_path == "kimi"
-
-    def test_clear_session_noop(self):
-        kp = KimiCliProvider(cli_path="kimi")
-        kp.clear_session("test_session")  # should not raise
-
-    def test_file_path_injection(self):
-        kp = KimiCliProvider(
-            cli_path="kimi",
-            agents_md_path="/fake/AGENTS.md",
-            preferences_path="/fake/preferences.md",
-        )
-        captured = {}
-
-        async def mock_run(self, command, *, stdin_text=None, timeout=120):
-            captured["stdin"] = stdin_text
-            captured["command"] = command
-            return "REPLY: test response"
-
-        async def _test():
-            with patch.object(KimiCliProvider, "_run", mock_run):
-                result = await kp.send(
-                    "dynamic context here\n\nuser said: hello",
-                    session="test_sess",
-                    system_prompt="ignored system prompt",
-                    timeout=60,
-                )
-            assert "Follow the instructions in these two files" in captured["stdin"]
-            assert "/fake/AGENTS.md" in captured["stdin"]
-            assert "/fake/preferences.md" in captured["stdin"]
-            assert "dynamic context here" in captured["stdin"]
-            assert "--session test_sess" in captured["command"]
-            assert "--print" in captured["command"]
-            assert "--final-message-only" in captured["command"]
-            assert result == "REPLY: test response"
-
-        asyncio.run(_test())
-
-    def test_no_paths(self):
-        kp_bare = KimiCliProvider(cli_path="kimi")
-        captured = {}
-
-        async def mock_run(self, command, *, stdin_text=None, timeout=120):
-            captured["stdin"] = stdin_text
-            return "fixed json"
-
-        async def _test():
-            with patch.object(KimiCliProvider, "_run", mock_run):
-                result = await kp_bare.send("Fix this: {}", session=None, timeout=30)
-            assert "Follow the instructions" not in captured["stdin"]
-            assert captured["stdin"] == "Fix this: {}"
-            assert result == "fixed json"
-
-        asyncio.run(_test())
-
-
-# ============================================================================
-# 3. OpenAICompatibleProvider
+# 2. OpenAICompatibleProvider
 # ============================================================================
 
 
@@ -288,9 +218,21 @@ class TestOpenAICompatibleProvider:
 
         asyncio.run(_test())
 
+    def test_response_format_passed(self):
+        mock_client, mock_response = _make_mock_client()
+        mock_response.choices[0].message.content = "resp"
+
+        async def _test():
+            p = _make_provider(mock_client)
+            await p.send("test", session=None, response_format={"type": "json_object"})
+            call_args = mock_client.chat.completions.create.call_args
+            assert call_args.kwargs["response_format"] == {"type": "json_object"}
+
+        asyncio.run(_test())
+
 
 # ============================================================================
-# 4. Provider Factory
+# 3. Provider Factory
 # ============================================================================
 
 
@@ -300,11 +242,6 @@ class TestProviderFactory:
         llm_module._provider_instance = None
         yield
         llm_module._provider_instance = None
-
-    def test_kimi_provider(self):
-        with patch.object(config, "LLM_PROVIDER", "kimi"):
-            p = get_provider()
-            assert isinstance(p, KimiCliProvider)
 
     def test_openai_compat_missing_config(self):
         with (
@@ -334,7 +271,7 @@ class TestProviderFactory:
 
 
 # ============================================================================
-# 5. Import pre-warming regression
+# 4. Import pre-warming regression
 # ============================================================================
 
 
@@ -410,7 +347,7 @@ class TestOpenAIClientConstructionPath:
 
 
 # ============================================================================
-# 6. Live Smoke Test (optional — pass --live to enable)
+# 5. Live Smoke Test (optional — pass --live to enable)
 # ============================================================================
 
 

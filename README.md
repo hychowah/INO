@@ -75,7 +75,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 | Databases | SQLite (WAL mode) × 2 |
 | Vector Store | Qdrant (embedded mode) |
 | Embeddings | sentence-transformers (`all-mpnet-base-v2`, 768-dim) |
-| LLM Backend | `kimi` CLI or any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
+| LLM Backend | OpenAI-compatible chat completions (Grok, DeepSeek, OpenAI, …) |
 | Discord | discord.py |
 | REST API | FastAPI + Uvicorn |
 | Web UI | FastAPI-served React/TypeScript/Vite SPA + Tailwind CSS + local UI primitives |
@@ -113,7 +113,7 @@ LEARN_LLM_MODEL=grok-3
 LEARN_AUTHORIZED_USER_ID=your_discord_user_id
 ```
 
-If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`. For the `kimi` CLI path, install and authenticate the `kimi` binary, then either omit the OpenAI-compatible block above or set `LEARN_LLM_PROVIDER=kimi` explicitly.
+If you omit `LEARN_LLM_PROVIDER`, the app defaults to `openai_compat`. You still need to set `LEARN_LLM_BASE_URL`, `LEARN_LLM_API_KEY`, and `LEARN_LLM_MODEL`.
 
 Then run:
 
@@ -163,8 +163,6 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_LLM_API_KEY` | Your API key |
 | `LEARN_LLM_MODEL` | `grok-3`, `deepseek-chat`, etc. |
 
-For `kimi`, the CLI backend is used instead of the OpenAI-compatible settings above.
-
 **Optional** (sensible defaults):
 
 | Variable | Default | Purpose |
@@ -195,7 +193,7 @@ See [.env.example](.env.example) for the full optional configuration list, inclu
 
 **Optional (Reasoning model for scheduled quiz P1):**
 
-If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model) generates a structured question, P2 (main provider) packages it with persona voice. Falls back to single-prompt if not set.
+If configured, scheduled quizzes use a structured generation flow: P1 (reasoning model) receives concept detail plus Active Persona and User Preferences, returns JSON including `question`, `formatted_question`, `question_type`, `target_facet`, and `concept_ids`, and a deterministic formatter delivers the final question text. If the reasoning model is unavailable or fails, the system falls back to the single-prompt `review-check` flow.
 
 | Variable | Example | Purpose |
 |----------|---------|--------|

@@ -38,9 +38,10 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 │      │         │         │                       │                    │
 │      │         │         ▼                       │                    │
 │      │         │  ┌──────────────┐               │                    │
-│      │         │  │ kimi CLI or  │               │                    │
 │      │         │  │ OpenAI compat│               │                    │
 │      │         │  │ backend      │               │                    │
+│      │         │  │ (main +      │               │                    │
+│      │         │  │ reasoning)   │               │                    │
 │      │         │  └──────────────┘               │                    │
 │      │         │                                 │                    │
 │      ▼         ▼                                 │                    │
@@ -70,7 +71,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and the runtime `data/preferences.md` file. That runtime file is git-ignored and auto-copied from tracked `data/preferences.template.md` on first bot startup. With `LLM_PROVIDER="openai_compat"`, the assembled prompt is sent directly in the API request. With `LLM_PROVIDER="kimi"`, the provider prepends file references for `AGENTS.md`, the active persona file, and the runtime `data/preferences.md` before invoking the CLI.
+**LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and the runtime `data/preferences.md` file. That runtime file is git-ignored and auto-copied from tracked `data/preferences.template.md` on first bot startup. The runtime now uses OpenAI-compatible chat completions only, so the fully assembled prompt is sent directly in the API request.
 
 ---
 
@@ -85,7 +86,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
 | `data/skills/taxonomy.md` | ~80 | Taxonomy skill — topic tree restructuring, grouping rules, rename criteria, suppressed-rename tracking (taxonomy mode only) |
 | `data/skills/preferences.md` | ~30 | Preference-edit skill — isolated fenced-output editor used by `/preference` text edits |
-| `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection, JSON output format (scheduled quiz P1 only) |
+| `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection plus structured JSON output including `formatted_question` (scheduled quiz P1 only) |
 | `data/preferences.template.md` | ~30 | Tracked default preferences file copied to the runtime file on first bot startup |
 | `data/preferences.md` | ~20 | Runtime user preferences copy (git-ignored, injected into every LLM call) |
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
@@ -129,9 +130,9 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
 | `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
-| `services/llm.py` | ~330 | LLM provider abstraction — owns Kimi CLI subprocess integration and the OpenAI-compatible chat-completions adapter |
+| `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter and reasoning-provider selection |
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
-| `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral kimi session) |
+| `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral isolated LLM session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
 | `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
@@ -216,9 +217,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │
          ├─── llm_provider.send(prompt, system_prompt)       ← provider abstraction
          │         │
-         │         ├── openai_compat: sends assembled prompt directly in API messages
-         │         └── kimi: prepends file refs (AGENTS.md + persona + runtime preferences)
-         │             before invoking the CLI subprocess
+         │         └── openai_compat: sends assembled prompt directly in API messages
          │
          ├─── pipeline.extract_llm_action(raw_output)
          │         └── strips echoed prompt, finds last JSON or prefix
@@ -230,7 +229,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │                                      │
          │                            context.format_fetch_result(data)
          │                                      │
-         │                            append to extra_context, re-call kimi ──┘
+         │                            append to extra_context, re-call provider ──┘
          │
          └─── Final non-fetch LLM response (string)
                     │
@@ -278,25 +277,26 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   scheduler._send_review_quiz(payload)
          │
          ▼
-  ┌─ Two-prompt pipeline (with fallback) ──────────────────────┐
+  ┌─ P1 generation + deterministic delivery (with fallback) ──┐
   │                                                            │
   │  P1: pipeline.generate_quiz_question(concept_id)           │
   │    Provider: REASONING_LLM_* (or main provider fallback)   │
-  │    System prompt: data/skills/quiz_generator.md             │
+  │    System prompt: quiz_generator.md + Active Persona +      │
+  │                   runtime preferences.md                    │
   │    Input: concept detail + related concepts                │
-  │    Output: JSON {question, difficulty, question_type,      │
-  │             target_facet, reasoning, concept_ids}           │
+  │    Output: JSON {question, formatted_question, difficulty, │
+  │             question_type, target_facet, reasoning,        │
+  │             concept_ids}                                   │
   │    Cached in: concepts.last_quiz_generator_output          │
   │                       │                                    │
   │                       ▼                                    │
-  │  P2: pipeline.package_quiz_for_discord(p1_result, cid)     │
-  │    Provider: main LLM provider                             │
-  │    Skill set: "quiz-packaging" (core + quiz)               │
-  │    Input: P1 JSON + concept context                        │
-  │    Output: quiz action with persona voice                  │
+  │  Delivery: pipeline.package_quiz_for_discord(p1_result)    │
+  │    Deterministic compatibility wrapper                     │
+  │    Input: P1 JSON                                          │
+  │    Output: REPLY string using formatted_question           │
   │                                                            │
   │  Fallback: If P1 fails → pipeline.call_with_fetch_loop()   │
-  │            (single-prompt, same as before)                  │
+  │            mode="review-check" single-prompt flow          │
   └────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -577,9 +577,8 @@ The core brain of the system. Coordinates everything:
 12. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
 ### services/llm.py — Provider Integration
-- Owns both provider modes: OpenAI-compatible chat completions and Kimi CLI subprocess execution
+- Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by scheduled quiz P1
 - For `openai_compat`, session history is provider-managed and existing session reads return a copy to avoid accidental live-list mutation
-- For `kimi`, this module is the **single point** where the system crosses a subprocess boundary
 
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
 - `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, `last_activity_at`, and the ContextVar-backed current-user identity
@@ -813,7 +812,7 @@ backup model without requiring administrator privileges.
 |:--------|:--------|:-------|
 | Bot token | env `LEARN_BOT_TOKEN` | config.py |
 | Authorized user | env `LEARN_AUTHORIZED_USER_ID` | config.py |
-| kimi-cli path | `"kimi"` | config.py |
+| LLM provider | `"openai_compat"` | config.py |
 | LLM timeout | 120 seconds | config.py |
 | Review check interval | 15 minutes | config.py |
 | Maintenance interval | 168 hours (weekly) | config.py |

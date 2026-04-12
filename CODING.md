@@ -40,7 +40,7 @@ api.py  (FastAPI)  ─┼───── services/pipeline.py ── services/to
 frontend/ (React)  ─┘  ← browser client, proxied to api.py in dev
 ```
 
-The runtime LLM (DeepSeek/Grok/kimi) is the brain — it decides what to teach, when to quiz, and how to adapt. The code is a thin executor: parse LLM JSON → call DB → return result.
+The runtime LLM (Grok/DeepSeek/OpenAI-compatible providers) is the brain — it decides what to teach, when to quiz, and how to adapt. The code is a thin executor: parse LLM JSON → call DB → return result.
 
 ---
 
@@ -86,7 +86,7 @@ ROOT
 │   ├── context.py         # Prompt builder: dynamic context for LLM calls
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
-│   ├── llm.py             # LLM provider abstraction (kimi-cli, OpenAI-compat)
+│   ├── llm.py             # LLM provider abstraction (OpenAI-compatible chat completions + reasoning provider)
 │   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
 │   ├── state.py           # Shared mutable state (avoids circular imports)
@@ -94,8 +94,7 @@ ROOT
 │   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
-│   ├── chat_session.py    # Shared chat-session controller for FastAPI browser/API routes
-│   └── kimi.py            # kimi-cli specific helpers
+│   └── chat_session.py    # Shared chat-session controller for FastAPI browser/API routes
 │
 ├── db/                    # Database layer (SQLite)
 │   ├── core.py            # Connections, init, datetime utils

@@ -327,7 +327,7 @@ async def execute_action(action_data: dict) -> str:
 
     msg_type, result = tools.execute_action(action, params)
 
-    # Repair sub-agent: if unknown action, try to fix via kimi session
+    # Repair sub-agent: if unknown action, try to fix via an isolated LLM session
     if msg_type == "error" and "Unknown action" in str(result):
         repaired = await repair_action(action_data)
         if repaired:
@@ -346,14 +346,11 @@ async def execute_action(action_data: dict) -> str:
     # Clear active quiz context when the LLM chose a non-quiz action
     # (quiz cycle complete, or intent shifted). See module-level constant.
     if action in _QUIZ_CLEARING_ACTIONS and msg_type != "error":
+        from services.tools_assess import clear_quiz_state
+
         anchor_before = db.get_session("quiz_anchor_concept_id")
-        db.set_session("active_concept_id", None)
-        db.set_session("active_concept_ids", None)
-        db.set_session("quiz_anchor_concept_id", None)
-        logger.debug(
-            f"[quiz_anchor] CLEARED by action='{action}' "
-            f"(anchor was {anchor_before!r})"
-        )
+        clear_quiz_state(mark_answered=action in {"assess", "multi_assess"})
+        logger.debug(f"[quiz_anchor] CLEARED by action='{action}' (anchor was {anchor_before!r})")
 
     if msg_type == "error":
         return f"REPLY: ⚠️ {result}"
@@ -600,6 +597,97 @@ async def call_with_fetch_loop(
 # ============================================================================
 
 _QUIZ_GENERATOR_SKILL = SKILLS_DIR / "quiz_generator.md"
+_QUIZ_QUESTION_TYPES = {
+    "definition",
+    "mechanism",
+    "comparison",
+    "application",
+    "synthesis",
+    "edge-case",
+    "teach-back",
+}
+
+
+def _quiz_generator_system_prompt() -> str:
+    """Build Prompt 1 instructions with persona guidance for delivery text."""
+    system_prompt = ctx._read_file(_QUIZ_GENERATOR_SKILL)
+    if not system_prompt:
+        return ""
+
+    persona_content = get_persona_content(get_persona())
+    preferences_content = ctx._read_file(PREFERENCES_MD_PATH)
+
+    parts = [system_prompt]
+    if persona_content:
+        parts.append(f"## Active Persona\n\n{persona_content}")
+    if preferences_content:
+        parts.append(f"## User Preferences\n\n{preferences_content}")
+    parts.append(
+        "Use the active persona only when writing `formatted_question`. "
+        "Keep `reasoning` analytical and concise."
+    )
+    return "\n\n".join(parts)
+
+
+def _validate_quiz_generator_result(result: dict) -> dict:
+    """Validate and normalize Prompt 1 structured output."""
+    if not isinstance(result, dict):
+        raise LLMError("Reasoning model output must be a JSON object", retryable=True)
+
+    question = result.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise LLMError("Reasoning model output missing valid 'question' field", retryable=True)
+
+    formatted_question = result.get("formatted_question")
+    if not isinstance(formatted_question, str) or not formatted_question.strip():
+        raise LLMError(
+            "Reasoning model output missing valid 'formatted_question' field",
+            retryable=True,
+        )
+
+    difficulty = result.get("difficulty")
+    if not isinstance(difficulty, int) or not 0 <= difficulty <= 100:
+        raise LLMError("Reasoning model output has invalid 'difficulty' field", retryable=True)
+
+    question_type = result.get("question_type")
+    if question_type not in _QUIZ_QUESTION_TYPES:
+        raise LLMError("Reasoning model output has invalid 'question_type' field", retryable=True)
+
+    target_facet = result.get("target_facet")
+    if not isinstance(target_facet, str) or not target_facet.strip():
+        raise LLMError("Reasoning model output missing valid 'target_facet' field", retryable=True)
+
+    reasoning = result.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        raise LLMError("Reasoning model output missing valid 'reasoning' field", retryable=True)
+
+    concept_ids = result.get("concept_ids")
+    if (
+        not isinstance(concept_ids, list)
+        or not concept_ids
+        or not all(isinstance(cid, int) for cid in concept_ids)
+    ):
+        raise LLMError("Reasoning model output has invalid 'concept_ids' field", retryable=True)
+
+    choices = result.get("choices")
+    if choices is not None:
+        if (
+            not isinstance(choices, list)
+            or not choices
+            or not all(isinstance(choice, str) and choice.strip() for choice in choices)
+        ):
+            raise LLMError("Reasoning model output has invalid 'choices' field", retryable=True)
+
+    return result
+
+
+def format_quiz_action(p1_result: dict, concept_id: int) -> str:
+    """Deterministically format a P1 quiz result for review delivery."""
+    _ = concept_id
+    message = (p1_result.get("formatted_question") or p1_result.get("question") or "").strip()
+    if not message:
+        raise LLMError("Quiz formatter requires a non-empty question", retryable=False)
+    return f"REPLY: {message}"
 
 
 async def generate_quiz_question(concept_id: int) -> dict:
@@ -615,7 +703,7 @@ async def generate_quiz_question(concept_id: int) -> dict:
     if not quiz_context:
         raise LLMError(f"Concept {concept_id} not found", retryable=False)
 
-    system_prompt = ctx._read_file(_QUIZ_GENERATOR_SKILL)
+    system_prompt = _quiz_generator_system_prompt()
     if not system_prompt:
         raise LLMError("quiz_generator.md not found", retryable=False)
 
@@ -629,6 +717,7 @@ async def generate_quiz_question(concept_id: int) -> dict:
     raw = await provider.send(
         prompt,
         system_prompt=system_prompt,
+        response_format={"type": "json_object"},
         timeout=config.COMMAND_TIMEOUT,
     )
 
@@ -651,14 +740,17 @@ async def generate_quiz_question(concept_id: int) -> dict:
         logger.error(f"P1 returned unparseable JSON: {raw[:300]}")
         raise LLMError(f"Reasoning model returned invalid JSON: {e}", retryable=True)
 
-    if not isinstance(result, dict) or "question" not in result:
-        logger.error(f"P1 missing 'question' key: {result}")
-        raise LLMError("Reasoning model output missing 'question' field", retryable=True)
+    result = _validate_quiz_generator_result(result)
 
     logger.info(
         f"P1 generated question for concept #{concept_id}: "
         f"type={result.get('question_type')}, diff={result.get('difficulty')}"
     )
+
+    db.set_session("p1_question_type", result.get("question_type"))
+    db.set_session("p1_target_facet", result.get("target_facet"))
+    difficulty = result.get("difficulty")
+    db.set_session("p1_difficulty", str(difficulty) if difficulty is not None else None)
 
     # Cache P1 output in database for debugging/inspection
     try:
@@ -670,42 +762,10 @@ async def generate_quiz_question(concept_id: int) -> dict:
 
 
 async def package_quiz_for_discord(p1_result: dict, concept_id: int) -> str:
-    """Prompt 2: Package a pre-generated question with persona and action format.
-
-    Takes the structured output from generate_quiz_question() and sends it
-    to the fast provider with the standard system prompt (personality, output
-    format rules). Returns the LLM response string (quiz action JSON).
-    """
-    provider = get_provider()
-
-    p1_json = json.dumps(p1_result, ensure_ascii=False)
-    prompt = (
-        f"[SCHEDULED_REVIEW] A quiz question has been pre-generated by the "
-        f"analysis system. Package it for delivery to the user.\n\n"
-        f"Pre-generated question data:\n{p1_json}\n\n"
-        f"Instructions:\n"
-        f"- Use the `quiz` action JSON format with concept_id from the data above\n"
-        f"- Place the question in the `message` field, lightly rephrased for your persona voice\n"
-        f"- If the pre-generated data includes `choices`, preserve them in `params.choices`\n"
-        f"- Do NOT change the question's scope, difficulty, or core intent\n"
-        f"- Do NOT fetch or generate a different question — use the one provided\n"
-        f"- Respond with the quiz action JSON only"
-    )
-
-    system_prompt = build_system_prompt(mode="quiz-packaging")
-
-    raw = await provider.send(
-        prompt,
-        system_prompt=system_prompt,
-        timeout=config.COMMAND_TIMEOUT,
-    )
-
-    if not raw:
-        raise LLMError("Empty response from packaging provider", retryable=True)
-
-    extracted = extract_llm_action(raw)
-    logger.info(f"P2 packaged quiz for concept #{concept_id} ({len(extracted)} chars)")
-    return extracted
+    """Compatibility wrapper for deterministic quiz delivery formatting."""
+    formatted = format_quiz_action(p1_result, concept_id)
+    logger.info(f"Formatted quiz delivery for concept #{concept_id} ({len(formatted)} chars)")
+    return formatted
 
 
 # ============================================================================
@@ -837,7 +897,7 @@ async def call_action_loop(
             result_clean = result
             for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
                 if result_clean.startswith(pfx):
-                    result_clean = result_clean[len(pfx):]
+                    result_clean = result_clean[len(pfx) :]
                     break
 
             is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
@@ -888,9 +948,7 @@ async def call_action_loop(
 
         action_log = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
         continuation_context = (
-            context
-            if continuation_context_limit <= 0
-            else context[:continuation_context_limit]
+            context if continuation_context_limit <= 0 else context[:continuation_context_limit]
         )
         text = (
             f"[{mode.upper()} continuation] Actions taken so far:\n{action_log}\n\n"
@@ -1068,7 +1126,6 @@ async def execute_dedup_merges(groups: list[dict]) -> list[str]:
     from services.dedup import execute_dedup_merges as run_dedup_merges
 
     return await run_dedup_merges(groups)
-
 
 
 async def execute_maintenance_actions(actions: list[dict]) -> list[str]:

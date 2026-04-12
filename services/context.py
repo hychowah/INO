@@ -213,12 +213,12 @@ def _is_quiz_stale() -> bool:
         return False
     try:
         updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
-        elapsed = (datetime.now(timezone.utc).replace(tzinfo=None) - updated_at).total_seconds() / 60
+        elapsed = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - updated_at
+        ).total_seconds() / 60
         return elapsed > timeout_minutes
     except (ValueError, TypeError):
-        logger.warning(
-            f"Failed to parse quiz timestamp '{updated_at_str}', treating as stale."
-        )
+        logger.warning(f"Failed to parse quiz timestamp '{updated_at_str}', treating as stale.")
         return True
 
 
@@ -244,13 +244,11 @@ def _append_active_quiz_context(parts: list) -> None:
     # --- Staleness timeout safety net ---
     anchor_cid_pre = db.get_session("quiz_anchor_concept_id")
     stale = _is_quiz_stale()
-    logger.debug(
-        f"[quiz_anchor] Staleness check — anchor={anchor_cid_pre!r}, stale={stale}"
-    )
+    logger.debug(f"[quiz_anchor] Staleness check — anchor={anchor_cid_pre!r}, stale={stale}")
     if stale:
-        db.set_session("active_concept_id", None)
-        db.set_session("active_concept_ids", None)
-        db.set_session("quiz_anchor_concept_id", None)
+        from services.tools_assess import clear_quiz_state
+
+        clear_quiz_state()
         logger.debug("[quiz_anchor] CLEARED by staleness check")
         return
 
@@ -407,7 +405,7 @@ def build_prompt_context(
     user_message: str, mode: str = "command", is_new_session: bool = True
 ) -> str:
     """Build only the dynamic context (no AGENTS.md/preferences content).
-    Used by the pipeline which tells kimi-cli to read AGENTS.md by file path.
+    Used by the pipeline before it sends the assembled prompt to the provider.
     Note: user_message is NOT included here — the pipeline appends it separately
     to avoid duplication."""
     lightweight = build_lightweight_context(mode, is_new_session=is_new_session)
@@ -457,6 +455,21 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
         for r in detail["remarks"][:3]:
             parts.append(f"  - [{r['created_at']}] {r['content']}")
 
+    if detail.get("last_quiz_generator_output"):
+        try:
+            last_generated = json.loads(detail["last_quiz_generator_output"])
+            parts.append("\nLast quiz generation:")
+            if last_generated.get("question_type"):
+                parts.append(f"  Type: {last_generated['question_type']}")
+            if last_generated.get("target_facet"):
+                parts.append(f"  Facet: {last_generated['target_facet']}")
+            if last_generated.get("difficulty") is not None:
+                parts.append(f"  Difficulty: {last_generated['difficulty']}/100")
+            if last_generated.get("reasoning"):
+                parts.append(f"  Reasoning: {last_generated['reasoning'][:300]}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parts.append("\nLast quiz generation: [unparseable cached output]")
+
     if detail.get("recent_reviews"):
         parts.append("\nRecent reviews:")
         for r in detail["recent_reviews"]:
@@ -466,6 +479,15 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
             parts.append(f"  - Q: {q[:200]}")
             parts.append(f"    A: {a[:200]}")
             parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
+            metadata = []
+            if r.get("question_type"):
+                metadata.append(f"type={r['question_type']}")
+            if r.get("target_facet"):
+                metadata.append(f"facet={r['target_facet']}")
+            if r.get("question_difficulty") is not None:
+                metadata.append(f"difficulty={r['question_difficulty']}")
+            if metadata:
+                parts.append(f"    Metadata: {', '.join(metadata)}")
 
     # --- Related concepts (enriched with description + recent reviews) ---
     relations = db.get_relations(concept_id)
@@ -859,9 +881,7 @@ def build_taxonomy_context() -> str:
         if not t:
             return []
         indent = "  " * depth
-        lines = [
-            f"{indent}[topic:{t['id']}] {t['title']} ({t['concept_count']} concepts)"
-        ]
+        lines = [f"{indent}[topic:{t['id']}] {t['title']} ({t['concept_count']} concepts)"]
         for child_id in sorted(children.get(node_id, [])):
             lines.extend(_render_tree(child_id, depth + 1, visited))
         return lines
@@ -892,9 +912,7 @@ def build_taxonomy_context() -> str:
         "and `link_topics` each under it.)\n"
     )
     for t in root_topics:
-        parts.append(
-            f"- [topic:{t['id']}] {t['title']}: {t['concept_count']} concepts"
-        )
+        parts.append(f"- [topic:{t['id']}] {t['title']}: {t['concept_count']} concepts")
     parts.append("")
 
     # Suppressed renames
@@ -910,12 +928,13 @@ def build_taxonomy_context() -> str:
             "Skip them entirely — do not mention, do not re-propose.)\n"
         )
         for r in rejected:
-            target_ref = f"[topic:{r['target_id']}]" if r["action"] == "update_topic" else \
-                         f"[concept:{r['target_id']}]"
-            title_note = f' → "{r["proposed_title"]}"' if r["proposed_title"] else ""
-            parts.append(
-                f"- {target_ref}{title_note} — rejected on {r['rejected_at'][:10]}"
+            target_ref = (
+                f"[topic:{r['target_id']}]"
+                if r["action"] == "update_topic"
+                else f"[concept:{r['target_id']}]"
             )
+            title_note = f' → "{r["proposed_title"]}"' if r["proposed_title"] else ""
+            parts.append(f"- {target_ref}{title_note} — rejected on {r['rejected_at'][:10]}")
         parts.append("")
 
     return "\n".join(parts)

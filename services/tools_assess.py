@@ -15,9 +15,28 @@ from services.tools import execute_action
 logger = logging.getLogger("tools")
 
 
+_QUIZ_STATE_KEYS = (
+    "active_concept_id",
+    "active_concept_ids",
+    "quiz_anchor_concept_id",
+    "pending_review",
+    "last_quiz_question",
+    "p1_question_type",
+    "p1_target_facet",
+    "p1_difficulty",
+)
+
+
 # ============================================================================
 # Quiz handlers
 # ============================================================================
+
+
+def clear_quiz_state(*, mark_answered: bool = False) -> None:
+    """Clear active quiz session state after the quiz is resolved or abandoned."""
+    for key in _QUIZ_STATE_KEYS:
+        db.set_session(key, None)
+    db.set_session("quiz_answered", "1" if mark_answered else None)
 
 
 def _handle_quiz(params: Dict) -> Tuple[str, Any]:
@@ -318,8 +337,24 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     # Clear pending review state — the quiz has been answered
     db.set_session("pending_review", None)
 
+    p1_question_type = db.get_session("p1_question_type")
+    p1_target_facet = db.get_session("p1_target_facet")
+    p1_difficulty_raw = db.get_session("p1_difficulty")
+    p1_difficulty = (
+        int(p1_difficulty_raw) if p1_difficulty_raw and p1_difficulty_raw.isdigit() else None
+    )
+
     # Log the review
-    db.add_review(cid, question, user_response, quality, assessment)
+    db.add_review(
+        cid,
+        question,
+        user_response,
+        quality,
+        assessment,
+        question_type=p1_question_type,
+        target_facet=p1_target_facet,
+        question_difficulty=p1_difficulty,
+    )
 
     # Add remark if provided
     if params.get("remark"):
@@ -471,12 +506,14 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
     if not concept:
         return {"error": f"Concept #{concept_id} not found"}
 
+    if not (db.get_session("quiz_anchor_concept_id") or db.get_session("active_concept_ids")):
+        return {"error": "No active quiz to skip"}
+
     if concept.get("review_count", 0) < 2:
         return {"error": "Need at least 2 reviews before skipping"}
 
     # Race guard: prevent double-processing if user already answered
     if db.get_session("quiz_answered"):
-        db.set_session("quiz_answered", None)
         return {"error": "Quiz already answered or skipped"}
 
     current_score = concept.get("mastery_level", 0)
@@ -506,8 +543,21 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
 
     # Log the review
     stored_question = db.get_session("last_quiz_question") or "(question not stored)"
+    p1_question_type = db.get_session("p1_question_type")
+    p1_target_facet = db.get_session("p1_target_facet")
+    p1_difficulty_raw = db.get_session("p1_difficulty")
+    p1_difficulty = (
+        int(p1_difficulty_raw) if p1_difficulty_raw and p1_difficulty_raw.isdigit() else None
+    )
     db.add_review(
-        concept_id, stored_question, "[Skipped]", 5, "Skipped by user — claimed confident recall"
+        concept_id,
+        stored_question,
+        "[Skipped]",
+        5,
+        "Skipped by user — claimed confident recall",
+        question_type=p1_question_type,
+        target_facet=p1_target_facet,
+        question_difficulty=p1_difficulty,
     )
 
     # Synthetic remark preserves LLM strategy continuity
@@ -522,10 +572,7 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
     db.set_session("last_assess_quality", "5")
 
     # Clean up session state
-    db.set_session("pending_review", None)
-    db.set_session("quiz_anchor_concept_id", None)
-    db.set_session("last_quiz_question", None)
-    db.set_session("quiz_answered", "1")
+    clear_quiz_state(mark_answered=True)
 
     # Audit trail
     db.log_action(

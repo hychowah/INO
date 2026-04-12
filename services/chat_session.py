@@ -218,7 +218,11 @@ def _action_proposal_actions(
                 "buttons": [
                     _proposal_button(
                         "Approve",
-                        {"kind": "apply_maintenance_actions", "actions": [action_data], "source": source},
+                        {
+                            "kind": "apply_maintenance_actions",
+                            "actions": [action_data],
+                            "source": source,
+                        },
                         style="primary",
                     ),
                     _proposal_button(
@@ -339,7 +343,9 @@ def _derive_actions(action_data: dict | None, reply: str) -> list[dict]:
     return []
 
 
-def _maintenance_review_actions(dedup_groups: list[dict], proposed_actions: list[dict]) -> list[dict]:
+def _maintenance_review_actions(
+    dedup_groups: list[dict], proposed_actions: list[dict]
+) -> list[dict]:
     actions = []
     if dedup_groups:
         actions.extend(_dedup_proposal_actions(dedup_groups))
@@ -458,7 +464,7 @@ async def _handle_review_command(raw_text: str, author: str = "chat", source: st
                 raise LLMError("No concept_id in payload", retryable=True)
         except LLMError:
             llm_response = await pipeline.call_with_fetch_loop(
-                mode="reply",
+                mode="review-check",
                 text=review_text,
                 author=author,
             )
@@ -467,7 +473,9 @@ async def _handle_review_command(raw_text: str, author: str = "chat", source: st
         _msg_type, response = process_output(final_result)
         response = response.strip() if response else "Could not generate a review quiz. Try again?"
         db.set_session("last_quiz_question", response)
-        return _response(response, actions=_quiz_question_actions(cid, (p1_result or {}).get("choices")))
+        return _response(
+            response, actions=_quiz_question_actions(cid, (p1_result or {}).get("choices"))
+        )
     finally:
         db.set_session("review_in_progress", None)
 
@@ -672,11 +680,15 @@ async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
         if dedup_groups:
             dedup_summaries = await execute_dedup_merges(dedup_groups)
             if dedup_summaries:
-                parts.append("Applied dedup changes:\n" + "\n".join(f"- {s}" for s in dedup_summaries))
+                parts.append(
+                    "Applied dedup changes:\n" + "\n".join(f"- {s}" for s in dedup_summaries)
+                )
         if proposed_actions:
             maint_summaries = await pipeline.execute_maintenance_actions(proposed_actions)
             if maint_summaries:
-                parts.append("Applied maintenance changes:\n" + "\n".join(f"- {s}" for s in maint_summaries))
+                parts.append(
+                    "Applied maintenance changes:\n" + "\n".join(f"- {s}" for s in maint_summaries)
+                )
         summary = "\n\n".join(parts) if parts else "No maintenance changes were applied."
         db.add_chat_message("user", confirmation_history_entry(action_data))
         db.add_chat_message("assistant", summary)
@@ -750,7 +762,8 @@ async def handle_chat_action(action: dict, author: str = "chat", source: str = "
         summaries = await pipeline.execute_maintenance_actions(actions)
         source_label = str(action.get("source", "maintenance")).title()
         summary = (
-            f"Applied {source_label.lower()} changes:\n" + "\n".join(f"- {line}" for line in summaries)
+            f"Applied {source_label.lower()} changes:\n"
+            + "\n".join(f"- {line}" for line in summaries)
             if summaries
             else f"No {source_label.lower()} changes were applied."
         )

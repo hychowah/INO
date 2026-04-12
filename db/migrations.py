@@ -327,5 +327,18 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 13: users table")
 
+    # --- Migration 14: structured quiz metadata on review_log ---
+    if current < 14:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        if not _core._has_column("review_log", "question_type"):
+            conn.execute("ALTER TABLE review_log ADD COLUMN question_type TEXT")
+        if not _core._has_column("review_log", "target_facet"):
+            conn.execute("ALTER TABLE review_log ADD COLUMN target_facet TEXT")
+        if not _core._has_column("review_log", "question_difficulty"):
+            conn.execute("ALTER TABLE review_log ADD COLUMN question_difficulty INTEGER")
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 14: review_log quiz metadata columns")
+
     _core._set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

@@ -11,7 +11,7 @@ This guide walks you through setting up a fully functional local development env
 | git | any | |
 | Node.js | 18+ | Required for the React frontend (`npm`) |
 | Discord account | — | Required for bot testing |
-| LLM API key | — | `kimi` CLI or any OpenAI-compatible provider |
+| LLM API key | — | Any OpenAI-compatible provider |
 
 ---
 
@@ -71,14 +71,10 @@ Open `.env` and fill in the required values:
 
 ```ini
 # LLM backend (required)
-# For kimi CLI: set LEARN_LLM_PROVIDER=kimi or omit it entirely.
-LEARN_LLM_PROVIDER=kimi
-
-# For OpenAI-compatible providers instead, use:
-# LEARN_LLM_PROVIDER=openai_compat
-# LEARN_LLM_BASE_URL=https://api.x.ai/v1
-# LEARN_LLM_API_KEY=your-api-key
-# LEARN_LLM_MODEL=grok-3
+LEARN_LLM_PROVIDER=openai_compat
+LEARN_LLM_BASE_URL=https://api.x.ai/v1
+LEARN_LLM_API_KEY=your-api-key
+LEARN_LLM_MODEL=grok-3
 
 # Discord (required for bot)
 LEARN_BOT_TOKEN=your-discord-bot-token
@@ -307,7 +303,7 @@ Run `pip install -r requirements.txt` inside your active virtual environment.
 ### Tests fail with `KeyError` on env vars
 The test suite sets safe dummy values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID`. If you run pytest directly, set them:
 ```bash
-LEARN_LLM_PROVIDER=kimi LEARN_AUTHORIZED_USER_ID=123456789 pytest tests/
+LEARN_LLM_PROVIDER=openai_compat LEARN_LLM_BASE_URL=https://api.test/v1 LEARN_LLM_API_KEY=test-key LEARN_LLM_MODEL=test-model LEARN_AUTHORIZED_USER_ID=123456789 pytest tests/
 ```
 Or use `make test`, which injects the same safe defaults automatically.
 

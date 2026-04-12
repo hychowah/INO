@@ -232,7 +232,9 @@ class TestQuizAnchorClearing:
         db.set_session("quiz_anchor_concept_id", str(cid))
 
         # Simulate stale timestamp (20 min ago, UTC — matches _is_quiz_stale comparison)
-        stale_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+        stale_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20)
+        ).strftime("%Y-%m-%d %H:%M:%S")
         with patch.object(db, "get_session_updated_at", return_value=stale_time):
             parts = []
             ctx._append_active_quiz_context(parts)
@@ -666,3 +668,33 @@ class TestSkipQuizButtonRegression:
         assert db.get_session("quiz_anchor_concept_id") is None
         assert db.get_session("quiz_answered") == "1"
         assert db.get_session("last_assess_concept_id") == str(cid)
+
+    def test_skip_quiz_clears_stale_active_concept(self, test_db):
+        """Successful skip clears active_concept_id alongside the quiz anchor."""
+        cid = db.add_concept("Skip Cleanup", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session("active_concept_id", str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
+        db.set_session("last_quiz_question", "What do you remember?")
+
+        result = skip_quiz(cid)
+
+        assert "error" not in result
+        assert db.get_session("active_concept_id") is None
+        assert db.get_session("quiz_anchor_concept_id") is None
+
+    def test_skip_quiz_blocked_when_no_active_quiz(self, test_db):
+        """Stale skip callbacks are blocked once quiz anchor state is gone."""
+        cid = db.add_concept("Stale Skip", "Desc")
+        db.update_concept(cid, review_count=3, mastery_level=40)
+        db.set_session("active_concept_id", str(cid))
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_ids", None)
+        db.set_session("quiz_answered", "1")
+
+        result = skip_quiz(cid)
+
+        assert result == {"error": "No active quiz to skip"}
+        concept = db.get_concept(cid)
+        assert concept["mastery_level"] == 40
+        assert concept["review_count"] == 3

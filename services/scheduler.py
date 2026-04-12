@@ -212,12 +212,12 @@ async def _send_review_reminder(pending: dict):
 
 async def _send_review_quiz(payload: str):
     """
-    Send a review quiz DM using the two-prompt pipeline.
+    Send a review quiz DM using the structured P1 generation flow.
     payload format: concept_id|context_string
 
     Prompt 1 (reasoning model): Generates the optimal question from pre-loaded data.
-    Prompt 2 (fast model): Packages it with persona voice and action JSON format.
-    Falls back to single-prompt flow if the two-prompt pipeline fails.
+    Delivery stage: Deterministically formats the P1 output for user delivery.
+    Falls back to single-prompt review-check flow if Prompt 1 fails.
     """
     if not _bot or not _authorized_user_id:
         logger.error("Bot not initialized, can't send review")
@@ -262,7 +262,7 @@ async def _send_review_quiz(payload: str):
                     f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
                 )
                 llm_response = await pipeline.call_with_fetch_loop(
-                    mode="reply",
+                    mode="review-check",
                     text=review_text,
                     author=str(_authorized_user_id),
                 )
@@ -380,9 +380,7 @@ async def _check_maintenance():
 async def _send_maintenance_report(diagnostic_context: str):
     """Send diagnostic context to the LLM for triage, then DM the report."""
     try:
-        final_result, proposed_actions = await pipeline.call_maintenance_loop(
-            diagnostic_context
-        )
+        final_result, proposed_actions = await pipeline.call_maintenance_loop(diagnostic_context)
         await _send_mode_report(
             mode_label="Knowledge Base Maintenance",
             icon="🔧",

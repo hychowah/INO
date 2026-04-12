@@ -117,7 +117,9 @@ def find_concept_by_title(title: str, *, user_id: Optional[str] = None) -> Optio
     """Find a concept by exact title (case-insensitive). Returns concept with topic_ids or None."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM concepts WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM concepts WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)
+    ).fetchone()
     if not row:
         conn.close()
         return None
@@ -134,7 +136,9 @@ def get_concept(concept_id: int, *, user_id: Optional[str] = None) -> Optional[D
     """Get a single concept by ID with its topic IDs."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)
+    ).fetchone()
     if not row:
         conn.close()
         return None
@@ -272,7 +276,9 @@ def get_concepts_for_topic(topic_id: int, *, user_id: Optional[str] = None) -> L
     return [dict(r) for r in rows]
 
 
-def get_due_concepts(limit: int = 10, offset: int = 0, *, user_id: Optional[str] = None) -> List[Dict]:
+def get_due_concepts(
+    limit: int = 10, offset: int = 0, *, user_id: Optional[str] = None
+) -> List[Dict]:
     """Get concepts due for review (next_review_at <= now), ordered by most overdue."""
     uid = user_id or _uid()
     conn = _conn()
@@ -308,7 +314,8 @@ def get_next_review_concept(*, user_id: Optional[str] = None) -> Optional[Dict]:
     a scheduled review."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("""
+    row = conn.execute(
+        """
         SELECT c.*,
                c.remark_summary AS latest_remark,
                GROUP_CONCAT(ct.topic_id) as topic_id_list
@@ -318,7 +325,9 @@ def get_next_review_concept(*, user_id: Optional[str] = None) -> Optional[Dict]:
         GROUP BY c.id
         ORDER BY c.next_review_at ASC
         LIMIT 1
-    """, (uid,)).fetchone()
+    """,
+        (uid,),
+    ).fetchone()
     conn.close()
 
     if not row:
@@ -329,7 +338,9 @@ def get_next_review_concept(*, user_id: Optional[str] = None) -> Optional[Dict]:
     return d
 
 
-def get_all_concepts_summary(limit: int | None = None, offset: int = 0, *, user_id: Optional[str] = None) -> List[Dict]:
+def get_all_concepts_summary(
+    limit: int | None = None, offset: int = 0, *, user_id: Optional[str] = None
+) -> List[Dict]:
     """Get all concepts with title, description, review count, topic names/IDs,
     and scheduling fields. Used by dedup agent and graph visualization.
     Optional limit/offset for paginated access."""
@@ -428,13 +439,16 @@ def get_due_forecast(range_type: str = "weeks", *, user_id: Optional[str] = None
     today = datetime.now().date().isoformat()
 
     # --- Overdue bucket ---
-    overdue_row = conn.execute("""
+    overdue_row = conn.execute(
+        """
         SELECT COUNT(*) as cnt, COALESCE(AVG(mastery_level), 0) as avg_m
         FROM concepts
         WHERE next_review_at IS NOT NULL
           AND DATE(next_review_at) < DATE(?)
           AND user_id = ?
-    """, (today, uid)).fetchone()
+    """,
+        (today, uid),
+    ).fetchone()
     overdue_count = overdue_row["cnt"] if overdue_row else 0
     # Not included in main buckets list — returned separately for chart rendering
 
@@ -453,7 +467,7 @@ def get_due_forecast(range_type: str = "weeks", *, user_id: Optional[str] = None
                             AND DATE(next_review_at) < DATE(?, ? || ' days')
                             AND user_id = ?
                         """,
-                        (today, str(start_offset), today, str(end_offset), uid),
+            (today, str(start_offset), today, str(end_offset), uid),
         ).fetchone()
 
         count = row["cnt"] if row else 0
@@ -500,7 +514,9 @@ def get_due_forecast(range_type: str = "weeks", *, user_id: Optional[str] = None
     }
 
 
-def get_forecast_bucket_concepts(range_type: str, bucket_key: str, *, user_id: Optional[str] = None) -> List[Dict]:
+def get_forecast_bucket_concepts(
+    range_type: str, bucket_key: str, *, user_id: Optional[str] = None
+) -> List[Dict]:
     """Return full concept list for one forecast bucket (for on-click detail).
 
     bucket_key "overdue" → concepts where next_review_at < today
@@ -522,7 +538,8 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str, *, user_id: O
     today = datetime.now().date().isoformat()
 
     if bucket_key == "overdue":
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT c.id, c.title, c.mastery_level, c.next_review_at,
                    c.interval_days, c.review_count
             FROM concepts c
@@ -530,7 +547,9 @@ def get_forecast_bucket_concepts(range_type: str, bucket_key: str, *, user_id: O
               AND DATE(c.next_review_at) < DATE(?)
               AND c.user_id = ?
             ORDER BY c.mastery_level ASC
-        """, (today, uid)).fetchall()
+        """,
+            (today, uid),
+        ).fetchall()
     else:
         try:
             i = int(bucket_key)
@@ -564,13 +583,16 @@ def get_all_concepts_with_topics(*, user_id: Optional[str] = None) -> List[Dict]
     uid = user_id or _uid()
     conn = _conn()
     # Main concept query
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT c.*,
                c.remark_summary AS latest_remark
         FROM concepts c
         WHERE c.user_id = ?
         ORDER BY c.next_review_at ASC NULLS LAST
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # Topic links — fetch all at once (faster than N+1)
     topic_links = conn.execute("""
@@ -725,7 +747,8 @@ def get_concept_detail(concept_id: int, *, user_id: Optional[str] = None) -> Opt
 
     reviews = conn.execute(
         """
-        SELECT id, question_asked, user_response, quality, llm_assessment, reviewed_at
+        SELECT id, question_asked, user_response, quality, llm_assessment, reviewed_at,
+               question_type, target_facet, question_difficulty
         FROM review_log
         WHERE concept_id = ? ORDER BY id DESC LIMIT 5
     """,

@@ -224,7 +224,7 @@ See `.env.example` for the full list. Key variables:
 
 | Variable | Purpose |
 |----------|---------|
-| `LEARN_LLM_PROVIDER` | LLM backend (`kimi` or `openai_compat`) |
+| `LEARN_LLM_PROVIDER` | LLM backend (`openai_compat`) |
 | `LEARN_LLM_MODEL` | Model name for the OpenAI-compatible backend |
 | `LEARN_LLM_API_KEY` | API key for the OpenAI-compatible backend |
 | `LEARN_LLM_BASE_URL` | Base URL for the OpenAI-compatible backend |

@@ -61,7 +61,9 @@ def get_latest_remark(concept_id: int, *, user_id: Optional[str] = None) -> Opti
     """Get the remark summary for a concept (cached on concepts table)."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT remark_summary FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)).fetchone()
+    row = conn.execute(
+        "SELECT remark_summary FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)
+    ).fetchone()
     conn.close()
     return row["remark_summary"] if row else None
 
@@ -72,17 +74,37 @@ def get_latest_remark(concept_id: int, *, user_id: Optional[str] = None) -> Opti
 
 
 def add_review(
-    concept_id: int, question_asked: str, user_response: str, quality: int, llm_assessment: str,
-    *, user_id: Optional[str] = None,
+    concept_id: int,
+    question_asked: str,
+    user_response: str,
+    quality: int,
+    llm_assessment: str,
+    *,
+    user_id: Optional[str] = None,
+    question_type: Optional[str] = None,
+    target_facet: Optional[str] = None,
+    question_difficulty: Optional[int] = None,
 ) -> int:
     """Log a review/quiz result. Returns the review ID."""
     uid = user_id or _uid()
     conn = _conn()
     cursor = conn.execute(
         """INSERT INTO review_log
-           (concept_id, question_asked, user_response, quality, llm_assessment, reviewed_at, user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (concept_id, question_asked, user_response, quality, llm_assessment, _now_iso(), uid),
+           (concept_id, question_asked, user_response, quality, llm_assessment,
+            reviewed_at, user_id, question_type, target_facet, question_difficulty)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            concept_id,
+            question_asked,
+            user_response,
+            quality,
+            llm_assessment,
+            _now_iso(),
+            uid,
+            question_type,
+            target_facet,
+            question_difficulty,
+        ),
     )
     review_id = cursor.lastrowid
     conn.commit()
@@ -90,7 +112,9 @@ def add_review(
     return review_id
 
 
-def get_recent_reviews(concept_id: int, limit: int = 5, *, user_id: Optional[str] = None) -> List[Dict]:
+def get_recent_reviews(
+    concept_id: int, limit: int = 5, *, user_id: Optional[str] = None
+) -> List[Dict]:
     """Get recent review log entries for a concept."""
     uid = user_id or _uid()
     conn = _conn()
@@ -129,14 +153,20 @@ def get_review_stats(*, user_id: Optional[str] = None) -> Dict[str, Any]:
     uid = user_id or _uid()
     conn = _conn()
 
-    total_concepts = conn.execute("SELECT COUNT(*) FROM concepts WHERE user_id = ?", (uid,)).fetchone()[0]
-    total_reviews = conn.execute("SELECT COUNT(*) FROM review_log WHERE user_id = ?", (uid,)).fetchone()[0]
+    total_concepts = conn.execute(
+        "SELECT COUNT(*) FROM concepts WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
+    total_reviews = conn.execute(
+        "SELECT COUNT(*) FROM review_log WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
     due_now = conn.execute(
         "SELECT COUNT(*) FROM concepts WHERE next_review_at IS NOT NULL AND next_review_at <= ? AND user_id = ?",
         (_now_iso(), uid),
     ).fetchone()[0]
 
-    avg_row = conn.execute("SELECT AVG(mastery_level) as avg FROM concepts WHERE user_id = ?", (uid,)).fetchone()
+    avg_row = conn.execute(
+        "SELECT AVG(mastery_level) as avg FROM concepts WHERE user_id = ?", (uid,)
+    ).fetchone()
     avg_mastery = round(avg_row["avg"], 1) if avg_row["avg"] is not None else 0.0
 
     week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")

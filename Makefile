@@ -5,11 +5,11 @@ test: test-all
 
 # Run only pure unit tests (fast feedback, no DB or network)
 test-fast:
-	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', '-m', 'unit'], env=env))"
+	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'openai_compat'); env.setdefault('LEARN_LLM_BASE_URL', 'https://api.test/v1'); env.setdefault('LEARN_LLM_API_KEY', 'test-key'); env.setdefault('LEARN_LLM_MODEL', 'test-model'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', '-m', 'unit'], env=env))"
 
 # Run the full test suite
 test-all:
-	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/'], env=env))"
+	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'openai_compat'); env.setdefault('LEARN_LLM_BASE_URL', 'https://api.test/v1'); env.setdefault('LEARN_LLM_API_KEY', 'test-key'); env.setdefault('LEARN_LLM_MODEL', 'test-model'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/'], env=env))"
 
 # Run the React chat frontend tests
 test-ui:
