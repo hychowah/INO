@@ -244,6 +244,18 @@ def _has_column(table: str, column: str, db_path=None) -> bool:
     return column in columns
 
 
+def _has_table(table: str, db_path=None) -> bool:
+    """Check if a table exists in a database (safe for migrations).
+    Uses KNOWLEDGE_DB by default; pass db_path for other databases."""
+    conn = sqlite3.connect(db_path or KNOWLEDGE_DB)
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    )
+    result = cursor.fetchone() is not None
+    conn.close()
+    return result
+
+
 def _run_migrations():
     """Run all pending migrations. Delegated to db.migrations module."""
     from db.migrations import _run_migrations as _do_migrations
