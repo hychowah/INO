@@ -15,7 +15,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
 - **Multiple interfaces** — Discord bot, FastAPI REST API, and the local Web UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard + chat** — FastAPI-served local UI with interactive dashboard pages, a React chat shell, and legacy D3.js graph/tree views
+- **Web dashboard + React SPA** — FastAPI-served local UI with React routes for dashboard, chat, and reviews plus legacy D3.js graph/tree views still being migrated
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -120,15 +120,15 @@ Then run:
 ```bash
 python bot.py          # Discord bot (+ local companion UI on :8050)
 python api.py          # FastAPI app on http://localhost:8080
-make build-ui          # Optional: rebuild the React chat assets before running api.py
-make dev-ui            # Optional: Vite dev server for chat UI development on :5173
+make build-ui          # Optional: rebuild the React SPA assets before running api.py
+make dev-ui            # Optional: Vite dev server for SPA development on :5173
 make dev-all           # API + Vite dev server + Discord bot together
 ```
 
 Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
-- If `frontend/dist/` exists, `/chat` serves the built React client; otherwise it falls back to the legacy server-rendered chat page.
+- If `frontend/dist/` exists, `/`, `/chat`, and `/reviews` serve the built React SPA; otherwise FastAPI falls back to the legacy server-rendered pages for those routes.
 - `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/` and proxies backend requests to the FastAPI app on port 8080.
 - `python bot.py` still starts a local companion web UI on port 8050 for the Discord flow.
 - `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
@@ -285,9 +285,9 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── schemas.py          # Request/response models
 │   └── routes/             # API and page routers
 ├── config.py               # Environment-based configuration
-├── frontend/               # React/Vite chat frontend
-│   ├── src/                # React app, API client, styles, frontend tests
-│   ├── dist/               # Built chat assets served by FastAPI when present
+├── frontend/               # React/Vite SPA frontend
+│   ├── src/                # React routes, pages, API client, styles, frontend tests
+│   ├── dist/               # Built SPA assets served by FastAPI when present
 │   └── vite.config.ts      # Dev server and proxy config
 ├── services/
 │   ├── pipeline.py         # Core orchestrator (context → LLM → parse → execute)
@@ -299,6 +299,7 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── embeddings.py       # Sentence-transformers singleton
 │   ├── dedup.py            # Duplicate detection (vector + fuzzy)
 │   ├── backup.py           # Snapshot backup service (DB + vectors)
+│   ├── chat_session.py     # Shared chat-session controller used by FastAPI and legacy WebUI
 │   └── ...
 ├── db/                     # Database package (SQLite + Qdrant)
 │   ├── core.py             # Connections, schema init
@@ -317,7 +318,7 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── taxonomy_shadow_rebuild.py  # Manual taxonomy preview/apply workflow
 │   └── ...
 ├── webui/                  # Legacy server-rendered web UI pieces still used by FastAPI/bot flows
-│   ├── chat_backend.py     # Shared web chat backend and action protocol helpers
+│   ├── chat_backend.py     # Compatibility alias to services/chat_session.py for legacy imports
 │   ├── helpers.py          # HTML layout helpers
 │   ├── pages/              # Server-rendered page generators
 │   └── static/             # Shared CSS and legacy browser JS

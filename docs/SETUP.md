@@ -197,23 +197,25 @@ make run-api
 - API docs: `http://localhost:8080/docs`
 - Health check: `http://localhost:8080/api/health`
 
-### React Chat Frontend (Vite dev server)
+### React Frontend (Vite dev server)
 
 ```bash
 make dev-ui
 # equivalent to: cd frontend && npm run dev
 ```
 
-- Opens the React chat UI at `http://127.0.0.1:5173`
+- Opens the React SPA at `http://127.0.0.1:5173`
 - The dev server proxies `/api/*` and page paths (`/chat`, `/topics`, `/concepts`, etc.) to FastAPI on `http://127.0.0.1:8080`
 - Requires the FastAPI backend (`make run-api`) to be running
 
-To build the production frontend (FastAPI serves it at `http://localhost:8080/chat`):
+To build the production frontend (FastAPI serves the built SPA on `http://localhost:8080/`, `http://localhost:8080/chat`, and `http://localhost:8080/reviews`):
 
 ```bash
 make build-ui
 # equivalent to: cd frontend && npm run build
 ```
+
+These same frontend commands are also exercised in `.github/workflows/frontend.yml` (`test` + `build`) so local validation matches CI.
 
 ### Run Everything at Once
 

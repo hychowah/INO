@@ -1,5 +1,7 @@
 """Concept CRUD endpoints."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import db
@@ -12,6 +14,53 @@ from api.schemas import (
 from services.tools import set_action_source
 
 router = APIRouter()
+
+_CONCEPT_SORT_FIELDS = {
+    "id",
+    "title",
+    "mastery_level",
+    "interval_days",
+    "review_count",
+    "next_review_at",
+    "last_reviewed_at",
+}
+
+
+def _normalize_concept_list_item(
+    item: dict,
+    topic_lookup: dict[int, dict],
+    topic_id_hint: int | None = None,
+) -> dict:
+    normalized = dict(item)
+    normalized["latest_remark"] = normalized.get("latest_remark") or normalized.get("remark_summary")
+
+    if "topics" in normalized and isinstance(normalized["topics"], list):
+        normalized["topic_ids"] = [int(topic["id"]) for topic in normalized["topics"] if "id" in topic]
+        return normalized
+
+    topic_ids = normalized.get("topic_ids")
+    if not topic_ids:
+        concept = db.get_concept(normalized["id"])
+        topic_ids = concept.get("topic_ids", []) if concept else ([] if topic_id_hint is None else [topic_id_hint])
+
+    normalized["topic_ids"] = [int(topic_id) for topic_id in topic_ids]
+    normalized["topics"] = [
+        {"id": topic_id, "title": topic_lookup[topic_id]["title"]}
+        for topic_id in normalized["topic_ids"]
+        if topic_id in topic_lookup
+    ]
+    return normalized
+
+
+def _concept_sort_value(item: dict, field: str):
+    value = item.get(field)
+    if field in {"next_review_at", "last_reviewed_at"}:
+        if not value:
+            return datetime.max
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    if field == "title":
+        return str(value or "").lower()
+    return value if value is not None else -1
 
 
 @router.get("/api/concepts/{concept_id}", dependencies=[Depends(verify_token)])
@@ -27,25 +76,33 @@ async def get_concept(concept_id: int):
 async def list_concepts(
     topic_id: int | None = None,
     search: str | None = None,
+    sort: str | None = None,
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
 ):
     """List concepts with optional filtering and pagination."""
+    if sort and sort not in _CONCEPT_SORT_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unsupported sort field '{sort}'")
+
     if search:
         all_items = db.search_concepts(query=search, limit=per_page * page)
-        total = len(all_items)
-        offset = (page - 1) * per_page
-        items = all_items[offset : offset + per_page]
     elif topic_id is not None:
         all_items = db.get_concepts_for_topic(topic_id)
-        total = len(all_items)
-        offset = (page - 1) * per_page
-        items = all_items[offset : offset + per_page]
     else:
         all_items = db.get_all_concepts_with_topics()
-        total = len(all_items)
-        offset = (page - 1) * per_page
-        items = all_items[offset : offset + per_page]
+
+    topic_lookup = {topic["id"]: topic for topic in db.get_all_topics()}
+    normalized_items = [
+        _normalize_concept_list_item(item, topic_lookup, topic_id_hint=topic_id)
+        for item in all_items
+    ]
+    if sort:
+        normalized_items.sort(key=lambda item: _concept_sort_value(item, sort), reverse=order == "desc")
+
+    total = len(normalized_items)
+    offset = (page - 1) * per_page
+    items = normalized_items[offset : offset + per_page]
 
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 

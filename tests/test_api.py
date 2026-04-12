@@ -5,6 +5,7 @@ Covers all CRUD endpoints: concepts, topics, relations, reviews, actions, graph.
 Uses the shared test_db fixture for DB isolation and httpx AsyncClient for requests.
 """
 
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -360,7 +361,48 @@ class TestChat:
         ]
 
 
+class TestMiscEndpoints:
+    @pytest.mark.anyio
+    async def test_action_summary_returns_recent_counts(self, client):
+        db.log_action("add_concept", {}, "success", "ok")
+        db.log_action("add_concept", {}, "success", "ok")
+        db.log_action("assess", {}, "success", "ok")
+
+        resp = await client.get("/api/action-summary?days=7")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "days": 7,
+            "total": 3,
+            "today_total": 3,
+            "by_action": {"add_concept": 2, "assess": 1},
+            "today_by_action": {"add_concept": 2, "assess": 1},
+        }
+
+
 class TestLegacyPages:
+    @pytest.mark.anyio
+    async def test_dashboard_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '📋 Recent Activity' in resp.text
+
+    @pytest.mark.anyio
+    async def test_dashboard_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react dashboard</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react dashboard</div>' in resp.text
+
     @pytest.mark.anyio
     async def test_chat_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
@@ -383,6 +425,28 @@ class TestLegacyPages:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert '<div id="root">react chat</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_reviews_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/reviews")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert 'No reviews yet. Start learning and get quizzed!' in resp.text
+
+    @pytest.mark.anyio
+    async def test_reviews_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react reviews</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/reviews")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react reviews</div>' in resp.text
 
     @pytest.mark.anyio
     async def test_static_style_served_by_fastapi(self, client):
@@ -411,6 +475,14 @@ class TestLegacyPages:
         assert resp.json() == {"ok": True}
         assert db.get_concept(concept_id) is None
 
+    @pytest.mark.anyio
+    async def test_actions_page_forwards_full_query_string_to_legacy_renderer(self, client):
+        with patch("api.routes.pages.page_actions", return_value="<html>ok</html>") as mock_page_actions:
+            resp = await client.get("/actions?action=assess&source=api&q=rust&time=7d&page=2")
+
+        assert resp.status_code == 200
+        mock_page_actions.assert_called_once_with("action=assess&source=api&q=rust&time=7d&page=2")
+
 
 # ============================================================================
 # Topic CRUD
@@ -418,6 +490,37 @@ class TestLegacyPages:
 
 
 class TestTopicCRUD:
+    @pytest.mark.anyio
+    async def test_get_topics_flat_returns_plain_topic_list(self, client):
+        _make_topic("Physics")
+        _make_topic("Math")
+
+        resp = await client.get("/api/topics/flat")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [topic["title"] for topic in data] == ["Math", "Physics"]
+
+    @pytest.mark.anyio
+    async def test_get_topic_map_returns_flat_dag_shape(self, client):
+        parent_id = _make_topic("Systems")
+        child_id = _make_topic("Operating Systems", parent_ids=[parent_id])
+        _make_concept("Processes", topic_id=child_id)
+
+        resp = await client.get("/api/topic-map")
+
+        assert resp.status_code == 200
+        data = resp.json()
+
+        parent = next(topic for topic in data if topic["id"] == parent_id)
+        child = next(topic for topic in data if topic["id"] == child_id)
+
+        assert parent["child_ids"] == [child_id]
+        assert parent["parent_ids"] == []
+        assert child["parent_ids"] == [parent_id]
+        assert child["child_ids"] == []
+        assert child["concept_count"] == 1
+
     @pytest.mark.anyio
     async def test_get_topics_empty(self, client):
         resp = await client.get("/api/topics")
@@ -616,12 +719,17 @@ class TestConceptCRUD:
     async def test_list_concepts_filter_by_topic(self, client):
         t1 = _make_topic("T1")
         t2 = _make_topic("T2")
-        _make_concept("In T1", topic_id=t1)
+        cid = _make_concept("In T1", topic_id=t1)
+        db.link_concept(cid, [t2])
         _make_concept("In T2", topic_id=t2)
         resp = await client.get(f"/api/concepts?topic_id={t1}")
         data = resp.json()
         assert data["total"] == 1
         assert data["items"][0]["title"] == "In T1"
+        assert data["items"][0]["topics"] == [
+            {"id": t1, "title": "T1"},
+            {"id": t2, "title": "T2"},
+        ]
 
     @pytest.mark.anyio
     async def test_list_concepts_search(self, client):
@@ -635,6 +743,7 @@ class TestConceptCRUD:
         titles = [i["title"] for i in data["items"]]
         assert "Quantum Mechanics" in titles
         assert "Classical Mechanics" in titles
+        assert all(item["topics"] == [{"id": tid, "title": "T"}] for item in data["items"])
 
     @pytest.mark.anyio
     async def test_list_concepts_pagination(self, client):
@@ -651,6 +760,20 @@ class TestConceptCRUD:
         resp2 = await client.get("/api/concepts?page=3&per_page=2")
         data2 = resp2.json()
         assert len(data2["items"]) == 1  # 5th item on page 3
+
+    @pytest.mark.anyio
+    async def test_list_concepts_supports_server_side_sort(self, client):
+        tid = _make_topic("T")
+        low_id = _make_concept("Low Score", topic_id=tid)
+        high_id = _make_concept("High Score", topic_id=tid)
+        db.update_concept(low_id, mastery_level=10)
+        db.update_concept(high_id, mastery_level=80)
+
+        resp = await client.get("/api/concepts?sort=mastery_level&order=desc")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [item["title"] for item in data["items"][:2]] == ["High Score", "Low Score"]
 
     @pytest.mark.anyio
     async def test_get_concept_detail(self, client):
@@ -896,10 +1019,17 @@ class TestRelations:
 
 class TestReviewsAndLogs:
     @pytest.mark.anyio
-    async def test_get_reviews_requires_concept_id(self, client):
+    async def test_get_reviews_without_concept_id_returns_global_log(self, client):
+        cid = _make_concept("Global Review Target")
+        db.add_review(cid, "What is X?", "X is Y", 4, "Correct")
+
         resp = await client.get("/api/reviews")
-        assert resp.status_code == 400
-        assert "concept_id" in resp.json()["detail"]
+
+        assert resp.status_code == 200
+        reviews = resp.json()
+        assert len(reviews) == 1
+        assert reviews[0]["concept_id"] == cid
+        assert reviews[0]["concept_title"] == "Global Review Target"
 
     @pytest.mark.anyio
     async def test_get_reviews_with_concept_id(self, client):
@@ -974,6 +1104,51 @@ class TestReviewsAndLogs:
         resp2 = await client.get("/api/actions?page=3&per_page=2")
         data2 = resp2.json()
         assert len(data2["items"]) == 1
+
+    @pytest.mark.anyio
+    async def test_get_actions_filter_by_search_query(self, client):
+        db.log_action("assess", {"concept_id": 1}, "success", "ownership review")
+        db.log_action("quiz", {"concept_id": 2}, "success", "done")
+
+        resp = await client.get("/api/actions?q=ownership")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["action"] == "assess"
+
+    @pytest.mark.anyio
+    async def test_get_actions_filter_by_time_window(self, client):
+        stale_id = db.log_action("assess", {}, "success", "old")
+        fresh_id = db.log_action("quiz", {}, "success", "new")
+
+        conn = db._conn()
+        conn.execute(
+            "UPDATE action_log SET created_at = ? WHERE id = ?",
+            ((datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S"), stale_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = await client.get("/api/actions?time=7d")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["id"] == fresh_id
+
+    @pytest.mark.anyio
+    async def test_get_action_filters_returns_distinct_values(self, client):
+        db.log_action("assess", {}, "success", "done", source="api")
+        db.log_action("quiz", {}, "success", "done", source="discord")
+
+        resp = await client.get("/api/actions/filters")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "actions": ["assess", "quiz"],
+            "sources": ["api", "discord"],
+        }
 
 
 # ============================================================================

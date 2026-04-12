@@ -32,7 +32,7 @@ If you see `No module named pytest` or any missing-import error, you forgot to a
 
 ## Project Overview
 
-A personal learning coach with spaced repetition. Two Python entry points share the same backend pipeline; the React/TypeScript frontend is a browser client that talks to the API:
+A personal learning coach with spaced repetition. Two Python entry points share the same backend pipeline; the React/TypeScript frontend is now a small SPA that talks to the API while legacy HTML pages are retired incrementally:
 
 ```
 bot.py  (Discord)  ─┬──┴────────────────────────────────────────────────────
@@ -94,6 +94,7 @@ ROOT
 │   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
+│   ├── chat_session.py    # Shared chat-session controller for FastAPI and legacy WebUI
 │   └── kimi.py            # kimi-cli specific helpers
 │
 ├── db/                    # Database layer (SQLite)
@@ -112,9 +113,10 @@ ROOT
 │   └── __init__.py        # Re-exports all public functions; VECTORS_AVAILABLE flag
 │
 ├── tests/                 # pytest test suite
-├── frontend/              # React/TypeScript/Vite chat frontend (dev :5173, built served by FastAPI :8080)
-│   ├── src/App.tsx        # Main chat shell — pending actions, request lock, action renderer
+├── frontend/              # React/TypeScript/Vite SPA frontend (dev :5173, built served by FastAPI :8080)
+│   ├── src/App.tsx        # Compatibility re-export for the chat page + navigation helper
 │   ├── src/App.test.tsx   # Frontend unit tests (Vitest + Testing Library)
+│   ├── src/routes.tsx     # SPA route ownership (`/`, `/chat`, `/reviews`)
 │   ├── src/types.ts       # Shared TypeScript types
 │   ├── src/api.ts         # API fetch helpers
 │   ├── vite.config.ts     # Vite dev server config + proxy rules to localhost:8080
@@ -122,7 +124,7 @@ ROOT
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, routing + Handler class
 │   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
-│   ├── chat_backend.py    # In-process WebUI chat backend (handle_webui_message, confirm_webui_action, decline_webui_action)
+│   ├── chat_backend.py    # Compatibility alias to services/chat_session.py for legacy imports/tests
 │   ├── pages/             # Page renderers package
 │   │   ├── chat.py        # page_chat — chat interface
 │   │   └── ...            # dashboard, topics, concepts, reviews, activity, graph

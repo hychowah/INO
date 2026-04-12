@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from webui.pages import (
@@ -22,16 +22,26 @@ router = APIRouter(include_in_schema=False)
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
+def _spa_entry_response() -> FileResponse | None:
+    spa_entry = FRONTEND_DIST / "index.html"
+    if spa_entry.exists():
+        return FileResponse(spa_entry)
+    return None
+
+
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_page():
+    spa_response = _spa_entry_response()
+    if spa_response is not None:
+        return spa_response
     return page_dashboard()
 
 
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_page():
-    spa_entry = FRONTEND_DIST / "index.html"
-    if spa_entry.exists():
-        return FileResponse(spa_entry)
+    spa_response = _spa_entry_response()
+    if spa_response is not None:
+        return spa_response
     return page_chat()
 
 
@@ -62,6 +72,9 @@ async def graph_page():
 
 @router.get("/reviews", response_class=HTMLResponse)
 async def reviews_page():
+    spa_response = _spa_entry_response()
+    if spa_response is not None:
+        return spa_response
     return page_reviews()
 
 
@@ -71,5 +84,5 @@ async def forecast_page():
 
 
 @router.get("/actions", response_class=HTMLResponse)
-async def actions_page(q: str = ""):
-    return page_actions(q)
+async def actions_page(request: Request):
+    return page_actions(str(request.url.query))

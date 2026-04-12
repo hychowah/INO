@@ -57,3 +57,50 @@ export type ChatBootstrap = {
   history: ChatEntry[];
   commands: Array<{ label: string; command: string }>;
 };
+
+export type ReviewStats = {
+  total_concepts: number;
+  total_reviews: number;
+  due_now: number;
+  avg_mastery: number;
+  reviews_last_7d: number;
+};
+
+export type DueConcept = {
+  id: number;
+  title: string;
+  mastery_level: number;
+  next_review_at?: string | null;
+  latest_remark?: string | null;
+  topic_ids?: number[];
+};
+
+export type ActionSummary = {
+  days: number;
+  total: number;
+  today_total: number;
+  by_action: Record<string, number>;
+  today_by_action: Record<string, number>;
+};
+
+export type ReviewLogEntry = {
+  id: number;
+  concept_id: number;
+  concept_title: string;
+  question_asked?: string | null;
+  user_response?: string | null;
+  quality?: number | null;
+  llm_assessment?: string | null;
+  reviewed_at?: string | null;
+};
+
+export type TopicMapNode = {
+  id: number;
+  title: string;
+  description?: string | null;
+  concept_count: number;
+  avg_mastery: number;
+  due_count: number;
+  parent_ids: number[];
+  child_ids: number[];
+};

@@ -1,10 +1,10 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-11
+> Last updated: 2026-04-12
 
 ## Overview
 
-The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access comes in two forms: a React/TypeScript/Vite chat frontend under `frontend/` (served by FastAPI on port 8080, or via Vite dev server on port 5173), and a companion web UI dashboard (`webui/server.py`) started alongside the Discord bot on port 8050.
+The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access now comes in two forms: a React/TypeScript/Vite frontend under `frontend/` that owns the FastAPI-served SPA routes `/`, `/chat`, and `/reviews` on port 8080 (or via the Vite dev server on port 5173), and a companion legacy web UI dashboard (`webui/server.py`) started alongside the Discord bot on port 8050 for the remaining server-rendered routes.
 
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
@@ -104,12 +104,13 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `services/chat_actions.py` | ~60 | Shared confirmation helpers and action whitelists used by FastAPI and Web UI chat flows |
+| `services/chat_session.py` | ~430 | Shared chat-session controller used by FastAPI and the legacy Web UI (`handle_webui_message`, confirm/decline/action helpers) |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
 | `webui/server.py` | ~220 | Zero-dependency HTTP server — routing, Handler class, static file serving, forecast routes |
 | `webui/helpers.py` | ~145 | HTML helpers (`score_bar`, `layout`, `_esc`, etc.) extracted from `server.py` |
-| `webui/chat_backend.py` | ~430 | In-process Web UI chat backend — `handle_webui_message`, `confirm_webui_action`, `decline_webui_action`; parallels FastAPI chat routes but runs without the REST server |
+| `webui/chat_backend.py` | ~20 | Compatibility alias to `services/chat_session.py` retained for the legacy Web UI server and existing tests |
 | **webui/pages/** | | Page renderers split into package modules (~950 total lines) |
 | `webui/pages/__init__.py` | ~25 | Re-exports all 11 page functions |
 | `webui/pages/chat.py` | ~? | `page_chat` — chat interface page renderer |
@@ -159,10 +160,15 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 | **frontend/** | | |
-| `frontend/src/App.tsx` | — | React 19 chat shell — pending actions, request lock, error rendering, `resolveBackendHref()` nav helper |
+| `frontend/src/routes.tsx` | — | React Router entry point — owns SPA routes for `/`, `/chat`, and `/reviews` |
+| `frontend/src/App.tsx` | — | Compatibility re-export for the chat page plus `resolveBackendHref()` |
+| `frontend/src/components/AppLayout.tsx` | — | Shared SPA navigation shell used by dashboard, chat, and review pages |
+| `frontend/src/pages/ChatPage.tsx` | — | React chat page — pending actions, request lock, structured UI action rendering |
+| `frontend/src/pages/DashboardPage.tsx` | — | React dashboard page backed by `/api/stats`, `/api/due`, `/api/action-summary`, and `/api/topic-map` |
+| `frontend/src/pages/ReviewsPage.tsx` | — | React review-log page backed by `/api/reviews` |
 | `frontend/src/App.test.tsx` | — | Frontend unit tests — Vitest + Testing Library; covers all action types and nav link rewriting |
-| `frontend/src/types.ts` | — | Shared TypeScript types (`Message`, `ButtonAction`, `PendingAction`, etc.) |
-| `frontend/src/api.ts` | — | Fetch helpers for `/api/chat`, `/api/chat/confirm`, `/api/chat/decline`, `/api/chat/bootstrap` |
+| `frontend/src/types.ts` | — | Shared TypeScript types for chat, dashboard, reviews, and topic-map payloads |
+| `frontend/src/api.ts` | — | Fetch helpers for chat plus dashboard/review API bundles |
 | `frontend/vite.config.ts` | — | Vite dev server on port 5173; proxies `/api/*` and page paths to FastAPI on 8080 |
 | `frontend/package.json` | — | npm scripts (`dev`, `build`, `test`) and dependencies (React, TypeScript, Vite, Vitest, Testing Library) |
 
@@ -370,7 +376,9 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   db.cleanup_expired_proposals()
 ```
 
-### Flow 4: Web UI (local dashboard + chat)
+### Flow 4: Companion Web UI (legacy dashboard + chat on port 8050)
+
+The port-8050 server is now the legacy companion UI only. FastAPI separately serves the built React SPA for `/`, `/chat`, and `/reviews` when `frontend/dist/index.html` exists; the flow below describes the companion server started with the Discord bot.
 
 ```
   Browser → http://localhost:8050
@@ -388,7 +396,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ├── /actions                 → Filterable action log
          ├── /forecast                → Review forecast with bucket drill-down
          ├── /graph                   → Interactive D3 force-directed knowledge graph
-         ├── /chat                    → Chat interface (served via `webui/chat_backend.py`)
+         ├── /chat                    → Legacy chat interface (served via `services/chat_session.py` through the compatibility alias)
          ├── /api/chat                → Local in-process chat POST route
          ├── /api/chat/confirm        → Confirm WebUI pending action
          ├── /api/chat/decline        → Decline WebUI pending action
@@ -403,7 +411,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          └── Dashboard routes read directly from the db/ package
            (no pipeline, no LLM — pure DB ➜ HTML / JSON)
            Chat and chat-confirmation routes go through
-           webui/chat_backend.py → pipeline → LLM / action execution
+           services/chat_session.py → pipeline → LLM / action execution
 ```
 
 ---
@@ -605,9 +613,9 @@ The core brain of the system. Coordinates everything:
 
 ### webui/ — Bot Companion Web Dashboard
 - Zero-dependency HTTP server on port 8050 (`webui/server.py`) — started automatically by the Discord bot on startup
-- This is separate from the React frontend (`frontend/`) which is served by FastAPI on port 8080
+- This is separate from the React frontend (`frontend/`) which is served by FastAPI on port 8080 and currently owns `/`, `/chat`, and `/reviews` when built
 - Static file serving for extracted CSS and JS (`webui/static/`)
-- Local chat surface at `/chat` backed by `webui/chat_backend.py`, plus local POST routes for confirm/decline and concept deletion
+- Local chat surface at `/chat` backed by `services/chat_session.py` through `webui/chat_backend.py` compatibility imports, plus local POST routes for confirm/decline/action and concept deletion
 - Interactive topic tree with expand/collapse, search/filter, and subtree stats
 - Topic detail pages with breadcrumb navigation and child topic cards
 - Computes aggregated subtree stats (own + total concepts) via post-order DFS

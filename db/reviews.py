@@ -105,6 +105,25 @@ def get_recent_reviews(concept_id: int, limit: int = 5, *, user_id: Optional[str
     return [dict(r) for r in rows]
 
 
+def get_recent_reviews_all(limit: int = 50, *, user_id: Optional[str] = None) -> List[Dict]:
+    """Get recent review log entries across all concepts with concept titles."""
+    uid = user_id or _uid()
+    conn = _conn()
+    rows = conn.execute(
+        """
+        SELECT rl.*, c.title AS concept_title
+        FROM review_log rl
+        JOIN concepts c ON rl.concept_id = c.id
+        WHERE rl.user_id = ? AND c.user_id = ?
+        ORDER BY rl.reviewed_at DESC, rl.id DESC
+        LIMIT ?
+    """,
+        (uid, uid, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_review_stats(*, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Get aggregate review statistics."""
     uid = user_id or _uid()

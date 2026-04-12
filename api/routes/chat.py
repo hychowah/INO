@@ -8,7 +8,7 @@ import db
 from api.auth import verify_token
 from api.schemas import ChatActionRequest, ChatRequest, ChatResponse, ConfirmRequest
 from services import state
-from webui.chat_backend import (
+from services.chat_session import (
     confirm_webui_action,
     decline_webui_action,
     handle_webui_action,

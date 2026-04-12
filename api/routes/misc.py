@@ -22,6 +22,12 @@ async def get_stats():
     return db.get_review_stats()
 
 
+@router.get("/api/action-summary", dependencies=[Depends(verify_token)])
+async def get_action_summary(days: int = 7):
+    """Aggregate action counts by type for the last N days."""
+    return db.get_action_summary(days=days)
+
+
 @router.get("/api/health")
 async def health():
     """Health check (no auth required)."""

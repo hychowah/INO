@@ -10,6 +10,18 @@ from services.tools import set_action_source
 router = APIRouter()
 
 
+@router.get("/api/topics/flat", dependencies=[Depends(verify_token)])
+async def get_topics_flat():
+    """Flat topic list for dropdowns and lightweight filters."""
+    return db.get_all_topics()
+
+
+@router.get("/api/topic-map", dependencies=[Depends(verify_token)])
+async def get_topic_map():
+    """Flat topic DAG with per-topic stats and parent/child ids."""
+    return db.get_topic_map()
+
+
 @router.get("/api/topics", dependencies=[Depends(verify_token)])
 async def get_topics():
     """Topic tree with mastery stats."""
