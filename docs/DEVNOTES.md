@@ -157,7 +157,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 **`view=None` rejection:** Discord raises `TypeError` when `view=None` is passed explicitly as a keyword argument to `send_fn`. `send_long_with_view()` omits the `view=` kwarg entirely when `view` is `None` — calls `await send_fn(chunks[-1])` without it rather than `await send_fn(chunks[-1], view=None)`.
 
-**WebUI threading trap:** `bot.py` spawns `webui/server.py` in a background thread, so `webui/server.py` must keep `import threading` when using `threading.current_thread()`, `threading.main_thread()`, or `threading.Thread()`, and signal registration must stay guarded behind `threading.current_thread() is threading.main_thread()`.
+**Pipeline serialization trap:** interactive entry points still share mutable in-process session state, so API/browser and Discord chat must continue to serialize through `services.state.pipeline_serialized()` to avoid overlapping fetch loops and confirmation state.
 
 **SVG/D3:** Set visual properties as inline SVG `.attr()` calls, not CSS classes — avoids specificity issues. CSS only for interactive states.
 
@@ -262,7 +262,7 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler falls back to single-prompt `call_with_fetch_loop()` — same behavior as before the change.
 
-**Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` table. Stores raw P1 JSON output for debugging/inspection. Displayed in webui concept detail page. Non-functional — purely for transparency.
+**Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` table. Stores raw P1 JSON output for debugging/inspection. Exposed in concept detail tooling for transparency. Non-functional — purely for transparency.
 
 **Key files:** `services/pipeline.py` (`generate_quiz_question`, `package_quiz_for_discord`), `services/scheduler.py` (`_send_review_quiz`), `services/llm.py` (`get_reasoning_provider`), `services/context.py` (`build_quiz_generator_context`), `config.py` (REASONING_LLM_* vars).
 
@@ -325,20 +325,21 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - **Dev mode:** Vite dev server on port 5173 (`make dev-ui`). React Router owns the SPA routes there, while Vite proxies backend/static requests such as `/api`, `/assets`, `/static`, and the current `/reviews` compatibility path to FastAPI on port 8080.
 - **Built mode:** `make build-ui` builds `frontend/dist`; FastAPI mounts `frontend/dist/assets` at `/assets` and serves `frontend/dist/index.html` for the explicit SPA-owned routes `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`.
 
-**Route ownership:** Browser routing now lives in `frontend/src/routes.tsx`. `frontend/src/App.tsx` is just a compatibility re-export for the chat page and `resolveBackendHref()` helper. Shared chat execution no longer lives in `webui/chat_backend.py`; the owning module is `services/chat_session.py`, while `webui/chat_backend.py` remains as a compatibility alias for the legacy server and tests. As of this checkpoint, the React route set includes dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews. The graph page is also the first route split out with `React.lazy` + `Suspense` so the force-graph dependency stays out of the main entry chunk.
+**Route ownership:** Browser routing now lives in `frontend/src/routes.tsx`. `frontend/src/App.tsx` is just a compatibility re-export for the chat page and `resolveBackendHref()` helper. Shared chat execution lives in `services/chat_session.py`. As of this checkpoint, the React route set includes dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews. The graph page is also the first route split out with `React.lazy` + `Suspense` so the force-graph dependency stays out of the main entry chunk.
 
 **Non-obvious trap — href navigation vs. fetch proxy:** The Vite proxy only intercepts XHR / `fetch()` calls. Plain HTML `href` navigation (for links that still point at legacy routes) is a full browser redirect — the browser sends it to the same origin (port 5173), so client-side routing can swallow the navigation unless links targeting backend-owned pages are rewritten to the FastAPI origin.
 
 **Fix:** `resolveBackendHref(path)` in `frontend/src/lib/navigation.ts` rewrites links to the FastAPI origin when `window.location.port === "5173"`. SPA-owned routes use raw client-side hrefs; links targeting backend-owned pages or inline `[concept:N]` links use this helper. In production (browser on port 8080), it passes through unchanged.
 
-**Auth:** `api/auth.py` `_is_local_webui_request` now permits bearer-token-free access from `localhost` on **both** `API_PORT` (8080) and `WEBUI_PORT` (8050). Before this fix, the React frontend's `/api/chat/bootstrap` call from a browser on port 8080 was rejected with 401 even though it was a localhost request.
+**Auth:** `api/auth.py` now permits bearer-token-free access from `localhost` on `API_PORT` (8080). Before this fix, the React frontend's `/api/chat/bootstrap` call from a browser on port 8080 was rejected with 401 even though it was a localhost request.
 
 **Later migration status update (2026-04-12):**
 - SPA-owned routes expanded to `/`, `/actions`, `/chat`, `/concept/:conceptId`, `/concepts`, `/forecast`, `/graph`, `/topic/:topicId`, `/topics`, and `/reviews`.
 - The migrated React page set now includes dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews.
 - The frontend foundation now includes Tailwind CSS plus local shadcn-style UI primitives under `frontend/src/components/ui`.
-- Shared chat logic moved into `services/chat_session.py`; `webui/chat_backend.py` now just re-exports that module for compatibility.
+- Shared chat logic moved into `services/chat_session.py`, which now backs both JSON and SSE browser chat routes.
 - The dedicated frontend workflow now runs typecheck, Vitest, Playwright browser install, and Chromium E2E smoke tests in `.github/workflows/frontend.yml`.
+- Playwright preview serves the current `frontend/dist` output. When running `npx playwright test` directly after frontend changes, rebuild first with `npm run build` or the preview server can serve stale assets and make route mocks look broken.
 
 **Key files:** `frontend/src/routes.tsx`, `frontend/src/lib/navigation.ts`, `frontend/src/pages/ChatPage.tsx`, `frontend/src/pages/DashboardPage.tsx`, `frontend/src/pages/TopicsListPage.tsx`, `frontend/src/pages/ConceptsListPage.tsx`, `frontend/src/pages/ForecastPage.tsx`, `frontend/src/pages/GraphPage.tsx`, `services/chat_session.py`, `api/routes/pages.py`, `api/auth.py`, `.github/workflows/frontend.yml`, `frontend/playwright.config.ts`, `frontend/e2e/knowledge-surfaces.spec.ts`.
 
@@ -476,10 +477,10 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 ## 23. Process-Local Lock Hardening
 
-**Goal:** Keep the runtime single-user and trustworthy across bot, WebUI, API, and scheduler paths that still share mutable in-process state.
+**Goal:** Keep the runtime single-user and trustworthy across bot, browser/API, and scheduler paths that still share mutable in-process state.
 
 **Key decisions:**
-- `services/state.py` now owns the shared `PIPELINE_LOCK` plus `pipeline_serialized()` and `pipeline_serialized_nowait()` helpers. This replaced the old WebUI-only lock and made the process-local boundary explicit.
+- `services/state.py` now owns the shared `PIPELINE_LOCK` plus `pipeline_serialized()` and `pipeline_serialized_nowait()` helpers. This replaced the older chat-specific lock boundary and made the process-local boundary explicit.
 - Bot message handling, manual review/maintenance/taxonomy/preference flows, reply-based confirmations, direct Discord button bypasses, and FastAPI chat/confirm/decline now all serialize through the same lock.
 - The scheduler does **not** block waiting for that lock. Review, maintenance, taxonomy, and dedup checks skip the current cycle when the pipeline is busy so background work yields to active chat turns.
 - `db.chat` session helpers and `db.action_log.log_action()` now resolve omitted `user_id` through `_uid()`. `clear_session(None)` intentionally still means clear all users.

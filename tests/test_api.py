@@ -62,7 +62,7 @@ class TestChat:
         assert "Message cannot be empty" in resp.json()["detail"]
 
     @pytest.mark.anyio
-    async def test_chat_supports_webui_ping_command(self, client):
+    async def test_chat_supports_ping_command(self, client):
         resp = await client.post("/api/chat", json={"message": "/ping"})
 
         assert resp.status_code == 200
@@ -92,12 +92,12 @@ class TestChat:
     async def test_chat_normal_reply(self, client):
         with (
             patch(
-                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                    "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
-            patch("webui.chat_backend.parse_llm_response", return_value=("REPLY", "raw", None)),
+                patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
             patch(
-                "webui.chat_backend.pipeline.execute_llm_response",
+                    "services.chat_session.pipeline.execute_llm_response",
                 new=AsyncMock(return_value="REPLY: Final answer"),
             ),
         ):
@@ -111,6 +111,29 @@ class TestChat:
         }
 
     @pytest.mark.anyio
+    async def test_chat_stream_returns_status_and_done_events(self, client):
+        with (
+            patch(
+                "services.chat_session.pipeline.call_with_fetch_loop",
+                new=AsyncMock(return_value="REPLY: raw"),
+            ),
+            patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
+            patch(
+                "services.chat_session.pipeline.execute_llm_response",
+                new=AsyncMock(return_value="REPLY: Final answer"),
+            ),
+        ):
+            resp = await client.post("/api/chat/stream", json={"message": "hello"})
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = resp.text
+        assert "event: status" in body
+        assert "Waiting for the learning agent..." in body
+        assert "event: done" in body
+        assert '"message": "Final answer"' in body
+
+    @pytest.mark.anyio
     async def test_chat_add_concept_returns_pending_confirm(self, client):
         action_data = {
             "action": "add_concept",
@@ -119,11 +142,11 @@ class TestChat:
         }
         with (
             patch(
-                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                    "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
-                "webui.chat_backend.parse_llm_response",
+                    "services.chat_session.parse_llm_response",
                 return_value=("FETCH", "Add this concept?", action_data),
             ),
         ):
@@ -150,11 +173,11 @@ class TestChat:
         }
         with (
             patch(
-                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                    "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
-                "webui.chat_backend.parse_llm_response",
+                    "services.chat_session.parse_llm_response",
                 return_value=("FETCH", "Want me to add this topic?", action_data),
             ),
         ):
@@ -174,7 +197,7 @@ class TestChat:
             "message": "Add this concept?",
             "params": {"title": "Ownership"},
         }
-        with patch("webui.chat_backend.execute_action", return_value=("reply", "Added concept #7")):
+        with patch("services.chat_session.execute_action", return_value=("reply", "Added concept #7")):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
 
         assert resp.status_code == 200
@@ -195,7 +218,7 @@ class TestChat:
             "params": {"title": "Compilers"},
         }
         with patch(
-            "webui.chat_backend.execute_suggest_topic_accept",
+            "services.chat_session.execute_suggest_topic_accept",
             return_value=(True, "✅ Created topic **Compilers** (#3)", 3),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
@@ -266,20 +289,6 @@ class TestChat:
                 assert resp.status_code == 401
 
     @pytest.mark.anyio
-    async def test_chat_allows_local_webui_without_token_when_auth_enabled(self, test_db):
-        with patch.object(config, "API_SECRET_KEY", "real-secret"):
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8050") as ac:
-                resp = await ac.post("/api/chat", json={"message": "/ping"})
-
-        assert resp.status_code == 200
-        assert resp.json() == {
-            "type": "reply",
-            "message": "Pong!",
-            "pending_action": None,
-        }
-
-    @pytest.mark.anyio
     async def test_chat_allows_local_fastapi_ui_without_token_when_auth_enabled(self, test_db):
         with patch.object(config, "API_SECRET_KEY", "real-secret"):
             transport = ASGITransport(app=app)
@@ -296,7 +305,7 @@ class TestChat:
     @pytest.mark.anyio
     async def test_chat_action_endpoint_dispatches_structured_action(self, client):
         with patch(
-            "api.routes.chat.handle_webui_action",
+            "api.routes.chat.handle_chat_action",
             new=AsyncMock(
                 return_value={
                     "type": "reply",
@@ -381,14 +390,19 @@ class TestMiscEndpoints:
 
 
 class TestLegacyPages:
+    @staticmethod
+    def _assert_missing_frontend(resp):
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Frontend bundle not built" in resp.text
+        assert "make build-ui" in resp.text
+
     @pytest.mark.anyio
     async def test_dashboard_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert '📋 Recent Activity' in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_dashboard_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -408,10 +422,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/chat")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert '<div class="chat-page">' in resp.text
-        assert '/static/chat.js?v=2' in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_chat_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -431,9 +442,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/reviews")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert 'No reviews yet. Start learning and get quizzed!' in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_reviews_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -455,9 +464,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get(f"/topic/{topic_id}")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Operating Systems" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_topic_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -479,9 +486,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get(f"/concept/{concept_id}")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Rust Ownership" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_concept_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -503,9 +508,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/topics")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Topics" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_topics_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -527,9 +530,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/concepts")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "All Concepts" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_concepts_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -551,10 +552,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/graph")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Knowledge graph visualization page" not in resp.text
-        assert "graph-controls" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_graph_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -574,9 +572,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/actions")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Activity Log" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_actions_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -596,9 +592,7 @@ class TestLegacyPages:
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/forecast")
 
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Review Forecast" in resp.text
+        self._assert_missing_frontend(resp)
 
     @pytest.mark.anyio
     async def test_forecast_page_serves_built_frontend_when_present(self, client, tmp_path):
@@ -614,12 +608,10 @@ class TestLegacyPages:
         assert '<div id="root">react forecast</div>' in resp.text
 
     @pytest.mark.anyio
-    async def test_static_style_served_by_fastapi(self, client):
+    async def test_static_style_not_served_by_fastapi(self, client):
         resp = await client.get("/static/style.css")
 
-        assert resp.status_code == 200
-        assert "text/css" in resp.headers["content-type"]
-        assert ".chat-page" in resp.text
+        assert resp.status_code == 404
 
     @pytest.mark.anyio
     async def test_forecast_json_endpoint_served_by_fastapi(self, client):
@@ -641,12 +633,11 @@ class TestLegacyPages:
         assert db.get_concept(concept_id) is None
 
     @pytest.mark.anyio
-    async def test_actions_page_forwards_full_query_string_to_legacy_renderer(self, client):
-        with patch("api.routes.pages.page_actions", return_value="<html>ok</html>") as mock_page_actions:
+    async def test_actions_page_ignores_query_string_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
             resp = await client.get("/actions?action=assess&source=api&q=rust&time=7d&page=2")
 
-        assert resp.status_code == 200
-        mock_page_actions.assert_called_once_with("action=assess&source=api&q=rust&time=7d&page=2")
+        self._assert_missing_frontend(resp)
 
 
 # ============================================================================

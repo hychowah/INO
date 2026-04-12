@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -162,7 +163,7 @@ function ForecastConceptTable({ concepts }: { concepts: ForecastConcept[] }) {
         <tbody>
           {concepts.map((concept) => (
             <tr key={concept.id} className="transition-colors hover:bg-white/5">
-              <td className="border-b border-white/5 px-3 py-3"><a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${concept.id}`}>{concept.title}</a></td>
+              <td className="border-b border-white/5 px-3 py-3"><Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${concept.id}`}>{concept.title}</Link></td>
               <td className="border-b border-white/5 px-3 py-3">{concept.mastery_level}</td>
               <td className="border-b border-white/5 px-3 py-3 text-slate-400">{concept.next_review_at || '—'}</td>
               <td className="border-b border-white/5 px-3 py-3">{concept.interval_days != null ? `${concept.interval_days}d` : '—'}</td>

@@ -12,7 +12,7 @@ Each concern has one owning document. Cross-links are fine; duplication is not.
 |---------|-------|-------------|
 | Public REST endpoints | `docs/API.md` | `docs/ARCHITECTURE.md` (file map if new module) |
 | Discord bot commands | `docs/API.md` | — |
-| Web UI pages / routes | `docs/API.md` | `docs/ARCHITECTURE.md` (Flow 4 diagram) |
+| Browser SPA routes | `docs/API.md` | `docs/ARCHITECTURE.md` (Flow 4 diagram) |
 | Module structure / file roles | `docs/ARCHITECTURE.md` | `CODING.md` (project structure tree) |
 | Runtime LLM skill files | `AGENTS.md` (table) | `docs/index.md`, `docs/ARCHITECTURE.md` (file map) |
 | Pipeline mode routing | `docs/index.md` | `AGENTS.md` (Skill sets section) |
@@ -40,8 +40,8 @@ Each concern has one owning document. Cross-links are fine; duplication is not.
 1. Add row to the Discord Commands table in `docs/API.md`
 2. Add one-line entry to `CHANGELOG.md`
 
-### New Web UI page or route
-1. Add row to the Web UI Pages table in `docs/API.md`
+### New browser page or route
+1. Add row to the browser routes table in `docs/API.md`
 2. Add the route to Flow 4 in `docs/ARCHITECTURE.md`
 3. If a new page module was added: update `ARCHITECTURE.md` file map and `CODING.md` tree
 

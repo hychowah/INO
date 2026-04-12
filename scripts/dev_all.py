@@ -102,7 +102,6 @@ def main() -> int:
         print("[dev-all] stack is running")
         print("[dev-all] api:      http://127.0.0.1:8080")
         print("[dev-all] frontend: http://127.0.0.1:5173 (if enabled)")
-        print("[dev-all] bot ui:   http://127.0.0.1:8050 (when bot is ready)")
         print("[dev-all] press Ctrl+C to stop all processes")
 
         while True:

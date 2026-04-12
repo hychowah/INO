@@ -42,7 +42,7 @@ async def get_next_review():
 
 @router.get("/api/forecast", dependencies=[Depends(verify_token)])
 async def get_forecast(range: str = "weeks"):
-    """Legacy forecast payload used by the current webui page."""
+    """Forecast summary payload used by the React forecast page."""
     try:
         return db.get_due_forecast(range)
     except ValueError as e:
@@ -51,7 +51,7 @@ async def get_forecast(range: str = "weeks"):
 
 @router.get("/api/forecast/concepts", dependencies=[Depends(verify_token)])
 async def get_forecast_concepts(range: str = "weeks", bucket: str = "0"):
-    """Legacy forecast bucket detail payload used by the current webui page."""
+    """Forecast bucket detail payload used by the React forecast page."""
     try:
         return db.get_forecast_bucket_concepts(range, bucket)
     except ValueError as e:

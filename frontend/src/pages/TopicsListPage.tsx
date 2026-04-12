@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -85,7 +86,7 @@ function TopicTreeNode({
           </button>
         ) : <span className="inline-flex h-7 w-7 items-center justify-center text-slate-600">•</span>}
 
-        <a className={`font-medium transition-colors hover:text-sky-100 ${ownMatch ? 'text-white' : 'text-sky-200'}`} href={`/topic/${topic.id}`}>{topic.title}</a>
+        <Link className={`font-medium transition-colors hover:text-sky-100 ${ownMatch ? 'text-white' : 'text-sky-200'}`} to={`/topic/${topic.id}`}>{topic.title}</Link>
         <span className="text-slate-500">{topic.concept_count} concepts</span>
         <span className="text-slate-500">{topic.due_count} due</span>
         <span className="text-slate-500">avg {topic.avg_mastery}/100</span>

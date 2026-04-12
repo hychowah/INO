@@ -1,6 +1,6 @@
 # API Reference
 
-This document describes all public API surfaces exposed by the Learning Agent: the Discord bot commands, the FastAPI REST backend, the transitional FastAPI page routes, and the local companion Web UI.
+This document describes the public API surfaces exposed by the Learning Agent: the Discord bot commands, the FastAPI REST backend, and the FastAPI-served browser routes used by the React frontend.
 
 ---
 
@@ -51,7 +51,7 @@ Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Disc
 
 ## 2. FastAPI REST API (`api.py`, `api/app.py`, `api/routes/`)
 
-`api.py` is a thin wrapper that starts the FastAPI app from `api/app.py`, and route handlers live under `api/routes/`. The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_SECRET_KEY`). All endpoints except `/api/health` require the header:
+`api.py` is a thin wrapper that starts the FastAPI app from `api/app.py`, and route handlers live under `api/routes/`. The REST API shares the same pipeline as the Discord bot and is protected with a bearer token (`LEARN_API_SECRET_KEY`) for non-localhost callers. Requests that hit the local FastAPI port directly are allowed through the development localhost bypass. For remote or non-local callers, all endpoints except `/api/health` require the header:
 
 ```
 Authorization: Bearer <LEARN_API_SECRET_KEY>
@@ -71,23 +71,25 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/chat/bootstrap` | Bootstrap payload for the React chat frontend — returns recent chat history and available command chips. |
-| `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional `pending_confirm` for intercepted confirmation flows. |
-| `POST` | `/api/chat/confirm` | Confirm a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
-| `POST` | `/api/chat/decline` | Decline a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
+| `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns one final `ChatResponse` envelope (`reply`, `error`, or `pending_confirm`). |
+| `POST` | `/api/chat/stream` | SSE chat endpoint. Emits a `status` event first, then either a final `done` event containing the same envelope shape as `/api/chat` or an `error` event. |
+| `POST` | `/api/chat/confirm` | Confirm a chat-layer pending action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted `add_concept` and `suggest_topic` confirmations. |
+| `POST` | `/api/chat/decline` | Decline a chat-layer pending action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted `add_concept` and `suggest_topic` confirmations. |
 | `POST` | `/api/chat/action` | Execute a structured UI action emitted by the chat frontend (button groups, proposal review items, multiple-choice actions). |
 
 #### `POST /api/chat/confirm` — confirmable actions
 
-Only a fixed whitelist of actions may be confirmed via this endpoint:
+Only a fixed chat-layer whitelist may be confirmed via this endpoint:
 
 | Allowed action | Description |
 |----------------|-------------|
 | `add_concept` | Create a new concept |
-| `suggest_topic` | Suggest a topic (no DB write) |
-| `add_topic` | Create a new topic |
-| `link_concept` | Link a concept to topic(s) |
+| `suggest_topic` | Accept a suggested topic proposal |
+| `preference_update` | Apply a proposed `preferences.md` update |
+| `maintenance_review` | Apply maintenance changes from a review block |
+| `taxonomy_review` | Apply taxonomy changes from a review block |
 
-In the normal `/api/chat` flow, the API only emits `pending_confirm` for the intercepted actions `add_concept` and `suggest_topic`. The broader whitelist exists so trusted callers can confirm compatible action payloads directly.
+In the normal `/api/chat` flow, the API currently emits `pending_confirm` only for the intercepted actions `add_concept` and `suggest_topic`. The wider whitelist exists because the shared chat controller also supports confirming review-style chat payloads.
 
 Any other action returns HTTP **400**:
 ```json
@@ -96,7 +98,7 @@ Any other action returns HTTP **400**:
 
 #### `POST /api/chat/decline`
 
-Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and validates against the same `API_CONFIRMABLE_ACTIONS` whitelist as `/confirm`.
+Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and validates against the same chat-layer whitelist as `/confirm`.
 
 - Returns `{"type": "reply", "message": "Declined."}` on success.
 - Returns HTTP **400** for any action type not in the whitelist.
@@ -145,9 +147,9 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 | `GET` | `/api/action-summary` | Aggregated action counts for recent activity cards (`?days=7` by default). |
 | `GET` | `/api/actions` | Action log with optional filters (`action`, `source`, `q` or `search`, `time`, `page`, `per_page`). |
 | `GET` | `/api/actions/filters` | Distinct action and source values for building action-log filter UIs. |
-| `GET` | `/api/forecast` | Review forecast buckets used by both the React forecast page and the companion legacy forecast page. |
+| `GET` | `/api/forecast` | Review forecast buckets used by the React forecast page. |
 | `GET` | `/api/forecast/concepts` | Concept drill-down for one forecast bucket. |
-| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`) used by both the React graph page and the companion legacy graph page. |
+| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`) used by the React graph page. |
 
 ### Persona
 
@@ -164,67 +166,43 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 
 ---
 
-## 3. FastAPI Page Routes During Migration
+## 3. FastAPI Page Routes
 
-FastAPI serves browser routes from `api/routes/pages.py` while the browser migration is in progress.
+FastAPI serves the browser routes from `api/routes/pages.py`.
 
 When `frontend/dist/index.html` exists, FastAPI serves the built React SPA entry for these routes:
 
 | Path | Behavior |
 |------|----------|
-| `/` | Built SPA entry for the React dashboard; otherwise falls back to the legacy dashboard HTML page. |
-| `/chat` | Built SPA entry for the React chat client; otherwise falls back to the legacy chat HTML page. |
-| `/topics` | Built SPA entry for the React topics list; otherwise falls back to the legacy topics HTML page. |
-| `/topic/{topic_id}` | Built SPA entry for the React topic detail page; otherwise falls back to the legacy topic-detail HTML page. |
-| `/concepts` | Built SPA entry for the React concepts list; otherwise falls back to the legacy concepts HTML page. |
-| `/concept/{concept_id}` | Built SPA entry for the React concept detail page; otherwise falls back to the legacy concept-detail HTML page. |
-| `/graph` | Built SPA entry for the React graph page; otherwise falls back to the legacy graph HTML page. |
-| `/reviews` | Built SPA entry for the React review-log page; otherwise falls back to the legacy reviews HTML page. |
-| `/forecast` | Built SPA entry for the React forecast page; otherwise falls back to the legacy forecast HTML page. |
-| `/actions` | Built SPA entry for the React activity log; otherwise falls back to the legacy actions HTML page. |
+| `/` | Built SPA entry for the React dashboard; otherwise returns a minimal HTML response instructing the operator to run `make build-ui`. |
+| `/chat` | Built SPA entry for the React chat client; otherwise returns the same missing-build HTML response. |
+| `/topics` | Built SPA entry for the React topics list; otherwise returns the same missing-build HTML response. |
+| `/topic/{topic_id}` | Built SPA entry for the React topic detail page; otherwise returns the same missing-build HTML response. |
+| `/concepts` | Built SPA entry for the React concepts list; otherwise returns the same missing-build HTML response. |
+| `/concept/{concept_id}` | Built SPA entry for the React concept detail page; otherwise returns the same missing-build HTML response. |
+| `/graph` | Built SPA entry for the React graph page; otherwise returns the same missing-build HTML response. |
+| `/reviews` | Built SPA entry for the React review-log page; otherwise returns the same missing-build HTML response. |
+| `/forecast` | Built SPA entry for the React forecast page; otherwise returns the same missing-build HTML response. |
+| `/actions` | Built SPA entry for the React activity log; otherwise returns the same missing-build HTML response. |
 
 This SPA fallback is explicit, not catch-all: only the routes above serve `frontend/dist/index.html` when a build exists.
 
 ---
 
-## 4. Bot Companion Web UI (`webui/server.py`)
+## 4. Chat Routes
 
-A local-only dashboard served on port `8050` (default) using Python's built-in HTTP server. Started automatically when `bot.py` starts. No authentication required (LAN/localhost only).
-
-> **Note:** The React SPA now owns the main FastAPI-served browser routes on port 8080, including dashboard, topics, concepts, graph, reviews, forecast, and activity. This companion Web UI on port 8050 remains the local-only legacy/operator surface.
-
-### Pages
-
-| Path | Description |
-|------|-------------|
-| `/` | Dashboard — summary stats and recently due concepts |
-| `/topics` | Topic tree with mastery progress bars |
-| `/topic/{id}` | Topic detail — concepts, scores, remarks |
-| `/concepts` | Searchable concept list |
-| `/concept/{id}` | Concept detail — score history, remarks, relations |
-| `/reviews` | Review history |
-| `/actions` | Action log with filtering and time-range picker |
-| `/forecast` | Review forecast — due concepts bucketed by days / weeks / months |
-| `/chat` | Legacy chat interface — local in-process LLM chat through the shared chat-session controller |
-| `/api/actions?offset=&limit=&action=&source=` | JSON action log data for the Web UI filter controls |
-| `/api/forecast?range=` | JSON forecast data — overdue count + 7 rolling buckets with counts and avg mastery |
-| `/api/forecast/concepts?range=&bucket=` | JSON concept list for a specific bucket, sorted by mastery ASC |
-| `/graph` | Interactive D3.js force-directed knowledge graph |
-| `/static/*` | Static assets (JS, CSS) |
-
-### Local Chat Routes (also available on FastAPI port 8080)
-
-The routes below exist on **both** the companion Web UI (port 8050) and the FastAPI REST API (port 8080). Both surfaces delegate to the shared controller in `services/chat_session.py`; `webui/chat_backend.py` is retained as a compatibility import path for the legacy server and older tests.
+The browser UI and other local clients now use the FastAPI routes below on port `8080`. They all delegate to the shared controller in `services/chat_session.py`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/chat` | In-process Web UI chat endpoint backed by the shared chat-session controller. |
-| `POST` | `/api/chat/confirm` | Confirm a Web UI pending action (`add_concept`, `suggest_topic`, `preference_update`, `maintenance_review`, `taxonomy_review`). |
-| `POST` | `/api/chat/decline` | Decline a Web UI pending action. |
+| `POST` | `/api/chat` | Standard JSON chat endpoint returning a single final envelope. |
+| `POST` | `/api/chat/stream` | SSE chat endpoint that emits a `status` event followed by `done` or `error`. |
+| `POST` | `/api/chat/confirm` | Confirm a pending action (`add_concept`, `suggest_topic`, `preference_update`, `maintenance_review`, `taxonomy_review`). |
+| `POST` | `/api/chat/decline` | Decline a pending action. |
 | `POST` | `/api/chat/action` | Execute a structured UI action payload. |
-| `POST` | `/api/concept/{id}/delete` | Delete a concept from the concepts page. |
+| `DELETE` | `/api/concepts/{id}` | Delete a concept via the browser concepts UI or other API clients. |
 
-The Web UI reads directly from the same SQLite databases used by the bot and API for dashboard pages, and routes local chat through the same in-process learning pipeline.
+The browser UI reads from the same FastAPI process as the API and routes chat through the same in-process learning pipeline.
 
 ---
 
@@ -233,10 +211,10 @@ The Web UI reads directly from the same SQLite databases used by the bot and API
 | Surface | Mechanism | Variable |
 |---------|-----------|----------|
 | Discord bot | Discord user ID allowlist | `LEARN_AUTHORIZED_USER_ID` |
-| REST API | Bearer token header | `LEARN_API_SECRET_KEY` |
-| Web UI | None (localhost-only by design) | — |
+| REST API | Bearer token header for non-local callers; localhost requests on `API_PORT` bypass the token check | `LEARN_API_SECRET_KEY` |
+| FastAPI-served browser UI | Same FastAPI process and auth policy as the REST API; local browser requests on `API_PORT` use the localhost bypass | `LEARN_API_SECRET_KEY` |
 
-Internally, db functions now accept an optional `user_id` and default to a ContextVar-backed lookup, but that is not yet activated at the Discord/API/Web UI entry points. From an operator perspective, the app still behaves as a single-user system.
+Internally, db functions now accept an optional `user_id` and default to a ContextVar-backed lookup, but that is not yet activated at the Discord/API/browser entry points. From an operator perspective, the app still behaves as a single-user system.
 
 ---
 

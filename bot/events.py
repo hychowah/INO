@@ -3,10 +3,8 @@
 import asyncio
 import logging
 import shutil
-import threading
 
 import discord
-import uvicorn
 from discord.ext import commands
 
 import config
@@ -31,22 +29,6 @@ from services.views import (
 logger = logging.getLogger("bot")
 
 
-def _get_api_app():
-    from api import app as api_app
-
-    return api_app
-
-
-def _run_webui_server():
-    uvicorn.run(_get_api_app(), host=config.WEBUI_HOST, port=config.WEBUI_PORT, log_level="info")
-
-
-def _start_webui_server():
-    webui_thread = threading.Thread(target=_run_webui_server, daemon=True)
-    webui_thread.start()
-    return webui_thread
-
-
 @bot.event
 async def on_ready():
     if not config.PREFERENCES_MD.exists() and config.PREFERENCES_TEMPLATE_MD.exists():
@@ -69,12 +51,6 @@ async def on_ready():
 
     scheduler.start(bot, config.AUTHORIZED_USER_ID)
     logger.info("[SCHEDULER] Review check started")
-
-    try:
-        _start_webui_server()
-        logger.info(f"[WEBUI] Started on http://{config.WEBUI_HOST}:{config.WEBUI_PORT}")
-    except Exception as e:
-        logger.error(f"[WEBUI] Failed to start: {e}", exc_info=True)
 
     bot.loop.create_task(_heartbeat())
 

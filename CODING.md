@@ -32,7 +32,7 @@ If you see `No module named pytest` or any missing-import error, you forgot to a
 
 ## Project Overview
 
-A personal learning coach with spaced repetition. Two Python entry points share the same backend pipeline; the React/TypeScript frontend is now a small SPA that talks to the API while legacy HTML pages are retired incrementally:
+A personal learning coach with spaced repetition. Two Python entry points share the same backend pipeline; the React/TypeScript frontend is now the sole browser UI and talks to FastAPI over JSON and SSE:
 
 ```
 bot.py  (Discord)  ─┬──┴────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ ROOT
 │   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
-│   ├── chat_session.py    # Shared chat-session controller for FastAPI and legacy WebUI
+│   ├── chat_session.py    # Shared chat-session controller for FastAPI browser/API routes
 │   └── kimi.py            # kimi-cli specific helpers
 │
 ├── db/                    # Database layer (SQLite)
@@ -114,21 +114,16 @@ ROOT
 │
 ├── tests/                 # pytest test suite
 ├── frontend/              # React/TypeScript/Vite SPA frontend (dev :5173, built served by FastAPI :8080)
-│   ├── src/App.tsx        # Compatibility re-export for the chat page + navigation helper
-│   ├── src/App.test.tsx   # Frontend unit tests (Vitest + Testing Library)
-│   ├── src/routes.tsx     # SPA route ownership (`/`, `/chat`, `/reviews`)
+│   ├── src/App.tsx        # Compatibility re-export for the main routed app shell
+│   ├── src/App.test.tsx   # Frontend chat/integration-style unit tests (Vitest + Testing Library)
+│   ├── src/routes.tsx     # SPA route ownership for dashboard, chat, topics, concepts, graph, reviews, forecast, actions
+│   ├── src/components/    # Shared layout and UI primitives
+│   ├── src/pages/         # Route components and page-level tests
 │   ├── src/types.ts       # Shared TypeScript types
-│   ├── src/api.ts         # API fetch helpers
+│   ├── src/api.ts         # API fetch helpers, including chat SSE parsing
+│   ├── e2e/               # Playwright browser smoke tests
 │   ├── vite.config.ts     # Vite dev server config + proxy rules to localhost:8080
-│   └── package.json       # npm scripts: dev, build, test
-├── webui/                 # Web UI: DB browser + knowledge graph visualization
-│   ├── server.py          # stdlib HTTP server, routing + Handler class
-│   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
-│   ├── chat_backend.py    # Compatibility alias to services/chat_session.py for legacy imports/tests
-│   ├── pages/             # Page renderers package
-│   │   ├── chat.py        # page_chat — chat interface
-│   │   └── ...            # dashboard, topics, concepts, reviews, activity, graph
-│   └── static/            # CSS, JS (tree.js, concepts.js, forecast.js, graph.js)
+│   └── package.json       # npm scripts: dev, build, test, test:e2e
 ├── docs/                  # Architecture, dev notes, plans (index.md for map)
 │   ├── ARCHITECTURE.md
 │   ├── API.md
@@ -253,9 +248,10 @@ Actions that mutate scores (`assess`, `multi_assess`) are gated in `execute_acti
 
 ## How to Add a New API Endpoint
 
-1. **`api.py`** — Add the route with `@app.get/post`, include `dependencies=[Depends(verify_token)]`
-2. Call existing `db.*` functions directly (sync is fine — they're fast)
-3. For anything needing the LLM, follow the `/api/chat` pattern (async, calls pipeline)
+1. **`api/routes/<module>.py`** — Add the route on the appropriate router and include `dependencies=[Depends(verify_token)]` unless it is intentionally public like `/api/health`.
+2. **`api/routes/__init__.py` / `api/app.py`** — Make sure the route module is registered if you add a new one.
+3. Call existing `db.*` functions directly for DB-backed reads/writes (sync is fine — they are fast).
+4. For anything needing the LLM or shared chat state, follow the `/api/chat` pattern (async, serialized through `services/state.py`, and routed through `services/chat_session.py` or `services/pipeline.py`).
 
 ---
 
@@ -384,7 +380,7 @@ Start services:
 
 ```bash
 python api.py                        # FastAPI on :8080
-python bot.py                        # Discord bot (also starts companion webui on :8050)
+python bot.py                        # Discord bot
 cd frontend && npm run dev           # React dev server on :5173
 ```
 
@@ -405,61 +401,65 @@ All services can run simultaneously — SQLite WAL mode handles concurrent reads
 
 ### Current Architecture
 
-The React frontend (`frontend/`) is the primary web interface. The companion web UI (`webui/server.py`) is a legacy stdlib HTTP server that starts alongside the Discord bot on port 8050.
+The React frontend (`frontend/`) is the primary web interface. FastAPI serves the built SPA on port 8080, and Vite serves the same SPA on port 5173 during development.
 
 ```
 React Frontend       ──→  api.py (FastAPI :8080)  ──→  services/pipeline.py  ──→  db/
 [Future] Mobile App  ──→  api.py (FastAPI :8080)  ──→  services/pipeline.py  ──→  db/
 Discord Bot          ──→  bot.py                   ──→  services/pipeline.py  ──→  db/
-Bot Companion WebUI  ──→  webui/server.py           ──→  db/  (direct, read-only)
 ```
 
 ### Current API Coverage (api.py)
 
 | Endpoint | Method | Auth | Purpose |
 |----------|--------|------|---------|
-| `/api/chat` | POST | Bearer | Send message to LLM agent |
-| `/api/chat/confirm` | POST | Bearer | Confirm pending add_concept |
+| `/api/chat` | POST | Bearer | Send message to the shared chat controller and get one final envelope |
+| `/api/chat/stream` | POST | Bearer | SSE chat replay for the browser client |
+| `/api/chat/bootstrap` | GET | Bearer | Load recent chat history and command chips |
+| `/api/chat/confirm` | POST | Bearer | Confirm a chat-layer pending action |
+| `/api/chat/decline` | POST | Bearer | Decline a chat-layer pending action |
+| `/api/chat/action` | POST | Bearer | Execute structured browser chat actions |
+| `/api/concepts` | GET | Bearer | Paginated concept list/search/filter |
+| `/api/concepts` | POST | Bearer | Create a concept |
 | `/api/topics` | GET | Bearer | Hierarchical topic map |
+| `/api/topics/flat` | GET | Bearer | Flat topic list for selectors |
 | `/api/topics/{id}` | GET | Bearer | Topic detail + concepts |
+| `/api/topic-map` | GET | Bearer | Topic DAG with parent/child ids and counts |
 | `/api/concepts/{id}` | GET | Bearer | Concept detail + remarks + reviews |
+| `/api/concepts/{id}` | PUT/DELETE | Bearer | Update or delete a concept |
+| `/api/concepts/{id}/remarks` | POST | Bearer | Add a concept remark |
+| `/api/concepts/{id}/relations` | GET | Bearer | Read concept relations |
+| `/api/topics` | POST | Bearer | Create a topic |
+| `/api/topics/{id}` | PUT/DELETE | Bearer | Update or delete a topic |
+| `/api/topics/link` | POST | Bearer | Link parent and child topics |
+| `/api/topics/unlink` | POST | Bearer | Remove a topic link |
+| `/api/relations` | POST | Bearer | Create a concept relation |
+| `/api/relations/remove` | POST | Bearer | Remove a concept relation |
+| `/api/reviews` | GET | Bearer | Review history |
+| `/api/reviews/next` | GET | Bearer | Next due concept for review |
 | `/api/due` | GET | Bearer | Due concepts for review |
 | `/api/stats` | GET | Bearer | Aggregate review stats |
+| `/api/action-summary` | GET | Bearer | Recent action counts for dashboard cards |
+| `/api/actions` | GET | Bearer | Paginated action log with filters |
+| `/api/actions/filters` | GET | Bearer | Distinct filter values for action log UIs |
 | `/api/persona` | GET/POST | Bearer | Get/switch persona |
+| `/api/forecast` | GET | Bearer | Forecast bucket summary |
+| `/api/forecast/concepts` | GET | Bearer | Forecast bucket drill-down |
 | `/api/graph` | GET | Bearer | Knowledge graph nodes + edges (filterable) |
 | `/api/health` | GET | None | Health check |
 
-### API Gaps (to fill before mobile development)
+### Remaining backend concerns before mobile development
 
-These endpoints don't exist yet. They should be added to `api.py` when the backend is stable enough to start mobile work. Listed here as a roadmap — **do not implement until backend + prompt are solid.**
+The HTTP surface is already broad enough for an eventual mobile client. The main remaining concerns are operational and architectural rather than missing CRUD endpoints:
 
-**Concept CRUD:**
-- `GET /api/concepts` — list/search/filter with pagination
-- `POST /api/concepts` — create concept → `db.add_concept()`
-- `PUT /api/concepts/{id}` — update → `db.update_concept()`
-- `DELETE /api/concepts/{id}` — delete → `db.delete_concept()`
-- `POST /api/concepts/{id}/remarks` — add remark → `db.add_remark()`
-
-**Topic CRUD:**
-- `POST /api/topics` — create → `db.add_topic()`
-- `PUT /api/topics/{id}` — update → `db.update_topic()`
-- `DELETE /api/topics/{id}` — delete → `db.delete_topic()`
-- `POST /api/topics/link` — link parent→child → `db.link_topics()`
-- `POST /api/topics/unlink` — unlink → `db.unlink_topics()`
-
-**Relations:**
-- `GET /api/concepts/{id}/relations` → `db.get_relations()`
-- `POST /api/relations` — add → `db.add_relation()`
-- `DELETE /api/relations` — remove → `db.remove_relation()`
-
-**Reviews & logs:**
-- `GET /api/reviews` — review log with pagination
-- `GET /api/reviews/next` — pull-based review (replaces Discord DM push)
-- `GET /api/actions` — audit log with filters
+- move from the current single shared bearer token to per-user auth when multi-user support is activated
+- expand CORS and deployment assumptions beyond localhost-only development
+- decide whether mobile should use the buffered SSE chat path or a different chat transport
+- keep browser-specific UI actions in `POST /api/chat/action` from turning into a generic RPC bucket without clear contracts
 
 ### Design Rules (for when endpoints are added)
 
-1. **Add to `api.py` only** — the webui server stays as a separate localhost dashboard.
+1. **Add to FastAPI route modules only** — the browser surface is served through `api/routes/`.
 2. **Always `dependencies=[Depends(verify_token)]`** except health check.
 3. **RESTful verbs** — GET reads, POST creates, PUT updates, DELETE deletes.
 4. **JSON in/out** — Pydantic request models, dict responses.

@@ -31,8 +31,6 @@ AUTHORIZED_USER_ID = int(os.environ.get("LEARN_AUTHORIZED_USER_ID", "0"))
 API_HOST = os.environ.get("LEARN_API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("LEARN_API_PORT", "8080"))
 API_SECRET_KEY = os.environ.get("LEARN_API_SECRET_KEY", "")
-WEBUI_HOST = os.environ.get("LEARN_WEBUI_HOST", "127.0.0.1")
-WEBUI_PORT = int(os.environ.get("LEARN_WEBUI_PORT", "8050"))
 
 # ============================================================================
 # OPTIONAL SETTINGS
@@ -195,4 +193,4 @@ def print_config():
         print(f"  Reasoning URL  : {REASONING_LLM_BASE_URL}")
     print(f"  Review Interval: {REVIEW_CHECK_INTERVAL_MINUTES} min")
     print(f"  Session Timeout: {SESSION_TIMEOUT_MINUTES} min")
-    print(f"  Web UI        : http://{WEBUI_HOST}:{WEBUI_PORT}")
+    print(f"  API           : http://{API_HOST}:{API_PORT}")

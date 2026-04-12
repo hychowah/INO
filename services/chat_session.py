@@ -9,7 +9,7 @@ import db
 from services import backup as backup_service
 from services import pipeline, state
 from services.chat_actions import (
-    WEBUI_CONFIRMABLE_ACTIONS,
+    CHAT_CONFIRMABLE_ACTIONS,
     confirmation_history_entry,
     decline_history_entry,
     is_intercepted_action,
@@ -412,7 +412,7 @@ def _due_summary() -> str:
     return "\n".join(lines)
 
 
-async def _handle_learn_message(text: str, author: str = "webui", source: str = "webui") -> dict:
+async def _handle_learn_message(text: str, author: str = "chat", source: str = "chat") -> dict:
     set_action_source(source)
     llm_response = await pipeline.call_with_fetch_loop("command", text, author)
     _prefix, message, action_data = parse_llm_response(llm_response)
@@ -427,7 +427,7 @@ async def _handle_learn_message(text: str, author: str = "webui", source: str = 
     return _response(reply, msg_type=msg_type, actions=_derive_actions(action_data, reply))
 
 
-async def _handle_review_command(raw_text: str, author: str = "webui", source: str = "webui") -> dict:
+async def _handle_review_command(raw_text: str, author: str = "chat", source: str = "chat") -> dict:
     review_lines = pipeline.handle_review_check()
     if not review_lines:
         _record_exchange(raw_text, "No concepts to review — add some topics first!")
@@ -555,7 +555,7 @@ async def _handle_reorganize_command(raw_text: str) -> dict:
     return _response(message)
 
 
-async def handle_webui_message(text: str, author: str = "webui", source: str = "webui") -> dict:
+async def handle_chat_message(text: str, author: str = "chat", source: str = "chat") -> dict:
     _ensure_db()
     text = text.strip()
     if not text:
@@ -574,7 +574,7 @@ async def handle_webui_message(text: str, author: str = "webui", source: str = "
             _record_exchange(text, message)
             return _response(message)
         if command == "sync":
-            message = "Discord slash-command sync is not relevant in WebUI chat."
+            message = "Discord slash-command sync is not relevant in this chat."
             _record_exchange(text, message)
             return _response(message)
         if command == "persona":
@@ -635,11 +635,11 @@ async def handle_webui_message(text: str, author: str = "webui", source: str = "
     return await _handle_learn_message(text, author=author, source=source)
 
 
-async def confirm_webui_action(action_data: dict, source: str = "webui") -> dict:
+async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
     _ensure_db()
     set_action_source(source)
 
-    action = require_confirmable_action(action_data, WEBUI_CONFIRMABLE_ACTIONS, "confirmed in WebUI")
+    action = require_confirmable_action(action_data, CHAT_CONFIRMABLE_ACTIONS, "confirmed here")
     message = action_data.get("message", "")
     params = action_data.get("params", {})
 
@@ -694,18 +694,18 @@ async def confirm_webui_action(action_data: dict, source: str = "webui") -> dict
         db.add_chat_message("assistant", summary)
         return _response(f"{message}\n\n{summary}")
 
-    raise ValueError(f"Action '{action}' is not supported by the WebUI confirm flow")
+    raise ValueError(f"Action '{action}' is not supported by this chat confirm flow")
 
 
-async def decline_webui_action(action_data: dict, source: str = "webui") -> dict:
+async def decline_chat_action(action_data: dict, source: str = "chat") -> dict:
     _ensure_db()
     set_action_source(source)
-    require_confirmable_action(action_data, WEBUI_CONFIRMABLE_ACTIONS, "declined in WebUI")
+    require_confirmable_action(action_data, CHAT_CONFIRMABLE_ACTIONS, "declined here")
     db.add_chat_message("user", decline_history_entry(action_data))
     return _response("Declined.")
 
 
-async def handle_webui_action(action: dict, author: str = "webui", source: str = "webui") -> dict:
+async def handle_chat_action(action: dict, author: str = "chat", source: str = "chat") -> dict:
     _ensure_db()
     kind = str(action.get("kind", "")).lower().strip()
 
@@ -713,7 +713,7 @@ async def handle_webui_action(action: dict, author: str = "webui", source: str =
         message = str(action.get("message", "")).strip()
         if not message:
             raise ValueError("Action message cannot be empty")
-        return await handle_webui_message(message, author=author, source=source)
+        return await handle_chat_message(message, author=author, source=source)
 
     if kind == "skip_quiz":
         concept_id = action.get("concept_id")
@@ -768,3 +768,9 @@ async def handle_webui_action(action: dict, author: str = "webui", source: str =
         return _response("")
 
     raise ValueError(f"Unknown chat action kind '{kind}'")
+
+
+handle_webui_message = handle_chat_message
+confirm_webui_action = confirm_chat_action
+decline_webui_action = decline_chat_action
+handle_webui_action = handle_chat_action

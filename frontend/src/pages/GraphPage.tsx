@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ForceGraph2D from 'react-force-graph-2d';
 import { forceCenter, forceX, forceY } from 'd3-force';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -510,8 +510,8 @@ export function GraphPage() {
                 <CardContent className="space-y-3 text-sm text-slate-300">
                   <p>If you need a denser view, jump back to the migrated lists instead of fighting the canvas.</p>
                   <div className="flex flex-wrap gap-2">
-                    <a className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" href="/topics">Topics</a>
-                    <a className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" href="/concepts">Concepts</a>
+                    <Link className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" to="/topics">Topics</Link>
+                    <Link className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" to="/concepts">Concepts</Link>
                   </div>
                 </CardContent>
               </Card>

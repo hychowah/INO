@@ -13,7 +13,7 @@ Read these **before making any code changes**.
 | `CODING.md` | Development instructions, project structure, import conventions, async/sync rules, how to add actions/endpoints | Every coding task |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory | Before touching a module with a known quirk; § numbers referenced in comments |
 | `docs/ARCHITECTURE.md` | File map, data flow diagrams, module responsibilities, DB schema, vector search, spaced repetition logic | Before adding a module or refactoring across layers |
-| `docs/API.md` | Full API surface: Discord commands, REST endpoints, Web UI pages, auth, env vars | Before changing or adding any public interface |
+| `docs/API.md` | Full API surface: Discord commands, REST endpoints, FastAPI-served browser routes, auth, env vars | Before changing or adding any public interface |
 | `AGENTS.md` | Pointer file — maps skill files to modes; **do not add runtime instructions here** | When adding or modifying a skill file or pipeline mode |
 | `docs/index.md` | Runtime LLM knowledge base map — skill files, persona files, loading logic | When changing skill sets, adding a skill file, or modifying pipeline mode routing |
 

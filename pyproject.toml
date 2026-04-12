@@ -24,5 +24,4 @@ select = ["E", "F", "W", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "db/__init__.py" = ["F401"]
-"webui/**" = ["E501"]
 "scripts/**" = ["E501"]

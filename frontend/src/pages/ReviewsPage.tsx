@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchReviews } from '../api';
@@ -93,7 +94,7 @@ function ReviewsTable({ reviews }: { reviews: ReviewLogEntry[] }) {
                 <tr key={reviewRowKey(review)} className="align-top transition-colors hover:bg-white/5">
                   <td className="border-b border-white/5 px-4 py-3 text-slate-400">{review.reviewed_at || '—'}</td>
                   <td className="border-b border-white/5 px-4 py-3">
-                    <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${review.concept_id}`}>{review.concept_title}</a>
+                    <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${review.concept_id}`}>{review.concept_title}</Link>
                   </td>
                   <td className="max-w-[200px] border-b border-white/5 px-4 py-3 text-slate-300">{review.question_asked || '—'}</td>
                   <td className="max-w-[200px] border-b border-white/5 px-4 py-3 text-slate-300">{review.user_response || '—'}</td>

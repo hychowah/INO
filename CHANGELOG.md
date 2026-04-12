@@ -6,6 +6,10 @@ Key changes, newest first.
 
 ## April 2026
 
+### Removed
+
+- **Legacy `webui/` runtime** — the separate Python-rendered browser stack and companion `8050` flow have been retired; FastAPI now serves the built React SPA on the explicit browser routes, and browser chat uses the shared FastAPI chat controller with buffered SSE replay via `/api/chat/stream`
+
 ### Added
 
 - **Taxonomy shadow rebuild** (`scripts/taxonomy_shadow_rebuild.py`, `docs/TAXONOMY_REBUILD.md`) — operator workflow that previews taxonomy changes against shadow copies of the live DBs/vector store, records replayable safe actions, writes before/after structure snapshots, and replays safe actions against live data after a backup; driven by `call_taxonomy_loop()` with `max_actions`, `action_journal`, and `operator_directive` hooks

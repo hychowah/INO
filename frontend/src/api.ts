@@ -57,6 +57,108 @@ async function postJson<T>(path: string, payload: object): Promise<T> {
   return parseJson<T>(response);
 }
 
+function parseSseBlock(block: string): { event: string; data: unknown } | null {
+  const lines = block.split('\n');
+  let event = 'message';
+  const dataLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim();
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (!dataLines.length) {
+    return null;
+  }
+
+  return {
+    event,
+    data: JSON.parse(dataLines.join('\n')),
+  };
+}
+
+export async function streamChat(
+  message: string,
+  handlers?: { onStatus?: (message: string) => void }
+): Promise<ChatEnvelope> {
+  const response = await fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Accept': 'text/event-stream',
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'fetch'
+    },
+    body: JSON.stringify({ message })
+  });
+
+  if (!response.ok || !response.body) {
+    return parseJson<ChatEnvelope>(response);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalPayload: ChatEnvelope | null = null;
+
+  function consumeBufferedEvents() {
+    const normalized = buffer.replace(/\r\n/g, '\n');
+    let nextBuffer = normalized;
+
+    while (true) {
+      const boundary = nextBuffer.indexOf('\n\n');
+      if (boundary === -1) {
+        break;
+      }
+
+      const block = nextBuffer.slice(0, boundary);
+      nextBuffer = nextBuffer.slice(boundary + 2);
+      const parsed = parseSseBlock(block);
+      if (!parsed) {
+        continue;
+      }
+
+      if (parsed.event === 'status') {
+        handlers?.onStatus?.(String((parsed.data as { message?: string }).message || ''));
+        continue;
+      }
+
+      if (parsed.event === 'error') {
+        throw new Error(String((parsed.data as { message?: string }).message || 'Stream request failed'));
+      }
+
+      if (parsed.event === 'done') {
+        finalPayload = parsed.data as ChatEnvelope;
+      }
+    }
+
+    buffer = nextBuffer;
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    consumeBufferedEvents();
+    if (done) {
+      break;
+    }
+  }
+
+  if (!finalPayload) {
+    throw new Error('Stream ended before a final response was received');
+  }
+
+  return finalPayload;
+}
+
 export function sendChat(message: string): Promise<ChatEnvelope> {
   return postJson<ChatEnvelope>('/api/chat', { message });
 }

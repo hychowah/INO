@@ -2,7 +2,7 @@
 Process-wide runtime coordination state shared across entry points.
 
 This module owns lightweight shared state that must be visible across the bot,
-scheduler, and embedded WebUI server without introducing import cycles.
+scheduler, and FastAPI chat entry points without introducing import cycles.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from datetime import datetime
 last_activity_at: datetime | None = None
 
 # Serializes access to the chat pipeline while process-global session state is
-# still shared between the bot, scheduler, and embedded WebUI server.
+# still shared between the bot, scheduler, and FastAPI chat entry points.
 PIPELINE_LOCK = threading.Lock()
 
 # ============================================================================

@@ -37,24 +37,17 @@ export function AppLayout({ active, children }: AppLayoutProps) {
                     : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white'
                 );
 
-                const label = (
-                  <>
-                    <span>{item.label}</span>
-                    {!item.migrated ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400/80" aria-hidden="true" /> : null}
-                  </>
-                );
-
-                if (item.migrated && inRouterContext) {
+                if (inRouterContext) {
                   return (
                     <Link key={item.href} to={item.href} className={className}>
-                      {label}
+                      {item.label}
                     </Link>
                   );
                 }
 
                 return (
-                  <a key={item.href} href={item.migrated ? item.href : resolveBackendHref(item.href)} className={className}>
-                    {label}
+                  <a key={item.href} href={resolveBackendHref(item.href)} className={className}>
+                    {item.label}
                   </a>
                 );
               })}

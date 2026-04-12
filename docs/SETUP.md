@@ -198,7 +198,6 @@ make run-bot
 ```
 
 The bot connects to Discord and registers slash commands on startup. Use `/sync` (in Discord) the first time you run it to publish commands to your server.
-It also starts the local Web UI on `http://localhost:8050` after the bot reaches `on_ready()`.
 
 ### FastAPI Backend
 
@@ -240,13 +239,7 @@ make dev-all
 # optional flags: python scripts/dev_all.py --no-bot  or  --no-ui
 ```
 
-### Bot Companion Web UI Dashboard
-
-```bash
-python webui/server.py
-```
-
-Open `http://localhost:8050` in your browser. This is optional — the Discord bot launches this automatically on startup.
+There is no longer a separate companion Web UI. Use the FastAPI-served built frontend on `:8080` or the Vite dev server on `:5173`.
 
 ---
 
@@ -260,11 +253,7 @@ INO/
 ├── backups/            # Runtime-generated — timestamped backup snapshots (git-ignored)
 ├── db/                 # SQLite database access layer
 ├── services/           # Core business logic (pipeline, tools, tools_assess, context, …)
-├── webui/              # Local web dashboard + in-process chat
-│   ├── server.py       # HTTP server + routing
-│   ├── helpers.py      # HTML helpers (extracted from server.py)
-│   ├── pages/          # Page renderer package (dashboard, topics, concepts, reviews, activity, graph)
-│   └── static/         # JS and CSS assets
+├── frontend/           # React/TypeScript/Vite browser frontend
 ├── data/
 │   ├── skills/         # LLM skill files (hot-reloadable)
 │   ├── preferences.template.md  # Tracked default copied to runtime preferences.md on first bot startup

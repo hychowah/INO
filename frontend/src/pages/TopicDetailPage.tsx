@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchTopicDetail, fetchTopicMap } from '../api';
@@ -94,11 +94,11 @@ function TopicDetailContent({ topic, topicMap }: TopicDetailBundle) {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
-            <a className="transition-colors hover:text-slate-200" href="/topics">Topics</a>
+            <Link className="transition-colors hover:text-slate-200" to="/topics">Topics</Link>
             {trail.map((ancestor) => (
               <span key={ancestor.id} className="flex items-center gap-2">
                 <span>/</span>
-                <a className="transition-colors hover:text-slate-200" href={`/topic/${ancestor.id}`}>{ancestor.title}</a>
+                <Link className="transition-colors hover:text-slate-200" to={`/topic/${ancestor.id}`}>{ancestor.title}</Link>
               </span>
             ))}
             <span className="flex items-center gap-2 text-slate-200">
@@ -138,7 +138,7 @@ function TopicDetailContent({ topic, topicMap }: TopicDetailBundle) {
                     {topic.concepts.map((concept) => (
                       <tr key={concept.id} className="transition-colors hover:bg-white/5">
                         <td className="border-b border-white/5 px-4 py-3">
-                          <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${concept.id}`}>{concept.title}</a>
+                          <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${concept.id}`}>{concept.title}</Link>
                           {concept.latest_remark ? <div className="mt-1 text-xs text-slate-500">{concept.latest_remark}</div> : null}
                         </td>
                         <td className="border-b border-white/5 px-4 py-3">{concept.mastery_level}/100</td>
@@ -163,7 +163,7 @@ function TopicDetailContent({ topic, topicMap }: TopicDetailBundle) {
               {topic.parents.length ? (
                 <div className="flex flex-wrap gap-2">
                   {topic.parents.map((parent) => (
-                    <a key={parent.id} className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" href={`/topic/${parent.id}`}>{parent.title}</a>
+                    <Link key={parent.id} className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" to={`/topic/${parent.id}`}>{parent.title}</Link>
                   ))}
                 </div>
               ) : <p className="text-sm text-slate-400">No parent topics.</p>}
@@ -180,7 +180,7 @@ function TopicDetailContent({ topic, topicMap }: TopicDetailBundle) {
                 const childStats = byId.get(child.id);
                 return (
                   <div key={child.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
-                    <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/topic/${child.id}`}>{child.title}</a>
+                    <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/topic/${child.id}`}>{child.title}</Link>
                     {child.description ? <p className="mt-2 text-sm text-slate-400">{child.description}</p> : null}
                     {childStats ? <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500"><span>{childStats.concept_count} concepts</span><span>{childStats.due_count} due</span></div> : null}
                   </div>

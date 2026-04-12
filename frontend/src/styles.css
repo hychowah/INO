@@ -1,19 +1,21 @@
-@import url('../../webui/static/style.css');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
+@layer base {
+  body {
+    margin: 0;
+  }
 }
 
-#root {
-  min-height: 100vh;
-}
+@layer components {
+  #root {
+    min-height: 100vh;
+  }
 
-.chat-pre {
-  white-space: pre-wrap;
-  font: inherit;
-  margin: 0;
+  .chat-pre {
+    white-space: pre-wrap;
+    font: inherit;
+    margin: 0;
+  }
 }

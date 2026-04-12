@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchConceptDetail, fetchConceptRelations } from '../api';
@@ -84,7 +84,7 @@ function ConceptDetailContent({ concept, relations }: ConceptDetailBundle) {
           <Badge variant="outline">{concept.review_count} reviews</Badge>
           <Badge variant="outline">{concept.interval_days || 1} day interval</Badge>
           {concept.topics.map((topic) => (
-            <a key={topic.id} className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" href={`/topic/${topic.id}`}>{topic.title}</a>
+            <Link key={topic.id} className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:bg-white/10" to={`/topic/${topic.id}`}>{topic.title}</Link>
           ))}
         </CardContent>
       </Card>
@@ -137,7 +137,7 @@ function ConceptDetailContent({ concept, relations }: ConceptDetailBundle) {
               {relations.length ? relations.map((relation) => (
                 <div key={relation.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${relation.other_concept_id}`}>{relation.other_title}</a>
+                    <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${relation.other_concept_id}`}>{relation.other_title}</Link>
                     <Badge variant="outline">{relation.relation_type.replace(/_/g, ' ')}</Badge>
                     <Badge variant="outline">{relation.other_mastery}/100</Badge>
                   </div>

@@ -12,6 +12,29 @@ function jsonResponse(data: FetchJson) {
   } as Response);
 }
 
+function streamResponse(events: Array<{ event: string; data: Record<string, unknown> }>) {
+  const encoder = new TextEncoder();
+  const chunks = events.map(({ event, data }) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+
+  return Promise.resolve(
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      }),
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+        },
+      }
+    )
+  );
+}
+
 describe('App', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -62,18 +85,24 @@ describe('App', () => {
         });
       }
 
-      if (String(input) === '/api/chat') {
+      if (String(input) === '/api/chat/stream') {
         const body = JSON.parse(String(init?.body || '{}')) as { message?: string };
         if (body.message === '/review') {
-          return jsonResponse({
-            type: 'pending_confirm',
-            message: 'Add this concept?',
-            pending_action: {
-              action: 'add_concept',
-              message: 'Add this concept?',
-              params: { title: 'Rust' },
+          return streamResponse([
+            { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+            {
+              event: 'done',
+              data: {
+                type: 'pending_confirm',
+                message: 'Add this concept?',
+                pending_action: {
+                  action: 'add_concept',
+                  message: 'Add this concept?',
+                  params: { title: 'Rust' },
+                },
+              },
             },
-          });
+          ]);
         }
         throw new Error(`Unexpected chat message: ${body.message}`);
       }
@@ -113,16 +142,22 @@ describe('App', () => {
         });
       }
 
-      if (String(input) === '/api/chat') {
-        return jsonResponse({
-          type: 'pending_confirm',
-          message: 'Add this concept?',
-          pending_action: {
-            action: 'add_concept',
-            message: 'Add this concept?',
-            params: { title: 'Rust' },
+      if (String(input) === '/api/chat/stream') {
+        return streamResponse([
+          { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+          {
+            event: 'done',
+            data: {
+              type: 'pending_confirm',
+              message: 'Add this concept?',
+              pending_action: {
+                action: 'add_concept',
+                message: 'Add this concept?',
+                params: { title: 'Rust' },
+              },
+            },
           },
-        });
+        ]);
       }
 
       if (String(input) === '/api/chat/confirm') {
@@ -165,35 +200,41 @@ describe('App', () => {
         });
       }
 
-      if (String(input) === '/api/chat') {
+      if (String(input) === '/api/chat/stream') {
         const body = JSON.parse(String(init?.body || '{}')) as { message?: string };
         if (body.message === '/maintain') {
-          return jsonResponse({
-            type: 'reply',
-            message: 'Maintenance proposals ready.',
-            pending_action: null,
-            actions: [
-              {
-                type: 'proposal_review',
-                title: 'Maintenance proposals',
-                items: [
+          return streamResponse([
+            { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+            {
+              event: 'done',
+              data: {
+                type: 'reply',
+                message: 'Maintenance proposals ready.',
+                pending_action: null,
+                actions: [
                   {
-                    id: 'proposal-1',
-                    label: 'Rename topic',
-                    detail: 'Rename target: Rust Basics',
-                    buttons: [
+                    type: 'proposal_review',
+                    title: 'Maintenance proposals',
+                    items: [
                       {
-                        label: 'Approve',
-                        style: 'primary',
-                        ui_effect: 'remove_item',
-                        action: { kind: 'apply_maintenance_actions', actions: [{ action: 'update_topic' }] },
+                        id: 'proposal-1',
+                        label: 'Rename topic',
+                        detail: 'Rename target: Rust Basics',
+                        buttons: [
+                          {
+                            label: 'Approve',
+                            style: 'primary',
+                            ui_effect: 'remove_item',
+                            action: { kind: 'apply_maintenance_actions', actions: [{ action: 'update_topic' }] },
+                          },
+                        ],
                       },
                     ],
                   },
                 ],
               },
-            ],
-          });
+            },
+          ]);
         }
       }
 
@@ -236,26 +277,32 @@ describe('App', () => {
         });
       }
 
-      if (String(input) === '/api/chat') {
+      if (String(input) === '/api/chat/stream') {
         const body = JSON.parse(String(init?.body || '{}')) as { message?: string };
         if (body.message === '/review') {
-          return jsonResponse({
-            type: 'reply',
-            message: 'Choose the best answer.',
-            pending_action: null,
-            actions: [
-              {
-                type: 'multiple_choice',
-                title: 'Choose an answer',
-                choices: [
+          return streamResponse([
+            { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+            {
+              event: 'done',
+              data: {
+                type: 'reply',
+                message: 'Choose the best answer.',
+                pending_action: null,
+                actions: [
                   {
-                    label: 'Borrowing',
-                    action: { kind: 'send_message', message: 'I choose: Borrowing' },
+                    type: 'multiple_choice',
+                    title: 'Choose an answer',
+                    choices: [
+                      {
+                        label: 'Borrowing',
+                        action: { kind: 'send_message', message: 'I choose: Borrowing' },
+                      },
+                    ],
                   },
                 ],
               },
-            ],
-          });
+            },
+          ]);
         }
       }
 
@@ -303,27 +350,33 @@ describe('App', () => {
         });
       }
 
-      if (String(input) === '/api/chat') {
+      if (String(input) === '/api/chat/stream') {
         const body = JSON.parse(String(init?.body || '{}')) as { message?: string };
         if (body.message === '/due') {
-          return jsonResponse({
-            type: 'reply',
-            message: 'Quiz follow-up',
-            pending_action: null,
-            actions: [
-              {
-                type: 'button_group',
-                title: 'Quiz follow-up',
-                buttons: [
+          return streamResponse([
+            { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+            {
+              event: 'done',
+              data: {
+                type: 'reply',
+                message: 'Quiz follow-up',
+                pending_action: null,
+                actions: [
                   {
-                    label: 'Done',
-                    style: 'secondary',
-                    action: { kind: 'dismiss' },
+                    type: 'button_group',
+                    title: 'Quiz follow-up',
+                    buttons: [
+                      {
+                        label: 'Done',
+                        style: 'secondary',
+                        action: { kind: 'dismiss' },
+                      },
+                    ],
                   },
                 ],
               },
-            ],
-          });
+            },
+          ]);
         }
       }
 
@@ -345,5 +398,67 @@ describe('App', () => {
     });
     expect(screen.getByText('Quiz follow-up')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders assistant rich text as React content including concept links', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (String(input) === '/api/chat/bootstrap') {
+        return jsonResponse({
+          history: [
+            {
+              role: 'assistant',
+              content: '## Review\n\nRead **this** `carefully` and revisit [concept:7].\n\n- First step\n- Second step',
+            },
+          ],
+          commands: [],
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument();
+    expect(screen.getByText('this')).toBeInTheDocument();
+    expect(screen.getByText('carefully')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'concept:7' })).toHaveAttribute('href', '/concept/7');
+    expect(screen.getByText('First step')).toBeInTheDocument();
+    expect(screen.getByText('Second step')).toBeInTheDocument();
+  });
+
+  it('streams the assistant reply over the chat stream endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (String(input) === '/api/chat/bootstrap') {
+        return jsonResponse({
+          history: [],
+          commands: [],
+        });
+      }
+
+      if (String(input) === '/api/chat/stream') {
+        return streamResponse([
+          { event: 'status', data: { message: 'Waiting for the learning agent...' } },
+          { event: 'done', data: { type: 'reply', message: 'Streaming works.', pending_action: null } },
+        ]);
+      }
+
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = await screen.findByPlaceholderText(/ask a question/i);
+    await user.type(input, 'hello');
+    await user.keyboard('{Enter}');
+
+    expect(await screen.findByText('Streaming works.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/chat/stream',
+      expect.objectContaining({
+        method: 'POST',
+      })
+    );
   });
 });

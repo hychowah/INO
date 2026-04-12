@@ -13,9 +13,9 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Hybrid search** — Qdrant vector store (768-dim, `all-mpnet-base-v2`) + SQLite FTS5, with graceful degradation if Qdrant is unavailable
 - **Multi-concept synthesis quizzes** — Semantically clusters related concepts for cross-topic questions
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
-- **Multiple interfaces** — Discord bot, FastAPI REST API, and the local Web UI share the same learning pipeline and data stores
+- **Multiple interfaces** — Discord bot, FastAPI REST API, and the FastAPI-served React browser UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard + React SPA** — FastAPI-served local UI with React routes for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity, with the legacy companion UI retained on port 8050 during cleanup
+- **Web dashboard + React SPA** — FastAPI serves the React browser UI for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity routes
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -78,7 +78,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 | LLM Backend | `kimi` CLI or any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
 | Discord | discord.py |
 | REST API | FastAPI + Uvicorn |
-| Web UI | FastAPI-served React/TypeScript/Vite SPA + Tailwind CSS + local UI primitives, plus the legacy companion Web UI on port 8050 |
+| Web UI | FastAPI-served React/TypeScript/Vite SPA + Tailwind CSS + local UI primitives |
 
 > **Note:** `sentence-transformers` pulls in PyTorch (~2 GB download). For CPU-only installs:
 > `pip install torch --index-url https://download.pytorch.org/whl/cpu` before installing requirements.
@@ -118,7 +118,7 @@ If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`. For the `kimi` CLI
 Then run:
 
 ```bash
-python bot.py          # Discord bot (+ local companion UI on :8050)
+python bot.py          # Discord bot
 python api.py          # FastAPI app on http://localhost:8080
 make build-ui          # Optional: rebuild the React SPA assets before running api.py
 make dev-ui            # Optional: Vite dev server for SPA development on :5173
@@ -128,9 +128,8 @@ make dev-all           # API + Vite dev server + Discord bot together
 Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
-- If `frontend/dist/` exists, FastAPI serves the built React SPA entry for `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`; otherwise those routes fall back to the legacy server-rendered pages.
+- If `frontend/dist/` exists, FastAPI serves the built React SPA entry for `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
 - `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while backend requests are proxied to the FastAPI app on port 8080.
-- `python bot.py` still starts a local companion web UI on port 8050 for the Discord flow.
 - `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
 
 ## Discord Bot Setup
@@ -308,7 +307,7 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── embeddings.py       # Sentence-transformers singleton
 │   ├── dedup.py            # Duplicate detection (vector + fuzzy)
 │   ├── backup.py           # Snapshot backup service (DB + vectors)
-│   ├── chat_session.py     # Shared chat-session controller used by FastAPI and legacy WebUI
+│   ├── chat_session.py     # Shared chat-session controller used by FastAPI browser/API routes
 │   └── ...
 ├── db/                     # Database package (SQLite + Qdrant)
 │   ├── core.py             # Connections, schema init
@@ -326,11 +325,6 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 ├── scripts/                # Operator/admin scripts and test harnesses
 │   ├── taxonomy_shadow_rebuild.py  # Manual taxonomy preview/apply workflow
 │   └── ...
-├── webui/                  # Legacy server-rendered web UI pieces still used by FastAPI/bot flows
-│   ├── chat_backend.py     # Compatibility alias to services/chat_session.py for legacy imports
-│   ├── helpers.py          # HTML layout helpers
-│   ├── pages/              # Server-rendered page generators
-│   └── static/             # Shared CSS and legacy browser JS
 ├── tests/                  # pytest test suite
 └── docs/
     ├── ARCHITECTURE.md     # Full architecture documentation

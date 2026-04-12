@@ -40,9 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR = Path(__file__).resolve().parents[1] / "webui" / "static"
-app.mount("/static", StaticFiles(directory=STATIC_DIR.resolve()), name="static")
-
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 frontend_assets = FRONTEND_DIST / "assets"
 if frontend_assets.exists():

@@ -1,8 +1,8 @@
-"""Shared chat action helpers for API and WebUI confirmation flows."""
+"""Shared chat action helpers for API and chat confirmation flows."""
 
 INTERCEPTED_ACTIONS = frozenset({"add_concept", "suggest_topic"})
 API_CONFIRMABLE_ACTIONS = frozenset({"add_concept", "suggest_topic", "add_topic", "link_concept"})
-WEBUI_CONFIRMABLE_ACTIONS = frozenset(
+CHAT_CONFIRMABLE_ACTIONS = frozenset(
     {
         "add_concept",
         "suggest_topic",
@@ -11,6 +11,8 @@ WEBUI_CONFIRMABLE_ACTIONS = frozenset(
         "taxonomy_review",
     }
 )
+
+WEBUI_CONFIRMABLE_ACTIONS = CHAT_CONFIRMABLE_ACTIONS
 
 
 def normalize_action(action_data: dict | str | None) -> str:

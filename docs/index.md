@@ -25,7 +25,7 @@
 |---|---|
 | `CODING.md` | Development instructions for AI coding assistants |
 | `docs/SETUP.md` | Step-by-step local development setup guide |
-| `docs/API.md` | API reference: Discord commands, FastAPI routes, local Web UI pages/endpoints |
+| `docs/API.md` | API reference: Discord commands, FastAPI routes, and FastAPI-served browser routes/endpoints |
 | `docs/ARCHITECTURE.md` | System architecture, file map, data flow, diagrams; **§ Semantic Search & Vector Store** |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **§12 Hybrid Vector Search** |
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |

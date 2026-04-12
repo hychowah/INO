@@ -4,7 +4,7 @@ Learning Agent — CLI entry point (standalone testing/debugging).
 
 The Discord bot does NOT call this as a subprocess anymore.
 Pipeline.py calls db/tools/context directly. This file is kept
-for manual testing and the webui.
+for manual testing and CLI debugging.
 
 Modes: command, reply, review-check, maintenance, fetch, context-only
 """
@@ -51,7 +51,7 @@ def execute_action(action_data: dict) -> str:
         return f"REPLY: {result}"
 
     # Guard: mirror pipeline.execute_action — block assess/multi_assess when no
-    # quiz is active. Prevents duplicate score writes during CLI/webui testing.
+    # quiz is active. Prevents duplicate score writes during CLI testing.
     if action in ("assess", "multi_assess"):
         if not db.get_session("quiz_anchor_concept_id") and not db.get_session(
             "active_concept_ids"

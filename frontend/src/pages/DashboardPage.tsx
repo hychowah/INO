@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppLayout } from '../components/AppLayout';
@@ -40,7 +41,7 @@ function TopicTree({ node, byId, seen }: { node: TopicMapNode; byId: Map<number,
   return (
     <li className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
-        <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/topic/${node.id}`}>{node.title}</a>
+        <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/topic/${node.id}`}>{node.title}</Link>
         <span className="text-slate-500">{node.concept_count} concepts</span>
         <span className="text-slate-500">{node.due_count} due</span>
       </div>
@@ -155,7 +156,7 @@ function DashboardContent({
               <tbody>
                 {dueConcepts.map((concept) => (
                   <tr key={concept.id} className="transition-colors hover:bg-white/5">
-                    <td className="border-b border-white/5 px-4 py-3"><a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${concept.id}`}>{concept.title}</a></td>
+                    <td className="border-b border-white/5 px-4 py-3"><Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${concept.id}`}>{concept.title}</Link></td>
                     <td className="border-b border-white/5 px-4 py-3">{concept.mastery_level}/100</td>
                     <td className="border-b border-white/5 px-4 py-3 text-slate-400">{concept.next_review_at || '—'}</td>
                   </tr>
@@ -175,7 +176,7 @@ function DashboardContent({
         <CardContent className="space-y-3 text-sm">
           <p className="text-slate-200">Today: {summarizeActivity(actionSummary.today_by_action)} ({actionSummary.today_total} total)</p>
           <p className="text-slate-400">This week: {summarizeActivity(actionSummary.by_action)} ({actionSummary.total} total)</p>
-          <p><a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href="/actions">View full activity log →</a></p>
+          <p><Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to="/actions">View full activity log →</Link></p>
         </CardContent>
       </Card>
 
