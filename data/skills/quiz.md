@@ -11,6 +11,7 @@ Generate and output one quiz question. The LLM writes the question in `message`.
 - `concept_id` (int, optional): Specific concept to quiz
 - `topic_id` (int, optional): Pick from this topic's due concepts
 - `message` (string, required): The actual quiz question text
+- `choices` (string[], optional): Multiple-choice options to display when provided by the quiz generator
 
 <!-- DO NOT REMOVE: This example is critical — without it the LLM puts quiz fields at top level instead of inside params, breaking concept_id tracking for the subsequent assess. See 2026-03-10 bug. -->
 **Example:**
@@ -18,7 +19,8 @@ Generate and output one quiz question. The LLM writes the question in `message`.
 {
   "action": "quiz",
   "params": {
-    "concept_id": 12
+    "concept_id": 12,
+    "choices": ["304 is always stronger", "316 has better chloride resistance", "316 is only for high heat"]
   },
   "message": "**Application:** In a coastal chemical plant, why might an engineer choose 316L over 304? What specific properties matter in that environment?"
 }
@@ -29,6 +31,7 @@ Generate and output one quiz question. The LLM writes the question in `message`.
 - **One question per turn.** Never generate multiple questions at once. Ask ONE question, wait for the user's answer, assess it, then offer the next question.
 - **Fetch concept detail FIRST** — you cannot write a good question without reading remarks + review history. See **Adaptive Quiz Evolution** below for the complete pre-quiz workflow.
 - The message IS the question — make it clear and engaging.
+- If pre-generated quiz data includes `choices`, preserve them in `params.choices` so the UI can render clickable multiple-choice answers.
 
 ## assess
 Judge the user's answer to a quiz question. Updates score + schedules next review.

@@ -2,9 +2,11 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from services import pipeline
 
@@ -37,6 +39,14 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+STATIC_DIR = Path(__file__).resolve().parents[1] / "webui" / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR.resolve()), name="static")
+
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+frontend_assets = FRONTEND_DIST / "assets"
+if frontend_assets.exists():
+    app.mount("/assets", StaticFiles(directory=frontend_assets.resolve()), name="assets")
 
 # Register all route modules
 from api import routes as _routes  # noqa: E402

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Learning Agent is a Discord-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database.
+The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access comes in two forms: a React/TypeScript/Vite chat frontend under `frontend/` (served by FastAPI on port 8080, or via Vite dev server on port 5173), and a companion web UI dashboard (`webui/server.py`) started alongside the Discord bot on port 8050.
 
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
@@ -96,7 +96,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `api/app.py` | ~55 | FastAPI app assembly and route registration |
-| `api/auth.py` | ~20 | Bearer-token dependency protecting REST endpoints except `/api/health` |
+| `api/auth.py` | ~20 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` or `WEBUI_PORT` bypass token checks; `/api/health` is always public |
 | `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals |
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
@@ -149,6 +149,7 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, `last_activity_at`, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
+| `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
 | `scripts/test_prompts.py` | ~180 | Prompt-debugging harness for maintenance, reorganize, and quiz prompt assembly |
 | `scripts/test_quiz_generator.py` | ~120 | Manual test harness for the two-prompt quiz generation pipeline |
@@ -157,6 +158,13 @@ The Learning Agent is a Discord-based spaced repetition system where **all learn
 | `tests/test_maintenance.py` | ~160 | Test maintenance diagnostics and dedup sub-agent |
 | `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
+| **frontend/** | | |
+| `frontend/src/App.tsx` | — | React 19 chat shell — pending actions, request lock, error rendering, `resolveBackendHref()` nav helper |
+| `frontend/src/App.test.tsx` | — | Frontend unit tests — Vitest + Testing Library; covers all action types and nav link rewriting |
+| `frontend/src/types.ts` | — | Shared TypeScript types (`Message`, `ButtonAction`, `PendingAction`, etc.) |
+| `frontend/src/api.ts` | — | Fetch helpers for `/api/chat`, `/api/chat/confirm`, `/api/chat/decline`, `/api/chat/bootstrap` |
+| `frontend/vite.config.ts` | — | Vite dev server on port 5173; proxies `/api/*` and page paths to FastAPI on 8080 |
+| `frontend/package.json` | — | npm scripts (`dev`, `build`, `test`) and dependencies (React, TypeScript, Vite, Vitest, Testing Library) |
 
 ---
 
@@ -595,8 +603,9 @@ The core brain of the system. Coordinates everything:
 - Imports from `context.py` and `tools.py` (same modules the bot uses)
 - **Not called by the bot** — pipeline.py calls the modules directly
 
-### webui/ — Web Dashboard
-- Zero-dependency HTTP server on port 8050 (`webui/server.py`)
+### webui/ — Bot Companion Web Dashboard
+- Zero-dependency HTTP server on port 8050 (`webui/server.py`) — started automatically by the Discord bot on startup
+- This is separate from the React frontend (`frontend/`) which is served by FastAPI on port 8080
 - Static file serving for extracted CSS and JS (`webui/static/`)
 - Local chat surface at `/chat` backed by `webui/chat_backend.py`, plus local POST routes for confirm/decline and concept deletion
 - Interactive topic tree with expand/collapse, search/filter, and subtree stats
@@ -814,7 +823,9 @@ backup model without requiring administrator privileges.
 | Max fetch iterations | 3 | pipeline.py |
 | Chat history in context | 12 messages | context.py |
 | Max Discord message | 1900 chars | config.py |
-| Web UI port | 8050 | webui/server.py |
+| Bot companion Web UI port | 8050 | webui/server.py (started by bot on ready) |
+| API / React chat port | 8080 | api.py / FastAPI |
+| React dev server port | 5173 | Vite (`cd frontend && npm run dev`) |
 | Static assets | `webui/static/` | webui/server.py |
 | Data directory | `learning_agent/data/` | config.py |
 | Vector store path | `data/vectors/` | `LEARN_VECTOR_STORE_PATH` / config.py |

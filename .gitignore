@@ -38,5 +38,9 @@ scripts/prompt_logs/
 .coverage
 htmlcov/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # Environment variables
 .env

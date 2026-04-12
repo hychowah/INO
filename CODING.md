@@ -26,16 +26,18 @@ python bot.py
 
 If you see `No module named pytest` or any missing-import error, you forgot to activate the venv.
 
+**Frontend commands** (`npm run dev`, `npm run build`, `npm run test`) do **not** use the venv but do require **Node.js and npm** on your PATH. Run `npm install` inside `frontend/` once before using these commands.
+
 ---
 
 ## Project Overview
 
-A personal learning coach with spaced repetition. Two entry points talk to the same pipeline:
+A personal learning coach with spaced repetition. Two Python entry points share the same backend pipeline; the React/TypeScript frontend is a browser client that talks to the API:
 
 ```
-bot.py  (Discord)  ─┐
-                     ├──→  services/pipeline.py  →  services/tools.py (+tools_assess.py)  →  db/
-api.py  (FastAPI)   ─┘
+bot.py  (Discord)  ─┬──┴────────────────────────────────────────────────────
+api.py  (FastAPI)  ─┼───── services/pipeline.py ── services/tools.py (+tools_assess.py) ── db/
+frontend/ (React)  ─┘  ← browser client, proxied to api.py in dev
 ```
 
 The runtime LLM (DeepSeek/Grok/kimi) is the brain — it decides what to teach, when to quiz, and how to adapt. The code is a thin executor: parse LLM JSON → call DB → return result.
@@ -110,6 +112,13 @@ ROOT
 │   └── __init__.py        # Re-exports all public functions; VECTORS_AVAILABLE flag
 │
 ├── tests/                 # pytest test suite
+├── frontend/              # React/TypeScript/Vite chat frontend (dev :5173, built served by FastAPI :8080)
+│   ├── src/App.tsx        # Main chat shell — pending actions, request lock, action renderer
+│   ├── src/App.test.tsx   # Frontend unit tests (Vitest + Testing Library)
+│   ├── src/types.ts       # Shared TypeScript types
+│   ├── src/api.ts         # API fetch helpers
+│   ├── vite.config.ts     # Vite dev server config + proxy rules to localhost:8080
+│   └── package.json       # npm scripts: dev, build, test
 ├── webui/                 # Web UI: DB browser + knowledge graph visualization
 │   ├── server.py          # stdlib HTTP server, routing + Handler class
 │   ├── helpers.py         # HTML helpers (score_bar, layout, _esc, etc.)
@@ -127,6 +136,7 @@ ROOT
 │   ├── index.md
 │   └── plans/             # Feature design plans
 ├── scripts/               # agent.py (maintenance CLI), utility scripts
+│   ├── dev_all.py         # Cross-platform dev launcher (API + Vite frontend + Discord bot)
 │   ├── taxonomy_shadow_rebuild.py # Operator taxonomy preview/apply workflow
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
 │   ├── test_prompts.py    # Prompt-debugging harness for maintenance/reorganize/quiz modes
@@ -292,6 +302,12 @@ python -m pytest tests/ -n 0          # single-threaded override for debugging
 python -m pytest tests/test_llm.py -v # single file
 ```
 
+For the React frontend tests (Vitest + Testing Library — no venv required):
+```bash
+make test-ui
+# equivalent to: cd frontend && npm run test
+```
+
 **Vector store tests** (`tests/test_vectors.py`) are automatically skipped when `qdrant-client` is not installed — `pytest.importorskip("qdrant_client")` at module top.
 
 **Normal tests skip vector init** via `conftest.py` patching `db.core._init_vector_store`, and they set `LEARN_DISABLE_VECTOR_SYNC=1` so CRUD helpers do not trigger embedding-model loads during ordinary test runs.
@@ -358,36 +374,42 @@ classes, fixtures, and assertions.
 python -m venv venv
 .\venv\Scripts\Activate.ps1          # Windows
 pip install -r requirements.txt
+cd frontend && npm install && cd ..  # install React frontend deps (requires Node.js)
 cp .env.example .env                 # Fill in your secrets
-python api.py                        # Start API on :8080
-python bot.py                        # Start Discord bot
 ```
 
-Both entry points can run simultaneously — SQLite WAL mode handles concurrent access.
+Start services:
+
+```bash
+python api.py                        # FastAPI on :8080
+python bot.py                        # Discord bot (also starts companion webui on :8050)
+cd frontend && npm run dev           # React dev server on :5173
+```
+
+Or start everything at once:
+
+```bash
+make dev-all                         # API + React dev server + Discord bot
+```
+
+All services can run simultaneously — SQLite WAL mode handles concurrent reads/writes.
 
 ---
 
 ## Future Direction — Mobile App (React Native)
 
-> **Status:** Not started. Current priority is reliable backend + prompt instructions.
-> The plan is to eventually ship this as a React Native / Expo mobile app.
-> All work below is about making the **backend app-ready** — no mobile code yet.
+> **Status:** React web SPA is live under `frontend/`. Mobile (React Native / Expo) is not started.
+> Current priority is reliable backend + prompt instructions.
 
-### Why This Matters Now
+### Current Architecture
 
-The web UI (`webui/server.py`) uses a stdlib HTTP server with direct `import db` calls — HTML is built in Python f-strings. This is fine as a localhost dashboard but **not reusable** as an app frontend. The FastAPI API (`api.py`) is the intended backend for any future client (mobile, desktop, or web SPA).
-
-**Current goal:** Expand `api.py` to cover all CRUD operations so that:
-1. Any future frontend (React Native, web SPA) has a complete REST API to consume
-2. The web dashboard could optionally be migrated to use the API too (not required)
-3. No business logic lives in transport-specific code (bot.py, webui/server.py)
-
-### Architecture (current + future)
+The React frontend (`frontend/`) is the primary web interface. The companion web UI (`webui/server.py`) is a legacy stdlib HTTP server that starts alongside the Discord bot on port 8050.
 
 ```
+React Frontend       ──→  api.py (FastAPI :8080)  ──→  services/pipeline.py  ──→  db/
 [Future] Mobile App  ──→  api.py (FastAPI :8080)  ──→  services/pipeline.py  ──→  db/
 Discord Bot          ──→  bot.py                   ──→  services/pipeline.py  ──→  db/
-Web Dashboard        ──→  webui/server.py           ──→  db/  (direct, read-only)
+Bot Companion WebUI  ──→  webui/server.py           ──→  db/  (direct, read-only)
 ```
 
 ### Current API Coverage (api.py)

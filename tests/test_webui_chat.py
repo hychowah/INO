@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import db
 
 import webui.server as webui_server
-from webui.chat_backend import handle_webui_message
+from webui.chat_backend import handle_webui_action, handle_webui_message
 from webui.pages.chat import page_chat
 from webui.server import Handler
 
@@ -46,6 +46,8 @@ def test_page_chat_renders_with_bootstrap_history(test_db):
     assert 'window.__CHAT_HISTORY =' in html
     assert "hello from the browser" in html
     assert '/static/chat.js?v=2' in html
+    assert 'window.__CHAT_COMMANDS =' in html
+    assert 'id="chat-command-list"' in html
     assert 'class="container chat-layout"' in html
     assert 'aria-label="Message the learning agent"' in html
     assert 'role="status" aria-live="polite"' in html
@@ -335,6 +337,33 @@ def test_handle_webui_review_command_works_without_api_server(test_db):
     assert db.get_session("last_quiz_question") == "What is the key idea?"
 
 
+def test_handle_webui_review_command_returns_skip_action_when_eligible(test_db):
+    cid = db.add_concept("Reviewable", "desc")
+    db.update_concept(cid, review_count=3)
+
+    with (
+        patch("webui.chat_backend.pipeline.handle_review_check", return_value=[f"{cid}|review payload"]),
+        patch("webui.chat_backend.pipeline.generate_quiz_question", new=AsyncMock(return_value={"concept_id": cid})),
+        patch("webui.chat_backend.pipeline.package_quiz_for_discord", new=AsyncMock(return_value="FETCH: ignored")),
+        patch("webui.chat_backend.pipeline.execute_llm_response", new=AsyncMock(return_value="REPLY: What is the key idea?")),
+    ):
+        response = asyncio.run(handle_webui_message("/review"))
+
+    assert response["actions"] == [
+        {
+            "type": "button_group",
+            "title": "Quiz actions",
+            "buttons": [
+                {
+                    "label": "I know this",
+                    "style": "secondary",
+                    "action": {"kind": "skip_quiz", "concept_id": cid},
+                }
+            ],
+        }
+    ]
+
+
 def test_handle_webui_review_command_does_not_duplicate_history(test_db):
     cid = db.add_concept("Reviewable", "desc")
 
@@ -362,6 +391,101 @@ def test_handle_webui_review_command_does_not_duplicate_history(test_db):
     assert history[1]["content"] == "What is the key idea?"
 
 
+def test_handle_webui_message_assess_response_returns_navigation_actions(test_db):
+    cid = db.add_concept("Assessable", "desc")
+    db.set_session("last_assess_concept_id", str(cid))
+    db.set_session("last_assess_quality", "2")
+    action_data = {
+        "action": "assess",
+        "params": {"concept_id": cid, "quality": 2},
+    }
+
+    with (
+        patch("webui.chat_backend.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
+        patch("webui.chat_backend.parse_llm_response", return_value=("FETCH", "Needs work", action_data)),
+        patch("webui.chat_backend.pipeline.execute_llm_response", new=AsyncMock(return_value="REPLY: Needs work")),
+    ):
+        response = asyncio.run(handle_webui_message("my answer"))
+
+    assert response["actions"] == [
+        {
+            "type": "button_group",
+            "title": "Quiz follow-up",
+            "buttons": [
+                {
+                    "label": "Explain",
+                    "style": "primary",
+                    "action": {
+                        "kind": "send_message",
+                        "message": f"[BUTTON] Explain concept #{cid} (Assessable) in detail — I got the quiz wrong and need help understanding it",
+                    },
+                },
+                {
+                    "label": "Quiz again",
+                    "style": "secondary",
+                    "action": {
+                        "kind": "send_message",
+                        "message": f"[BUTTON] Quiz me again on concept #{cid} (Assessable)",
+                    },
+                },
+                {
+                    "label": "Next due",
+                    "style": "secondary",
+                    "action": {
+                        "kind": "send_message",
+                        "message": "[BUTTON] Quiz me on the next due concept",
+                    },
+                },
+                {
+                    "label": "Done",
+                    "style": "secondary",
+                    "action": {"kind": "dismiss"},
+                },
+            ],
+        }
+    ]
+
+
+def test_handle_webui_message_quiz_with_choices_returns_multiple_choice_actions(test_db):
+    cid = db.add_concept("Quizable", "desc")
+    action_data = {
+        "action": "quiz",
+        "params": {
+            "concept_id": cid,
+            "choices": ["Option A", "Option B", "Option C"],
+        },
+    }
+
+    with (
+        patch("webui.chat_backend.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
+        patch("webui.chat_backend.parse_llm_response", return_value=("FETCH", "Question", action_data)),
+        patch("webui.chat_backend.pipeline.execute_llm_response", new=AsyncMock(return_value="REPLY: Question")),
+    ):
+        response = asyncio.run(handle_webui_message("quiz me"))
+
+    assert response["actions"][0] == {
+        "type": "multiple_choice",
+        "title": "Choose an answer",
+        "choices": [
+            {"label": "Option A", "action": {"kind": "send_message", "message": "I choose: Option A"}},
+            {"label": "Option B", "action": {"kind": "send_message", "message": "I choose: Option B"}},
+            {"label": "Option C", "action": {"kind": "send_message", "message": "I choose: Option C"}},
+        ],
+    }
+
+
+def test_handle_webui_action_skip_quiz_returns_navigation_actions(test_db):
+    cid = db.add_concept("Skippable", "desc")
+    db.update_concept(cid, review_count=3)
+    db.set_session("quiz_answered", None)
+    db.set_session("last_quiz_question", "What do you know?")
+
+    response = asyncio.run(handle_webui_action({"kind": "skip_quiz", "concept_id": cid}))
+
+    assert response["message"].startswith("⏭️ Skipped — score:")
+    assert response["actions"][0]["buttons"][0]["label"] == "Next due"
+
+
 def test_handle_webui_preference_edit_returns_pending_confirm(test_db):
     with patch(
         "webui.chat_backend.pipeline.call_preference_edit",
@@ -372,6 +496,95 @@ def test_handle_webui_preference_edit_returns_pending_confirm(test_db):
     assert response["type"] == "pending_confirm"
     assert response["pending_action"]["action"] == "preference_update"
     assert response["pending_action"]["params"]["content"] == "new preferences content"
+
+
+def test_handle_webui_maintenance_returns_granular_review_actions(test_db):
+    dedup_groups = [{"keep": db.add_concept("Keep", "desc"), "merge": [], "reason": "same concept"}]
+    proposed_actions = [
+        {
+            "action": "update_topic",
+            "message": "Rename topic for clarity",
+            "params": {"topic_id": 7, "title": "Control Systems"},
+        }
+    ]
+
+    with (
+        patch("webui.chat_backend.pipeline.handle_maintenance", return_value="context"),
+        patch("webui.chat_backend.pipeline.call_maintenance_loop", new=AsyncMock(return_value=("REPLY: Summary", proposed_actions))),
+        patch("webui.chat_backend.db.get_pending_proposal", return_value=None),
+        patch("webui.chat_backend.pipeline.handle_dedup_check", new=AsyncMock(return_value=dedup_groups)),
+    ):
+        response = asyncio.run(handle_webui_message("/maintain"))
+
+    assert response["type"] == "reply"
+    assert "actions" in response
+    assert [block["type"] for block in response["actions"]] == ["proposal_review", "proposal_review"]
+    assert response["actions"][0]["title"] == "Dedup proposals"
+    assert response["actions"][1]["title"] == "Maintenance proposals"
+
+
+def test_handle_webui_reorganize_returns_granular_review_actions(test_db):
+    proposed_actions = [
+        {
+            "action": "update_topic",
+            "message": "Rename topic",
+            "params": {"topic_id": 2, "title": "Embedded Systems"},
+        }
+    ]
+
+    with (
+        patch("webui.chat_backend.pipeline.handle_taxonomy", return_value="taxonomy context"),
+        patch("webui.chat_backend.pipeline.call_taxonomy_loop", new=AsyncMock(return_value=("REPLY: Taxonomy summary", proposed_actions))),
+    ):
+        response = asyncio.run(handle_webui_message("/reorganize"))
+
+    assert response["type"] == "reply"
+    assert response["actions"][0]["title"] == "Taxonomy proposals"
+
+
+def test_handle_webui_action_apply_maintenance_actions_executes_single_item(test_db):
+    action_data = {
+        "action": "update_topic",
+        "message": "Rename topic for clarity",
+        "params": {"topic_id": 7, "title": "Control Systems"},
+    }
+
+    with patch(
+        "webui.chat_backend.pipeline.execute_maintenance_actions",
+        new=AsyncMock(return_value=["✅ `update_topic` — Rename topic for clarity"]),
+    ):
+        response = asyncio.run(
+            handle_webui_action(
+                {"kind": "apply_maintenance_actions", "actions": [action_data], "source": "taxonomy"}
+            )
+        )
+
+    assert response == {
+        "type": "reply",
+        "message": "Applied taxonomy changes:\n- ✅ `update_topic` — Rename topic for clarity",
+        "pending_action": None,
+    }
+
+
+def test_handle_webui_action_reject_proposals_logs_rejection(test_db):
+    action_data = {
+        "action": "update_topic",
+        "message": "Rename topic for clarity",
+        "params": {"topic_id": 7, "title": "Control Systems"},
+    }
+
+    response = asyncio.run(
+        handle_webui_action({"kind": "reject_proposals", "items": [action_data], "source": "maintenance"})
+    )
+
+    assert response == {
+        "type": "reply",
+        "message": "Rejected 1 proposal(s).",
+        "pending_action": None,
+    }
+    entries = db.get_action_log(limit=5)
+    assert entries[0]["action"] == "update_topic"
+    assert entries[0]["result_type"] == "rejected"
 
 
 def test_chat_confirm_preference_update_records_history(test_db):

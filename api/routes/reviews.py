@@ -25,6 +25,24 @@ async def get_next_review():
     return db.get_next_review_concept()
 
 
+@router.get("/api/forecast", dependencies=[Depends(verify_token)])
+async def get_forecast(range: str = "weeks"):
+    """Legacy forecast payload used by the current webui page."""
+    try:
+        return db.get_due_forecast(range)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/api/forecast/concepts", dependencies=[Depends(verify_token)])
+async def get_forecast_concepts(range: str = "weeks", bucket: str = "0"):
+    """Legacy forecast bucket detail payload used by the current webui page."""
+    try:
+        return db.get_forecast_bucket_concepts(range, bucket)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.get("/api/actions", dependencies=[Depends(verify_token)])
 async def get_actions(
     action: str | None = None,

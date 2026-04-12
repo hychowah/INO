@@ -61,12 +61,42 @@ class TestChat:
         assert "Message cannot be empty" in resp.json()["detail"]
 
     @pytest.mark.anyio
+    async def test_chat_supports_webui_ping_command(self, client):
+        resp = await client.post("/api/chat", json={"message": "/ping"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Pong!",
+            "pending_action": None,
+        }
+
+    @pytest.mark.anyio
+    async def test_chat_clear_exposes_clear_history_flag(self, client):
+        db.add_chat_message("user", "hello")
+        db.add_chat_message("assistant", "hi")
+
+        resp = await client.post("/api/chat", json={"message": "/clear"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Chat history cleared.",
+            "pending_action": None,
+            "clear_history": True,
+        }
+        assert db.get_chat_history(limit=5) == []
+
+    @pytest.mark.anyio
     async def test_chat_normal_reply(self, client):
         with (
-            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="REPLY: raw")),
-            patch("api.routes.chat.parse_llm_response", return_value=("REPLY", "raw", None)),
             patch(
-                "api.routes.chat.pipeline.execute_llm_response",
+                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                new=AsyncMock(return_value="REPLY: raw"),
+            ),
+            patch("webui.chat_backend.parse_llm_response", return_value=("REPLY", "raw", None)),
+            patch(
+                "webui.chat_backend.pipeline.execute_llm_response",
                 new=AsyncMock(return_value="REPLY: Final answer"),
             ),
         ):
@@ -87,9 +117,12 @@ class TestChat:
             "params": {"title": "Rust", "topic_titles": ["Programming"]},
         }
         with (
-            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
             patch(
-                "api.routes.chat.parse_llm_response",
+                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                new=AsyncMock(return_value="ignored"),
+            ),
+            patch(
+                "webui.chat_backend.parse_llm_response",
                 return_value=("FETCH", "Add this concept?", action_data),
             ),
         ):
@@ -115,9 +148,12 @@ class TestChat:
             "params": {"title": "Compilers"},
         }
         with (
-            patch("api.routes.chat.pipeline.call_with_fetch_loop", new=AsyncMock(return_value="ignored")),
             patch(
-                "api.routes.chat.parse_llm_response",
+                "webui.chat_backend.pipeline.call_with_fetch_loop",
+                new=AsyncMock(return_value="ignored"),
+            ),
+            patch(
+                "webui.chat_backend.parse_llm_response",
                 return_value=("FETCH", "Want me to add this topic?", action_data),
             ),
         ):
@@ -137,7 +173,7 @@ class TestChat:
             "message": "Add this concept?",
             "params": {"title": "Ownership"},
         }
-        with patch("services.tools.execute_action", return_value=("reply", "Added concept #7")):
+        with patch("webui.chat_backend.execute_action", return_value=("reply", "Added concept #7")):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
 
         assert resp.status_code == 200
@@ -158,7 +194,7 @@ class TestChat:
             "params": {"title": "Compilers"},
         }
         with patch(
-            "services.tools.execute_suggest_topic_accept",
+            "webui.chat_backend.execute_suggest_topic_accept",
             return_value=(True, "✅ Created topic **Compilers** (#3)", 3),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
@@ -227,6 +263,153 @@ class TestChat:
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.post("/api/chat", json={"message": "hello"})
                 assert resp.status_code == 401
+
+    @pytest.mark.anyio
+    async def test_chat_allows_local_webui_without_token_when_auth_enabled(self, test_db):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8050") as ac:
+                resp = await ac.post("/api/chat", json={"message": "/ping"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Pong!",
+            "pending_action": None,
+        }
+
+    @pytest.mark.anyio
+    async def test_chat_allows_local_fastapi_ui_without_token_when_auth_enabled(self, test_db):
+        with patch.object(config, "API_SECRET_KEY", "real-secret"):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8080") as ac:
+                resp = await ac.post("/api/chat", json={"message": "/ping"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Pong!",
+            "pending_action": None,
+        }
+
+    @pytest.mark.anyio
+    async def test_chat_action_endpoint_dispatches_structured_action(self, client):
+        with patch(
+            "api.routes.chat.handle_webui_action",
+            new=AsyncMock(
+                return_value={
+                    "type": "reply",
+                    "message": "Next quiz",
+                    "pending_action": None,
+                    "actions": [
+                        {
+                            "type": "button_group",
+                            "buttons": [
+                                {
+                                    "label": "Done",
+                                    "style": "secondary",
+                                    "action": {"kind": "dismiss"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+        ):
+            resp = await client.post(
+                "/api/chat/action",
+                json={"action": {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"}},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Next quiz",
+            "pending_action": None,
+            "actions": [
+                {
+                    "type": "button_group",
+                    "buttons": [
+                        {
+                            "label": "Done",
+                            "style": "secondary",
+                            "action": {"kind": "dismiss"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    @pytest.mark.anyio
+    async def test_chat_bootstrap_returns_history_and_commands(self, client):
+        db.add_chat_message("user", "hello")
+        db.add_chat_message("assistant", "hi there")
+
+        resp = await client.get("/api/chat/bootstrap")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [entry["content"] for entry in data["history"]] == ["hello", "hi there"]
+        assert data["commands"] == [
+            {"label": "Review", "command": "/review"},
+            {"label": "Due", "command": "/due"},
+            {"label": "Topics", "command": "/topics"},
+            {"label": "Maintain", "command": "/maintain"},
+            {"label": "Reorganize", "command": "/reorganize"},
+            {"label": "Preference", "command": "/preference "},
+        ]
+
+
+class TestLegacyPages:
+    @pytest.mark.anyio
+    async def test_chat_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/chat")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div class="chat-page">' in resp.text
+        assert '/static/chat.js?v=2' in resp.text
+
+    @pytest.mark.anyio
+    async def test_chat_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react chat</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/chat")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react chat</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_static_style_served_by_fastapi(self, client):
+        resp = await client.get("/static/style.css")
+
+        assert resp.status_code == 200
+        assert "text/css" in resp.headers["content-type"]
+        assert ".chat-page" in resp.text
+
+    @pytest.mark.anyio
+    async def test_forecast_json_endpoint_served_by_fastapi(self, client):
+        resp = await client.get("/api/forecast?range=weeks")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "overdue_count" in data
+        assert "buckets" in data
+
+    @pytest.mark.anyio
+    async def test_legacy_concept_delete_endpoint_served_by_fastapi(self, client):
+        concept_id = _make_concept("Delete Me")
+
+        resp = await client.post(f"/api/concept/{concept_id}/delete")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert db.get_concept(concept_id) is None
 
 
 # ============================================================================

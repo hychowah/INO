@@ -126,6 +126,16 @@ Examples:
 - Better for a user who wants architecture: "How do routing, dependency injection, and ASGI fit together in FastAPI's architecture during a request?"
 - Better for a user who wants concrete implementation: "In a small internal API, when would FastAPI's type-driven validation save you work compared with a lighter manual approach?"
 
+### Optional multiple-choice output
+When the question has a clean, non-trick multiple-choice form, you may include a `choices` array with 3–4 plausible options.
+
+Use multiple choice only when:
+- there is one clearly best answer based on the provided concept data
+- the distractors are educational, not misleading nonsense
+- the question still tests understanding rather than lucky guessing
+
+Do not force multiple choice for synthesis, teach-back, or open-ended mechanism questions.
+
 ---
 
 ## Output Format
@@ -139,7 +149,8 @@ Respond with a single JSON object. No other text, no markdown, no explanation.
   "question_type": "application",
   "target_facet": "Brief description of which aspect of the concept this targets",
   "reasoning": "Why you chose this question — what remark/review history informed the decision",
-  "concept_ids": [12]
+  "concept_ids": [12],
+  "choices": ["Optional choice A", "Optional choice B", "Optional choice C"]
 }
 ```
 
@@ -150,3 +161,4 @@ Respond with a single JSON object. No other text, no markdown, no explanation.
 - `target_facet` (string, required): Which aspect/facet of the concept this question targets — ensures variety across quizzes.
 - `reasoning` (string, required): Your analysis of why this is the right question. References remark strategy, past review patterns, related concept scores.
 - `concept_ids` (int[], required): IDs of all concepts this question covers. Usually just `[primary_id]`. For synthesis questions spanning multiple concepts, include all relevant IDs.
+- `choices` (string[], optional): 3–4 answer options when a strong multiple-choice version exists. Omit this field for open-ended questions.

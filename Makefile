@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-all lint format run-bot run-api
+.PHONY: test test-fast test-all test-ui lint format run-bot run-api dev-ui build-ui dev-all
 
 # Run the full test suite (parallel)
 test: test-all
@@ -10,6 +10,10 @@ test-fast:
 # Run the full test suite
 test-all:
 	python -c "import os, subprocess, sys; env=os.environ.copy(); env.setdefault('LEARN_LLM_PROVIDER', 'kimi'); env.setdefault('LEARN_AUTHORIZED_USER_ID', '123456789'); raise SystemExit(subprocess.call([sys.executable, '-m', 'pytest', 'tests/'], env=env))"
+
+# Run the React chat frontend tests
+test-ui:
+	cd frontend && npm run test
 
 # Lint with Ruff
 lint:
@@ -27,3 +31,15 @@ run-bot:
 # Start the FastAPI backend (with live-reload)
 run-api:
 	python -c "import config, uvicorn; uvicorn.run('api:app', host=config.API_HOST, port=config.API_PORT, reload=True)"
+
+# Start the Vite chat frontend (requires npm install in frontend/ first)
+dev-ui:
+	cd frontend && npm run dev
+
+# Start API + frontend dev server + Discord bot together
+dev-all:
+	python scripts/dev_all.py
+
+# Build the React chat frontend for FastAPI to serve
+build-ui:
+	cd frontend && npm run build

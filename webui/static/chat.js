@@ -5,6 +5,7 @@
   const input = document.getElementById("chat-input");
   const sendButton = document.getElementById("chat-send");
   const status = document.getElementById("chat-status");
+  const commandList = document.getElementById("chat-command-list");
 
   if (!thread || !pendingHost || !form || !input || !sendButton || !status) {
     return;
@@ -12,12 +13,52 @@
 
   const STORAGE_KEY = "learning-agent-pending-action";
   const history = Array.isArray(window.__CHAT_HISTORY) ? window.__CHAT_HISTORY : [];
+  const commands = Array.isArray(window.__CHAT_COMMANDS) ? window.__CHAT_COMMANDS : [];
   let pendingAction = loadPendingAction();
   let requestInFlight = false;
 
   function resizeInput() {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+  }
+
+  function insertCommand(command) {
+    const raw = String(command || "");
+    if (!raw) {
+      return;
+    }
+
+    const prefix = input.value && !input.value.endsWith(" ") ? " " : "";
+    input.value = `${input.value}${prefix}${raw}`;
+    resizeInput();
+    input.focus();
+  }
+
+  function renderCommandPalette() {
+    if (!commandList) {
+      return;
+    }
+
+    commandList.innerHTML = "";
+    commands.forEach(function (item) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chat-command-chip";
+      button.textContent = item.label || item.command || "Command";
+      button.draggable = true;
+      button.dataset.command = item.command || "";
+
+      button.addEventListener("click", function () {
+        insertCommand(item.command || "");
+      });
+
+      button.addEventListener("dragstart", function (event) {
+        event.dataTransfer.setData("text/plain", item.command || "");
+        event.dataTransfer.effectAllowed = "copy";
+      });
+
+      commandList.appendChild(button);
+    });
   }
 
   function loadPendingAction() {
@@ -110,6 +151,7 @@
 
   function appendMessage(role, content, timestamp, options) {
     const variant = options && options.variant ? options.variant : "default";
+    const actions = options && Array.isArray(options.actions) ? options.actions : [];
     const empty = thread.querySelector(".chat-empty");
     if (empty) {
       empty.remove();
@@ -140,6 +182,13 @@
     }
     item.appendChild(bubble);
 
+    if (role === "assistant" && actions.length) {
+      const actionHost = renderActionBlocks(actions);
+      if (actionHost) {
+        item.appendChild(actionHost);
+      }
+    }
+
     if (timestamp) {
       const meta = document.createElement("div");
       meta.className = "chat-meta";
@@ -149,6 +198,140 @@
 
     thread.appendChild(item);
     thread.scrollTop = thread.scrollHeight;
+  }
+
+  function renderActionBlocks(actionBlocks) {
+    const host = document.createElement("div");
+    host.className = "chat-actions";
+
+    actionBlocks.forEach(function (block) {
+      if (!block) {
+        return;
+      }
+
+      if (block.type === "button_group" && Array.isArray(block.buttons)) {
+        const group = document.createElement("div");
+        group.className = "chat-action-group";
+
+        if (block.title) {
+          const title = document.createElement("div");
+          title.className = "chat-action-title";
+          title.textContent = block.title;
+          group.appendChild(title);
+        }
+
+        const row = document.createElement("div");
+        row.className = "chat-action-buttons";
+
+        block.buttons.forEach(function (buttonDef) {
+          appendActionButton(row, buttonDef, group, buttonDef.ui_effect || "remove_block");
+        });
+
+        if (row.childElementCount) {
+          group.appendChild(row);
+          host.appendChild(group);
+        }
+      }
+
+      if (block.type === "proposal_review" && Array.isArray(block.items)) {
+        const review = document.createElement("div");
+        review.className = "proposal-review";
+
+        if (block.title) {
+          const title = document.createElement("div");
+          title.className = "proposal-review-title";
+          title.textContent = block.title;
+          review.appendChild(title);
+        }
+
+        if (block.description) {
+          const description = document.createElement("div");
+          description.className = "proposal-review-description";
+          description.textContent = block.description;
+          review.appendChild(description);
+        }
+
+        const list = document.createElement("div");
+        list.className = "proposal-review-list";
+
+        block.items.forEach(function (item) {
+          const card = document.createElement("div");
+          card.className = "proposal-review-item";
+
+          const label = document.createElement("div");
+          label.className = "proposal-review-label";
+          label.textContent = item.label || "Proposal";
+          card.appendChild(label);
+
+          if (item.detail) {
+            const detail = document.createElement("div");
+            detail.className = "proposal-review-detail";
+            detail.textContent = item.detail;
+            card.appendChild(detail);
+          }
+
+          const row = document.createElement("div");
+          row.className = "proposal-review-buttons";
+          (item.buttons || []).forEach(function (buttonDef) {
+            appendActionButton(row, buttonDef, card, buttonDef.ui_effect || "remove_item");
+          });
+          if (row.childElementCount) {
+            card.appendChild(row);
+          }
+          list.appendChild(card);
+        });
+
+        review.appendChild(list);
+
+        if (Array.isArray(block.bulk_buttons) && block.bulk_buttons.length) {
+          const bulkRow = document.createElement("div");
+          bulkRow.className = "proposal-review-bulk";
+          block.bulk_buttons.forEach(function (buttonDef) {
+            appendActionButton(bulkRow, buttonDef, review, buttonDef.ui_effect || "remove_block");
+          });
+          review.appendChild(bulkRow);
+        }
+
+        host.appendChild(review);
+      }
+
+      if (block.type === "multiple_choice" && Array.isArray(block.choices)) {
+        const card = document.createElement("div");
+        card.className = "multiple-choice";
+
+        if (block.title) {
+          const title = document.createElement("div");
+          title.className = "multiple-choice-title";
+          title.textContent = block.title;
+          card.appendChild(title);
+        }
+
+        const choices = document.createElement("div");
+        choices.className = "multiple-choice-list";
+        block.choices.forEach(function (choiceDef) {
+          appendActionButton(choices, choiceDef, card, choiceDef.ui_effect || "remove_block");
+        });
+        card.appendChild(choices);
+        host.appendChild(card);
+      }
+    });
+
+    return host.childElementCount ? host : null;
+  }
+
+  function appendActionButton(container, buttonDef, targetElement, uiEffect) {
+    if (!buttonDef || !buttonDef.action) {
+      return;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = buttonDef.style === "primary" ? "btn btn-primary" : "btn";
+    button.textContent = buttonDef.label || "Action";
+    button.addEventListener("click", function () {
+      runInlineAction(buttonDef.action, targetElement, uiEffect);
+    });
+    container.appendChild(button);
   }
 
   function renderHistory() {
@@ -312,6 +495,61 @@
     return data;
   }
 
+  function setGroupBusy(group, isBusy) {
+    const buttons = group.querySelectorAll("button");
+    buttons.forEach(function (button) {
+      button.disabled = isBusy;
+    });
+  }
+
+  async function runInlineAction(action, group, uiEffect) {
+    if (!action || requestInFlight) {
+      return;
+    }
+
+    if (action.kind === "dismiss") {
+      group.remove();
+      return;
+    }
+
+    setGroupBusy(group, true);
+    setBusy(true, "Running action...");
+
+    try {
+      const response = await apiPost("/api/chat/action", { action: action });
+      if (response.message) {
+        appendMessage("assistant", response.message || "", undefined, {
+          variant: response.type === "error" ? "error" : "default",
+          actions: response.actions || [],
+        });
+      }
+      if (response.type === "pending_confirm" && response.pending_action) {
+        savePendingAction(response.pending_action);
+      }
+      if (uiEffect === "remove_block") {
+        group.remove();
+      } else if (uiEffect === "remove_item") {
+        const parentList = group.parentElement;
+        group.remove();
+        if (parentList && !parentList.querySelector(".proposal-review-item")) {
+          const reviewBlock = parentList.closest(".proposal-review");
+          if (reviewBlock) {
+            reviewBlock.remove();
+          }
+        }
+      }
+    } catch (error) {
+      appendMessage("assistant", error.message || "Action failed.", undefined, {
+        variant: "error",
+      });
+      setGroupBusy(group, false);
+      return;
+    } finally {
+      setBusy(false, "");
+      input.focus();
+    }
+  }
+
   async function resolvePendingAction(path, confirmButton, declineButton) {
     if (!pendingAction || requestInFlight) {
       return;
@@ -378,6 +616,7 @@
       }
       appendMessage("assistant", response.message || "", undefined, {
         variant: response.type === "error" ? "error" : "default",
+        actions: response.actions || [],
       });
       if (response.type === "pending_confirm" && response.pending_action) {
         savePendingAction(response.pending_action);
@@ -401,9 +640,26 @@
     }
   });
 
+  input.addEventListener("dragover", function (event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    input.classList.add("chat-input-drop-target");
+  });
+
+  input.addEventListener("dragleave", function () {
+    input.classList.remove("chat-input-drop-target");
+  });
+
+  input.addEventListener("drop", function (event) {
+    event.preventDefault();
+    input.classList.remove("chat-input-drop-target");
+    insertCommand(event.dataTransfer.getData("text/plain"));
+  });
+
   input.addEventListener("input", resizeInput);
 
   resizeInput();
   renderHistory();
   renderPendingAction();
+  renderCommandPalette();
 })();

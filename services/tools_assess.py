@@ -459,7 +459,7 @@ def _handle_suggest_topic(params: Dict) -> Tuple[str, Any]:
     return ("reply", "\n".join(lines))
 
 
-def skip_quiz(concept_id: int, user_id: str = "default") -> dict:
+def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord") -> dict:
     """Skip a quiz question without answering. Scores as quality=5 with
     synthetic difficulty, writes a synthetic remark, and logs the review.
 
@@ -533,7 +533,7 @@ def skip_quiz(concept_id: int, user_id: str = "default") -> dict:
         params={"concept_id": concept_id},
         result_type="reply",
         result=f"score {current_score}→{new_score}",
-        source="discord",
+        source=source,
         user_id=user_id,
     )
 

@@ -35,6 +35,7 @@
 22. [Multi-User DB Groundwork](#22-multi-user-db-groundwork)
 23. [Process-Local Lock Hardening](#23-process-local-lock-hardening)
 24. [OpenAI Blocking-Import Fix](#24-openai-blocking-import-fix)
+25. [React Frontend & Dev Server URL Routing](#25-react-frontend--dev-server-url-routing)
 
 ---
 
@@ -317,6 +318,20 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `bot/commands.py` (`/review` anchor pre-set), `scripts/agent.py` (assess guard), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`.
 
 ---
+
+## 25. React Frontend & Dev Server URL Routing
+
+**Architecture:** The React/TypeScript/Vite frontend (`frontend/`) is served two ways:
+- **Dev mode:** Vite dev server on port 5173 (`make dev-ui`). Vite proxies XHR/fetch requests matching `/api/*` and page paths to FastAPI on port 8080.
+- **Production:** `make build-ui` builds `frontend/dist`; FastAPI mounts `frontend/dist/assets` at `/assets` and serves `frontend/dist/index.html` at `/chat`.
+
+**Non-obvious trap — href navigation vs. fetch proxy:** The Vite proxy only intercepts XHR / `fetch()` calls. Plain HTML `href` navigation (e.g., clicking the Dashboard link) is a full browser redirect — the browser sends it to the same origin (port 5173), so React Router catches it and routes to `/chat` instead of going to FastAPI's dashboard at port 8080.
+
+**Fix:** `resolveBackendHref(path)` in `frontend/src/App.tsx` rewrites nav links to the FastAPI origin when `window.location.port === "5173"`. All seven nav links and inline `[concept:N]` links use this helper. In production (browser on port 8080), it passes through unchanged.
+
+**Auth:** `api/auth.py` `_is_local_webui_request` now permits bearer-token-free access from `localhost` on **both** `API_PORT` (8080) and `WEBUI_PORT` (8050). Before this fix, the React frontend's `/api/chat/bootstrap` call from a browser on port 8080 was rejected with 401 even though it was a localhost request.
+
+**Key files:** `frontend/src/App.tsx` (`resolveBackendHref`, `loadPendingAction`, `ActionRenderer`), `frontend/vite.config.ts` (proxy rules), `api/app.py` (static mounts), `api/routes/pages.py` (`/chat` SPA entry point), `api/auth.py` (`_is_local_webui_request`), `frontend/src/App.test.tsx` (8 tests covering all action types + link rewriting).
 
 ## 21. Preference-Edit Isolated Skill Path
 

@@ -15,7 +15,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
 - **Multiple interfaces** — Discord bot, FastAPI REST API, and the local Web UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard + chat** — Zero-dependency local HTTP UI with interactive dashboard pages, in-process chat, and D3.js topic tree / force-directed graph
+- **Web dashboard + chat** — FastAPI-served local UI with interactive dashboard pages, a React chat shell, and legacy D3.js graph/tree views
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -28,8 +28,8 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 ┌─────────────────────────────────────────────────────────────────┐
 │  User Interfaces                                                │
 │  ┌────────────┐  ┌────────────┐  ┌──────────────────────────┐  │
-│  │ Discord Bot │  │  REST API  │  │   Web UI (local :8050)  │  │
-│  │  bot.py     │  │  api.py    │  │  webui/server.py         │  │
+│  │ Discord Bot │  │  REST API  │  │   Local Web UI           │  │
+│  │  bot.py     │  │  api.py    │  │  FastAPI + React/HTML    │  │
 │  └──────┬──────┘  └──────┬─────┘  └────────────┬─────────────┘  │
 ├─────────┼────────────────┼─────────────────────┼────────────────┤
 │  Pipeline Layer          │                     │                │
@@ -78,7 +78,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 | LLM Backend | `kimi` CLI or any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
 | Discord | discord.py |
 | REST API | FastAPI + Uvicorn |
-| Web UI | Vanilla JS + D3.js (zero build step) |
+| Web UI | FastAPI-served HTML + React/TypeScript + Vite + D3.js |
 
 > **Note:** `sentence-transformers` pulls in PyTorch (~2 GB download). For CPU-only installs:
 > `pip install torch --index-url https://download.pytorch.org/whl/cpu` before installing requirements.
@@ -118,11 +118,20 @@ If you omit `LEARN_LLM_PROVIDER`, the app defaults to `kimi`. For the `kimi` CLI
 Then run:
 
 ```bash
-python bot.py          # Discord bot (+ web dashboard on :8050)
-python api.py          # REST API only (http://localhost:8080)
+python bot.py          # Discord bot (+ local companion UI on :8050)
+python api.py          # FastAPI app on http://localhost:8080
+make build-ui          # Optional: rebuild the React chat assets before running api.py
+make dev-ui            # Optional: Vite dev server for chat UI development on :5173
+make dev-all           # API + Vite dev server + Discord bot together
 ```
 
-The web dashboard starts automatically with the Discord bot on port 8050. To run it standalone: `python -m webui.server`.
+Current web runtime notes:
+
+- `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
+- If `frontend/dist/` exists, `/chat` serves the built React client; otherwise it falls back to the legacy server-rendered chat page.
+- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/` and proxies backend requests to the FastAPI app on port 8080.
+- `python bot.py` still starts a local companion web UI on port 8050 for the Discord flow.
+- `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
 
 ## Discord Bot Setup
 
@@ -200,6 +209,7 @@ If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model)
 
 ```bash
 make test
+make test-ui
 
 # Fast unit-only subset
 make test-fast
@@ -209,6 +219,14 @@ pytest tests/
 ```
 
 `pytest` now defaults to `-n 4 --dist loadfile --tb=short` via `pyproject.toml`, so parallel execution is the standard path rather than an opt-in flag. Use `make test-fast` for the unit-marked subset when you want quicker feedback.
+
+The React chat frontend has its own focused test path:
+
+```bash
+make test-ui
+# or:
+cd frontend && npm run test
+```
 
 Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
 
@@ -260,8 +278,17 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── events.py           # Discord event handlers
 │   ├── messages.py         # Message splitting and view helpers
 │   └── auth.py             # Authorization helpers
-├── api.py                  # FastAPI REST entry point
+├── api.py                  # Thin FastAPI launcher for local development
+├── api/                    # FastAPI app package
+│   ├── app.py              # App factory, lifespan, middleware, static mounts
+│   ├── auth.py             # Bearer-token and localhost auth rules
+│   ├── schemas.py          # Request/response models
+│   └── routes/             # API and page routers
 ├── config.py               # Environment-based configuration
+├── frontend/               # React/Vite chat frontend
+│   ├── src/                # React app, API client, styles, frontend tests
+│   ├── dist/               # Built chat assets served by FastAPI when present
+│   └── vite.config.ts      # Dev server and proxy config
 ├── services/
 │   ├── pipeline.py         # Core orchestrator (context → LLM → parse → execute)
 │   ├── context.py          # Prompt/context construction
@@ -289,10 +316,11 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 ├── scripts/                # Operator/admin scripts and test harnesses
 │   ├── taxonomy_shadow_rebuild.py  # Manual taxonomy preview/apply workflow
 │   └── ...
-├── webui/                  # Zero-dependency web dashboard
-│   ├── server.py           # HTTP server + routing
-│   ├── helpers.py          # HTML helpers (extracted from server.py)
-│   └── pages/              # Page renderers split into package modules
+├── webui/                  # Legacy server-rendered web UI pieces still used by FastAPI/bot flows
+│   ├── chat_backend.py     # Shared web chat backend and action protocol helpers
+│   ├── helpers.py          # HTML layout helpers
+│   ├── pages/              # Server-rendered page generators
+│   └── static/             # Shared CSS and legacy browser JS
 ├── tests/                  # pytest test suite
 └── docs/
     ├── ARCHITECTURE.md     # Full architecture documentation

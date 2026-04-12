@@ -70,6 +70,7 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/chat/bootstrap` | Bootstrap payload for the React chat frontend — returns recent chat history and available command chips. |
 | `POST` | `/api/chat` | Send a message through the full LLM pipeline. Returns a text reply and optional `pending_confirm` for intercepted confirmation flows. |
 | `POST` | `/api/chat/confirm` | Confirm a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
 | `POST` | `/api/chat/decline` | Decline a whitelisted action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted confirmation actions. |
@@ -156,17 +157,11 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 
 ---
 
-## 3. Web UI (`webui/server.py`)
+## 3. Bot Companion Web UI (`webui/server.py`)
 
-A local-only dashboard and chat surface served on port `8050` (default) using Python's built-in HTTP server. No authentication is required for page loads (LAN/localhost use only by design).
+A local-only dashboard served on port `8050` (default) using Python's built-in HTTP server. Started automatically when `bot.py` starts. No authentication required (LAN/localhost only).
 
-Start with:
-
-```bash
-python webui/server.py
-```
-
-Running `python bot.py` also starts the same Web UI automatically after the Discord bot comes online.
+> **Note:** The React chat interface is served by FastAPI on port 8080, not by this server. This companion web UI provides the knowledge-base dashboard, topic browser, concept pages, and graph view.
 
 ### Pages
 
@@ -187,9 +182,9 @@ Running `python bot.py` also starts the same Web UI automatically after the Disc
 | `/graph` | Interactive D3.js force-directed knowledge graph |
 | `/static/*` | Static assets (JS, CSS) |
 
-### Local JSON Routes
+### Local Chat Routes (also available on FastAPI port 8080)
 
-These routes are served by the Web UI's built-in HTTP server on port `8050`. They are local Web UI routes, not FastAPI routes on port `8080`.
+The routes below exist on **both** the companion Web UI (port 8050, via `webui/chat_backend.py`) and the FastAPI REST API (port 8080, via `api/routes/chat.py`). The React frontend uses the FastAPI versions.
 
 | Method | Path | Description |
 |--------|------|-------------|

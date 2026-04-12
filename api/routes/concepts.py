@@ -106,6 +106,16 @@ async def delete_concept(concept_id: int):
     return {"message": f"Concept {concept_id} deleted."}
 
 
+@router.post("/api/concept/{concept_id}/delete", dependencies=[Depends(verify_token)])
+async def delete_concept_legacy(concept_id: int):
+    """Legacy delete endpoint used by the current concepts page JS."""
+    set_action_source("api")
+
+    if not db.delete_concept(concept_id):
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return {"ok": True}
+
+
 @router.post(
     "/api/concepts/{concept_id}/remarks", status_code=201, dependencies=[Depends(verify_token)]
 )

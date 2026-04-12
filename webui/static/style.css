@@ -189,6 +189,169 @@ tr:hover { background: rgba(88,166,255,.06); }
 .child-topic-card .card-title { font-weight: 500; font-size: 14px; color: var(--accent); }
 .child-topic-card .card-stats { font-size: 12px; color: var(--text2); margin-top: 4px; }
 
+.chat-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-action-title {
+  font-size: 12px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-command-palette {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.chat-command-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-command-hint {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.chat-command-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-command-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: grab;
+  font-size: 13px;
+}
+
+.chat-command-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chat-command-chip:active {
+  cursor: grabbing;
+}
+
+.chat-input-drop-target {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.16);
+}
+
+.proposal-review {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.proposal-review-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.proposal-review-description {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.proposal-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.proposal-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.proposal-review-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.proposal-review-detail {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: pre-wrap;
+}
+
+.proposal-review-buttons,
+.proposal-review-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multiple-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.multiple-choice-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.multiple-choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.multiple-choice-list .btn {
+  width: 100%;
+  text-align: left;
+}
+
 @media (max-width: 700px) {
   .container { padding: 12px; }
   .stats { flex-direction: column; }

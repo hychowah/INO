@@ -686,6 +686,7 @@ async def package_quiz_for_discord(p1_result: dict, concept_id: int) -> str:
         f"Instructions:\n"
         f"- Use the `quiz` action JSON format with concept_id from the data above\n"
         f"- Place the question in the `message` field, lightly rephrased for your persona voice\n"
+        f"- If the pre-generated data includes `choices`, preserve them in `params.choices`\n"
         f"- Do NOT change the question's scope, difficulty, or core intent\n"
         f"- Do NOT fetch or generate a different question — use the one provided\n"
         f"- Respond with the quiz action JSON only"
@@ -1053,6 +1054,20 @@ def handle_taxonomy() -> str | None:
     if not db.get_topic_map():
         return None
     return ctx.build_taxonomy_context()
+
+
+async def handle_dedup_check() -> list[dict] | None:
+    """Compatibility wrapper for the dedicated dedup sub-agent."""
+    from services.dedup import handle_dedup_check as run_dedup_check
+
+    return await run_dedup_check()
+
+
+async def execute_dedup_merges(groups: list[dict]) -> list[str]:
+    """Compatibility wrapper for executing dedup merge recommendations."""
+    from services.dedup import execute_dedup_merges as run_dedup_merges
+
+    return await run_dedup_merges(groups)
 
 
 

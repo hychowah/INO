@@ -1,6 +1,6 @@
 """Pydantic request/response models for the Learning Agent API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Chat
@@ -12,6 +12,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: str
     message: str
     pending_action: dict | None = None
@@ -19,6 +21,10 @@ class ChatResponse(BaseModel):
 
 class ConfirmRequest(BaseModel):
     action_data: dict
+
+
+class ChatActionRequest(BaseModel):
+    action: dict
 
 
 # ---------------------------------------------------------------------------

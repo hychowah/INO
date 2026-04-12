@@ -1,0 +1,15 @@
+@import url('../../webui/static/style.css');
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.chat-pre {
+  white-space: pre-wrap;
+  font: inherit;
+  margin: 0;
+}

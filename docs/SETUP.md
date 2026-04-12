@@ -9,6 +9,7 @@ This guide walks you through setting up a fully functional local development env
 | Python | 3.10+ | 3.12 recommended |
 | pip | latest | `pip install --upgrade pip` |
 | git | any | |
+| Node.js | 18+ | Required for the React frontend (`npm`) |
 | Discord account | — | Required for bot testing |
 | LLM API key | — | `kimi` CLI or any OpenAI-compatible provider |
 
@@ -44,6 +45,19 @@ pip install -r requirements-dev.txt
 > ```bash
 > pip install torch --index-url https://download.pytorch.org/whl/cpu
 > ```
+
+---
+
+## 2b. Install Frontend Dependencies
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+> **Node.js required.** This installs the React/TypeScript/Vite chat frontend.
+> Run this once before `make dev-ui`, `make build-ui`, `make test-ui`, or `make dev-all`.
 
 ---
 
@@ -135,6 +149,13 @@ make test-fast
 python -m pytest tests/ -n 0
 ```
 
+To run the React frontend tests (Vitest + Testing Library — no venv required):
+
+```bash
+make test-ui
+# equivalent to: cd frontend && npm run test
+```
+
 The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing. Parallel execution is the default through `pyproject.toml` (`-n 4 --dist loadfile --tb=short`), while `make test-fast` runs only tests marked `unit`.
 
 ---
@@ -176,13 +197,39 @@ make run-api
 - API docs: `http://localhost:8080/docs`
 - Health check: `http://localhost:8080/api/health`
 
-### Web UI Dashboard
+### React Chat Frontend (Vite dev server)
+
+```bash
+make dev-ui
+# equivalent to: cd frontend && npm run dev
+```
+
+- Opens the React chat UI at `http://127.0.0.1:5173`
+- The dev server proxies `/api/*` and page paths (`/chat`, `/topics`, `/concepts`, etc.) to FastAPI on `http://127.0.0.1:8080`
+- Requires the FastAPI backend (`make run-api`) to be running
+
+To build the production frontend (FastAPI serves it at `http://localhost:8080/chat`):
+
+```bash
+make build-ui
+# equivalent to: cd frontend && npm run build
+```
+
+### Run Everything at Once
+
+```bash
+make dev-all
+# starts API (:8080), React dev server (:5173), and Discord bot together
+# optional flags: python scripts/dev_all.py --no-bot  or  --no-ui
+```
+
+### Bot Companion Web UI Dashboard
 
 ```bash
 python webui/server.py
 ```
 
-Open `http://localhost:8050` in your browser. This standalone command is optional if you already started `python bot.py`, because the bot launches the same Web UI server automatically.
+Open `http://localhost:8050` in your browser. This is optional — the Discord bot launches this automatically on startup.
 
 ---
 
@@ -207,6 +254,9 @@ INO/
 │   ├── preferences.md  # Runtime preferences file (local, git-ignored)
 │   └── personas/       # Persona presets (mentor, coach, buddy)
 ├── tests/              # pytest test suite
+├── frontend/           # React/TypeScript/Vite chat frontend
+│   ├── src/App.tsx     # Main chat shell component
+│   └── package.json    # npm scripts and frontend dependencies
 ├── scripts/            # Operational scripts (migrations, manual tests)
 ├── docs/               # Developer documentation
 │   ├── ARCHITECTURE.md
@@ -266,6 +316,7 @@ Run `/sync` in your Discord server after starting the bot for the first time, or
 
 | Script | Purpose |
 |--------|---------|
+| `scripts/dev_all.py` | Run the full local dev stack: API + React frontend dev server + Discord bot |
 | `scripts/agent.py` | Run the standalone maintenance agent |
 | `scripts/migrate_vectors.py` | Migrate vector embeddings between Qdrant collections |
 | `scripts/test_quiz_generator.py` | Manual integration test for quiz generation (not in pytest suite) |
