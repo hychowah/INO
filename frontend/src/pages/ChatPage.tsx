@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { confirmPending, declinePending, fetchBootstrap, runChatAction, sendChat } from '../api';
 import { AppLayout } from '../components/AppLayout';
-import { resolveBackendHref } from '../lib/navigation';
 import type { ActionBlock, ButtonAction, ChatEntry, ChatEnvelope } from '../types';
 
 type Message = {
@@ -106,7 +108,7 @@ function extractFollowupMessage(message: string, prefix?: string) {
 
 function formatInline(content: string) {
   return escapeHtml(content)
-    .replace(/\[concept:(\d+)\]/g, (_, conceptId: string) => `<a class="chat-inline-link" href="${resolveBackendHref(`/concept/${conceptId}`)}">concept:${conceptId}</a>`)
+    .replace(/\[concept:(\d+)\]/g, (_, conceptId: string) => `<a class="chat-inline-link" href="/concept/${conceptId}">concept:${conceptId}</a>`)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
@@ -450,14 +452,20 @@ export function ChatPage() {
 
   return (
     <AppLayout active="/chat">
-      <div className="chat-page">
-        <div className="chat-shell">
-          <div className="chat-header">
-            <h2>Chat</h2>
-            <p className="chat-subtitle">Talk to the learning agent from the React chat shell.</p>
+      <section className="space-y-6">
+        <div className="flex flex-col gap-3">
+          <Badge className="w-fit">Assistant</Badge>
+          <div>
+            <h2 className="text-3xl font-semibold tracking-tight text-white">Chat</h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">Talk to the learning agent from the React chat shell.</p>
           </div>
+        </div>
 
-          <div ref={threadRef} className="chat-thread">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-6">
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                <div ref={threadRef} className="chat-thread min-h-[26rem] bg-slate-950/40 p-4 sm:p-5">
             {messages.length ? messages.map((message, index) => (
               <div className={`chat-message chat-message-${message.role === 'user' ? 'user' : 'assistant'}`} key={index}>
                 <MessageBubble message={message} />
@@ -466,72 +474,103 @@ export function ChatPage() {
                 ) : null}
               </div>
             )) : <div className="chat-empty">No chat history yet. Start the conversation below.</div>}
-          </div>
+                </div>
+              </CardContent>
+            </Card>
 
-          {pendingAction ? (
-            <div className="chat-pending-card">
-              <div className="chat-pending-title">Pending confirmation</div>
-              <div className="chat-pending-summary" dangerouslySetInnerHTML={{ __html: renderRichText(pendingAction.message || 'Resolve the pending action before continuing.') }} />
-              {pendingError ? <div className="chat-pending-error">{pendingError}</div> : null}
-              <div className="chat-pending-actions">
-                <button className="btn btn-primary" disabled={requestInFlight} onClick={() => void handlePending(true)}>Confirm</button>
-                <button className="btn" disabled={requestInFlight} onClick={() => void handlePending(false)}>Decline</button>
-              </div>
-            </div>
-          ) : null}
+            {pendingAction ? (
+              <Card className="border-amber-400/25 bg-amber-400/8">
+                <CardContent className="space-y-4 py-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-100">Pending confirmation</div>
+                    <Badge className="border-amber-300/20 bg-amber-300/10 text-amber-50" variant="outline">Action required</Badge>
+                  </div>
+                  <div className="chat-pending-summary text-sm text-slate-100" dangerouslySetInnerHTML={{ __html: renderRichText(pendingAction.message || 'Resolve the pending action before continuing.') }} />
+                  {pendingError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{pendingError}</div> : null}
+                  <div className="flex flex-wrap gap-3">
+                    <Button disabled={requestInFlight} onClick={() => void handlePending(true)}>Confirm</Button>
+                    <Button variant="secondary" disabled={requestInFlight} onClick={() => void handlePending(false)}>Decline</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
-          <div className="chat-command-palette">
-            <div className="chat-command-header">
-              <span>Commands</span>
-              <span className="chat-command-hint">Click or drag into the input</span>
-            </div>
-            <div className="chat-command-list">
-              {commands.map((item) => (
-                <button
-                  key={item.command}
-                  className="chat-command-chip"
-                  disabled={requestInFlight}
-                  draggable
-                  onClick={() => insertCommand(item.command)}
-                  onDragStart={(event) => {
-                    if (requestInFlight) {
+            <Card>
+              <CardContent className="space-y-4 py-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Composer</div>
+                  <span className="text-xs text-slate-500">Enter to send, Shift+Enter for newline</span>
+                </div>
+                <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleSend(); }}>
+                  <textarea
+                    ref={inputRef}
+                    className={`min-h-[3.5rem] w-full resize-none rounded-3xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20${dragActive ? ' border-sky-400/60 ring-2 ring-sky-400/20' : ''}`}
+                    disabled={requestInFlight}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    onDragOver={(event) => {
                       event.preventDefault();
-                      return;
-                    }
-                    event.dataTransfer.setData('text/plain', item.command);
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+                      setDragActive(true);
+                    }}
+                    onDragLeave={() => setDragActive(false)}
+                    onDrop={handleComposerDrop}
+                    rows={1}
+                    placeholder="Ask a question, request a quiz, or tell the agent what you want to learn..."
+                  />
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="min-h-5 text-sm text-slate-400">{status}</span>
+                    <Button disabled={requestInFlight} type="submit">{requestInFlight ? 'Working...' : 'Send'}</Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
           </div>
 
-          <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void handleSend(); }}>
-            <textarea
-              ref={inputRef}
-              className={`chat-input${dragActive ? ' chat-input-drop-target' : ''}`}
-              disabled={requestInFlight}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-              }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={handleComposerDrop}
-              rows={1}
-              placeholder="Ask a question, request a quiz, or tell the agent what you want to learn..."
-            />
-            <div className="chat-composer-actions">
-              <span className="chat-status">{status}</span>
-              <button className="btn btn-primary" disabled={requestInFlight} type="submit">{requestInFlight ? 'Working...' : 'Send'}</button>
-            </div>
-          </form>
+          <aside className="space-y-6">
+            <Card>
+              <CardContent className="space-y-4 py-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Commands</div>
+                  <span className="text-xs text-slate-500">Click or drag into the input</span>
+                </div>
+                <div className="chat-command-list flex flex-wrap gap-2">
+                  {commands.map((item) => (
+                    <Button
+                      key={item.command}
+                      variant="secondary"
+                      size="sm"
+                      className="chat-command-chip rounded-full"
+                      disabled={requestInFlight}
+                      draggable
+                      onClick={() => insertCommand(item.command)}
+                      onDragStart={(event) => {
+                        if (requestInFlight) {
+                          event.preventDefault();
+                          return;
+                        }
+                        event.dataTransfer.setData('text/plain', item.command);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                  {!commands.length ? <p className="text-sm text-slate-500">No suggested commands right now.</p> : null}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-900/55">
+              <CardContent className="space-y-3 py-5 text-sm text-slate-400">
+                <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Notes</div>
+                <p>The conversation thread still uses the existing rich-text and action block classes for compatibility while the migration is in progress.</p>
+                <p>Legacy routes in the header are marked with an amber dot until their React versions are ready.</p>
+              </CardContent>
+            </Card>
+          </aside>
         </div>
-      </div>
+      </section>
     </AppLayout>
   );
 }

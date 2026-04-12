@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-all test-ui lint format run-bot run-api dev-ui build-ui dev-all
+.PHONY: test test-fast test-all test-ui test-e2e lint format run-bot run-api dev-ui build-ui dev-all
 
 # Run the full test suite (parallel)
 test: test-all
@@ -14,6 +14,10 @@ test-all:
 # Run the React chat frontend tests
 test-ui:
 	cd frontend && npm run test
+
+# Run browser E2E smoke tests for the React frontend
+test-e2e:
+	cd frontend && npm run test:e2e
 
 # Lint with Ruff
 lint:

@@ -56,7 +56,7 @@ npm install
 cd ..
 ```
 
-> **Node.js required.** This installs the React/TypeScript/Vite chat frontend.
+> **Node.js required.** This installs the React/TypeScript/Vite SPA frontend, including Tailwind CSS tooling and Playwright test dependencies.
 > Run this once before `make dev-ui`, `make build-ui`, `make test-ui`, or `make dev-all`.
 
 ---
@@ -156,6 +156,20 @@ make test-ui
 # equivalent to: cd frontend && npm run test
 ```
 
+To run the browser smoke tests for the frontend preview build:
+
+```bash
+make test-e2e
+# equivalent to: cd frontend && npm run test:e2e
+```
+
+On a fresh machine, install the Playwright browser once before the first E2E run:
+
+```bash
+cd frontend
+npx playwright install chromium
+```
+
 The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing. Parallel execution is the default through `pyproject.toml` (`-n 4 --dist loadfile --tb=short`), while `make test-fast` runs only tests marked `unit`.
 
 ---
@@ -205,17 +219,18 @@ make dev-ui
 ```
 
 - Opens the React SPA at `http://127.0.0.1:5173`
-- The dev server proxies `/api/*` and page paths (`/chat`, `/topics`, `/concepts`, etc.) to FastAPI on `http://127.0.0.1:8080`
+- React Router owns the SPA routes in dev mode; backend requests are proxied to FastAPI on `http://127.0.0.1:8080`
+- The current Vite proxy covers `/api`, `/assets`, `/static`, and `/reviews`; browser navigation for SPA routes stays inside the Vite app
 - Requires the FastAPI backend (`make run-api`) to be running
 
-To build the production frontend (FastAPI serves the built SPA on `http://localhost:8080/`, `http://localhost:8080/chat`, and `http://localhost:8080/reviews`):
+To build the production frontend (FastAPI serves the built SPA on `http://localhost:8080/`, `http://localhost:8080/chat`, `http://localhost:8080/topics`, `http://localhost:8080/concepts`, `http://localhost:8080/graph`, `http://localhost:8080/reviews`, `http://localhost:8080/forecast`, and `http://localhost:8080/actions`, with matching detail routes for topics and concepts):
 
 ```bash
 make build-ui
 # equivalent to: cd frontend && npm run build
 ```
 
-These same frontend commands are also exercised in `.github/workflows/frontend.yml` (`test` + `build`) so local validation matches CI.
+These same frontend commands are also exercised in `.github/workflows/frontend.yml`, which typechecks the frontend, runs Vitest, installs the Chromium Playwright browser, and runs the browser smoke suite so local validation matches CI.
 
 ### Run Everything at Once
 
@@ -256,8 +271,9 @@ INO/
 │   ├── preferences.md  # Runtime preferences file (local, git-ignored)
 │   └── personas/       # Persona presets (mentor, coach, buddy)
 ├── tests/              # pytest test suite
-├── frontend/           # React/TypeScript/Vite chat frontend
-│   ├── src/App.tsx     # Main chat shell component
+├── frontend/           # React/TypeScript/Vite SPA frontend
+│   ├── src/            # Routes, pages, API client, Tailwind styles, local UI primitives, frontend tests
+│   ├── e2e/            # Playwright browser smoke tests
 │   └── package.json    # npm scripts and frontend dependencies
 ├── scripts/            # Operational scripts (migrations, manual tests)
 ├── docs/               # Developer documentation

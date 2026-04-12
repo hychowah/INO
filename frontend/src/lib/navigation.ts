@@ -13,10 +13,10 @@ export function resolveBackendHref(path: string, locationLike: LocationLike = wi
 export const navItems = [
   { label: 'Dashboard', href: '/', migrated: true },
   { label: 'Chat', href: '/chat', migrated: true },
-  { label: 'Topics', href: '/topics', migrated: false },
-  { label: 'Concepts', href: '/concepts', migrated: false },
-  { label: 'Graph', href: '/graph', migrated: false },
+  { label: 'Topics', href: '/topics', migrated: true },
+  { label: 'Concepts', href: '/concepts', migrated: true },
+  { label: 'Graph', href: '/graph', migrated: true },
   { label: 'Reviews', href: '/reviews', migrated: true },
-  { label: 'Forecast', href: '/forecast', migrated: false },
-  { label: 'Activity', href: '/actions', migrated: false },
+  { label: 'Forecast', href: '/forecast', migrated: true },
+  { label: 'Activity', href: '/actions', migrated: true },
 ] as const;

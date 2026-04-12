@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access now comes in two forms: a React/TypeScript/Vite frontend under `frontend/` that owns the FastAPI-served SPA routes `/`, `/chat`, and `/reviews` on port 8080 (or via the Vite dev server on port 5173), and a companion legacy web UI dashboard (`webui/server.py`) started alongside the Discord bot on port 8050 for the remaining server-rendered routes.
+The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access now comes in two forms: a React/TypeScript/Vite frontend under `frontend/` that owns the FastAPI-served SPA routes `/`, `/chat`, `/topics`, `/topic/:topicId`, `/concepts`, `/concept/:conceptId`, `/graph`, `/reviews`, `/forecast`, and `/actions` on port 8080 (or via the Vite dev server on port 5173), and a companion legacy web UI dashboard (`webui/server.py`) started alongside the Discord bot on port 8050 for the legacy/operator surface.
 
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
@@ -160,17 +160,21 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 | **frontend/** | | |
-| `frontend/src/routes.tsx` | — | React Router entry point — owns SPA routes for `/`, `/chat`, and `/reviews` |
+| `frontend/src/routes.tsx` | — | React Router entry point — owns SPA routes for `/`, `/actions`, `/chat`, `/concept/:conceptId`, `/concepts`, `/forecast`, `/graph`, `/topic/:topicId`, `/topics`, and `/reviews`; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |
 | `frontend/src/App.tsx` | — | Compatibility re-export for the chat page plus `resolveBackendHref()` |
-| `frontend/src/components/AppLayout.tsx` | — | Shared SPA navigation shell used by dashboard, chat, and review pages |
-| `frontend/src/pages/ChatPage.tsx` | — | React chat page — pending actions, request lock, structured UI action rendering |
-| `frontend/src/pages/DashboardPage.tsx` | — | React dashboard page backed by `/api/stats`, `/api/due`, `/api/action-summary`, and `/api/topic-map` |
-| `frontend/src/pages/ReviewsPage.tsx` | — | React review-log page backed by `/api/reviews` |
-| `frontend/src/App.test.tsx` | — | Frontend unit tests — Vitest + Testing Library; covers all action types and nav link rewriting |
-| `frontend/src/types.ts` | — | Shared TypeScript types for chat, dashboard, reviews, and topic-map payloads |
-| `frontend/src/api.ts` | — | Fetch helpers for chat plus dashboard/review API bundles |
-| `frontend/vite.config.ts` | — | Vite dev server on port 5173; proxies `/api/*` and page paths to FastAPI on 8080 |
-| `frontend/package.json` | — | npm scripts (`dev`, `build`, `test`) and dependencies (React, TypeScript, Vite, Vitest, Testing Library) |
+| `frontend/src/components/AppLayout.tsx` | — | Shared SPA navigation shell used by the migrated React pages |
+| `frontend/src/components/ui/*` | — | Local shadcn-style UI primitives used by the React app shell and migrated pages |
+| `frontend/src/pages/*.tsx` | — | Migrated React pages: dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews |
+| `frontend/src/pages/*.test.tsx` | — | Vitest + Testing Library coverage for the migrated React pages |
+| `frontend/src/types.ts` | — | Shared TypeScript types for chat, topics, concepts, forecast, graph, reviews, and activity payloads |
+| `frontend/src/api.ts` | — | Fetch helpers for chat plus topic/concept/forecast/graph/review/activity API bundles |
+| `frontend/src/styles.css` | — | Tailwind layers plus shared legacy stylesheet import for the transition period |
+| `frontend/tailwind.config.ts` | — | Tailwind configuration with preflight disabled while legacy styles coexist |
+| `frontend/components.json` | — | Local component metadata for the shadcn-style UI setup |
+| `frontend/vite.config.ts` | — | Vite dev server on port 5173; proxies backend/static requests to FastAPI on 8080 |
+| `frontend/playwright.config.ts` | — | Playwright preview-server config for Chromium browser smoke tests |
+| `frontend/e2e/*.spec.ts` | — | Browser smoke tests for the built SPA against mocked `/api/*` responses |
+| `frontend/package.json` | — | npm scripts (`dev`, `build`, `test`, `test:e2e`) and dependencies (React, TypeScript, Vite, Tailwind, Vitest, Testing Library, Playwright) |
 
 ---
 
@@ -378,7 +382,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
 
 ### Flow 4: Companion Web UI (legacy dashboard + chat on port 8050)
 
-The port-8050 server is now the legacy companion UI only. FastAPI separately serves the built React SPA for `/`, `/chat`, and `/reviews` when `frontend/dist/index.html` exists; the flow below describes the companion server started with the Discord bot.
+The port-8050 server is now the legacy companion UI only. FastAPI separately serves the built React SPA for the explicit browser routes `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions` when `frontend/dist/index.html` exists; the flow below describes the companion server started with the Discord bot.
 
 ```
   Browser → http://localhost:8050
@@ -613,7 +617,7 @@ The core brain of the system. Coordinates everything:
 
 ### webui/ — Bot Companion Web Dashboard
 - Zero-dependency HTTP server on port 8050 (`webui/server.py`) — started automatically by the Discord bot on startup
-- This is separate from the React frontend (`frontend/`) which is served by FastAPI on port 8080 and currently owns `/`, `/chat`, and `/reviews` when built
+- This is separate from the React frontend (`frontend/`) which is served by FastAPI on port 8080 and now owns the main browser routes for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity when built
 - Static file serving for extracted CSS and JS (`webui/static/`)
 - Local chat surface at `/chat` backed by `services/chat_session.py` through `webui/chat_backend.py` compatibility imports, plus local POST routes for confirm/decline/action and concept deletion
 - Interactive topic tree with expand/collapse, search/filter, and subtree stats

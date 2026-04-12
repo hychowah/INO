@@ -1,6 +1,7 @@
 """Concept CRUD endpoints."""
 
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -76,6 +77,7 @@ async def get_concept(concept_id: int):
 async def list_concepts(
     topic_id: int | None = None,
     search: str | None = None,
+    status: Literal["all", "due", "upcoming", "never"] = "all",
     sort: str | None = None,
     order: str = Query(default="asc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
@@ -97,6 +99,27 @@ async def list_concepts(
         _normalize_concept_list_item(item, topic_lookup, topic_id_hint=topic_id)
         for item in all_items
     ]
+
+    if status != "all":
+        now = datetime.now()
+
+        def matches_status(item: dict) -> bool:
+            review_count = int(item.get("review_count") or 0)
+            next_review_at = item.get("next_review_at")
+
+            if status == "never":
+                return review_count == 0
+
+            if not next_review_at:
+                return False
+
+            next_review_dt = datetime.strptime(next_review_at, "%Y-%m-%d %H:%M:%S")
+            if status == "due":
+                return next_review_dt <= now
+            return next_review_dt > now
+
+        normalized_items = [item for item in normalized_items if matches_status(item)]
+
     if sort:
         normalized_items.sort(key=lambda item: _concept_sort_value(item, sort), reverse=order == "desc")
 

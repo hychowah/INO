@@ -1,5 +1,9 @@
 @import url('../../webui/static/style.css');
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
   margin: 0;
 }

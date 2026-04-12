@@ -15,7 +15,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
 - **Multiple interfaces** — Discord bot, FastAPI REST API, and the local Web UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard + React SPA** — FastAPI-served local UI with React routes for dashboard, chat, and reviews plus legacy D3.js graph/tree views still being migrated
+- **Web dashboard + React SPA** — FastAPI-served local UI with React routes for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity, with the legacy companion UI retained on port 8050 during cleanup
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -78,7 +78,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 | LLM Backend | `kimi` CLI or any OpenAI-compatible API (Grok, DeepSeek, OpenAI, …) |
 | Discord | discord.py |
 | REST API | FastAPI + Uvicorn |
-| Web UI | FastAPI-served HTML + React/TypeScript + Vite + D3.js |
+| Web UI | FastAPI-served React/TypeScript/Vite SPA + Tailwind CSS + local UI primitives, plus the legacy companion Web UI on port 8050 |
 
 > **Note:** `sentence-transformers` pulls in PyTorch (~2 GB download). For CPU-only installs:
 > `pip install torch --index-url https://download.pytorch.org/whl/cpu` before installing requirements.
@@ -128,8 +128,8 @@ make dev-all           # API + Vite dev server + Discord bot together
 Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
-- If `frontend/dist/` exists, `/`, `/chat`, and `/reviews` serve the built React SPA; otherwise FastAPI falls back to the legacy server-rendered pages for those routes.
-- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/` and proxies backend requests to the FastAPI app on port 8080.
+- If `frontend/dist/` exists, FastAPI serves the built React SPA entry for `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`; otherwise those routes fall back to the legacy server-rendered pages.
+- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while backend requests are proxied to the FastAPI app on port 8080.
 - `python bot.py` still starts a local companion web UI on port 8050 for the Discord flow.
 - `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
 
@@ -210,6 +210,7 @@ If configured, scheduled quizzes use a two-prompt pipeline: P1 (reasoning model)
 ```bash
 make test
 make test-ui
+make test-e2e
 
 # Fast unit-only subset
 make test-fast
@@ -220,15 +221,21 @@ pytest tests/
 
 `pytest` now defaults to `-n 4 --dist loadfile --tb=short` via `pyproject.toml`, so parallel execution is the standard path rather than an opt-in flag. Use `make test-fast` for the unit-marked subset when you want quicker feedback.
 
-The React chat frontend has its own focused test path:
+The React frontend has its own focused test paths:
 
 ```bash
 make test-ui
 # or:
 cd frontend && npm run test
+
+make test-e2e
+# or:
+cd frontend && npm run test:e2e
 ```
 
-Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
+`npm run test:e2e` builds the SPA and runs the Playwright Chromium smoke suite against the preview server. On a fresh machine, install the browser once with `cd frontend && npx playwright install chromium`.
+
+Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Frontend coverage now includes Vitest page tests plus Playwright browser smoke tests. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
 
 `make test` injects safe defaults for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` if your shell does not already provide them.
 
@@ -286,9 +293,11 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   └── routes/             # API and page routers
 ├── config.py               # Environment-based configuration
 ├── frontend/               # React/Vite SPA frontend
-│   ├── src/                # React routes, pages, API client, styles, frontend tests
+│   ├── src/                # React routes, pages, UI primitives, API client, styles, frontend tests
+│   ├── e2e/                # Playwright browser smoke tests
 │   ├── dist/               # Built SPA assets served by FastAPI when present
-│   └── vite.config.ts      # Dev server and proxy config
+│   ├── vite.config.ts      # Dev server and proxy config
+│   └── playwright.config.ts # Browser smoke-test runner config
 ├── services/
 │   ├── pipeline.py         # Core orchestrator (context → LLM → parse → execute)
 │   ├── context.py          # Prompt/context construction

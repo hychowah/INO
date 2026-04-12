@@ -1,23 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchReviews } from '../api';
 import { AppLayout } from '../components/AppLayout';
-import { resolveBackendHref } from '../lib/navigation';
 import type { ReviewLogEntry } from '../types';
 
-function qualityColor(quality?: number | null) {
+function qualityTone(quality?: number | null) {
   if (quality === 0 || quality === 1) {
-    return 'var(--red)';
+    return 'border-red-500/30 bg-red-500/10 text-red-100';
   }
   if (quality === 2) {
-    return 'var(--orange)';
+    return 'border-orange-500/30 bg-orange-500/10 text-orange-100';
   }
   if (quality === 3) {
-    return 'var(--yellow)';
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-100';
   }
   if (quality === 4 || quality === 5) {
-    return 'var(--green)';
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100';
   }
-  return 'var(--text2)';
+  return 'border-white/10 bg-white/5 text-slate-300';
 }
 
 function reviewRowKey(review: ReviewLogEntry) {
@@ -32,58 +33,80 @@ export function ReviewsPage() {
 
   return (
     <AppLayout active="/reviews">
-      <div className="chat-page">
-        <div className="chat-shell">
-          <div className="chat-header">
-            <h2>Review Log</h2>
-            <p className="chat-subtitle">Recent assessment history across all concepts.</p>
+      <section className="space-y-6">
+        <div className="flex flex-col gap-3">
+          <Badge className="w-fit">Assessments</Badge>
+          <div>
+            <h2 className="text-3xl font-semibold tracking-tight text-white">Review Log</h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">Recent assessment history across all concepts.</p>
           </div>
-
-          {reviewsQuery.isPending ? <div className="card">Loading reviews…</div> : null}
-          {reviewsQuery.isError ? <div className="card chat-bubble-error">{(reviewsQuery.error as Error).message}</div> : null}
-
-          {reviewsQuery.data ? <ReviewsTable reviews={reviewsQuery.data} /> : null}
         </div>
-      </div>
+
+        {reviewsQuery.isPending ? (
+          <Card>
+            <CardContent className="py-6 text-sm text-slate-300">Loading reviews…</CardContent>
+          </Card>
+        ) : null}
+
+        {reviewsQuery.isError ? (
+          <Card className="border-red-500/30 bg-red-500/10">
+            <CardContent className="py-6 text-sm text-red-100">{(reviewsQuery.error as Error).message}</CardContent>
+          </Card>
+        ) : null}
+
+        {reviewsQuery.data ? <ReviewsTable reviews={reviewsQuery.data} /> : null}
+      </section>
     </AppLayout>
   );
 }
 
 function ReviewsTable({ reviews }: { reviews: ReviewLogEntry[] }) {
   if (!reviews.length) {
-    return <div className="card">No reviews yet. Start learning and get quizzed!</div>;
+    return (
+      <Card>
+        <CardContent className="py-6 text-sm text-slate-300">No reviews yet. Start learning and get quizzed!</CardContent>
+      </Card>
+    );
   }
 
   return (
-    <div className="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Concept</th>
-            <th>Question</th>
-            <th>Answer</th>
-            <th>Quality</th>
-            <th>Assessment</th>
-          </tr>
-        </thead>
-        <tbody>
-          {reviews.map((review) => (
-            <tr key={reviewRowKey(review)}>
-              <td>{review.reviewed_at || '—'}</td>
-              <td>
-                <a href={resolveBackendHref(`/concept/${review.concept_id}`)}>{review.concept_title}</a>
-              </td>
-              <td style={{ maxWidth: '200px' }}>{review.question_asked || '—'}</td>
-              <td style={{ maxWidth: '200px' }}>{review.user_response || '—'}</td>
-              <td style={{ color: qualityColor(review.quality), fontWeight: 600, textAlign: 'center' }}>
-                {review.quality ?? '?'} / 5
-              </td>
-              <td style={{ fontSize: '12px', color: 'var(--text2)' }}>{(review.llm_assessment || '').slice(0, 80)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Recent Reviews</CardTitle>
+        <CardDescription>Latest quiz and assessment outcomes across the knowledge base.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full border-separate border-spacing-0 text-left text-sm text-slate-200">
+            <thead>
+              <tr className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                <th className="border-b border-white/10 px-4 py-3">Date</th>
+                <th className="border-b border-white/10 px-4 py-3">Concept</th>
+                <th className="border-b border-white/10 px-4 py-3">Question</th>
+                <th className="border-b border-white/10 px-4 py-3">Answer</th>
+                <th className="border-b border-white/10 px-4 py-3 text-center">Quality</th>
+                <th className="border-b border-white/10 px-4 py-3">Assessment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviews.map((review) => (
+                <tr key={reviewRowKey(review)} className="align-top transition-colors hover:bg-white/5">
+                  <td className="border-b border-white/5 px-4 py-3 text-slate-400">{review.reviewed_at || '—'}</td>
+                  <td className="border-b border-white/5 px-4 py-3">
+                    <a className="font-medium text-sky-200 transition-colors hover:text-sky-100" href={`/concept/${review.concept_id}`}>{review.concept_title}</a>
+                  </td>
+                  <td className="max-w-[200px] border-b border-white/5 px-4 py-3 text-slate-300">{review.question_asked || '—'}</td>
+                  <td className="max-w-[200px] border-b border-white/5 px-4 py-3 text-slate-300">{review.user_response || '—'}</td>
+                  <td className="border-b border-white/5 px-4 py-3 text-center">
+                    <Badge className={qualityTone(review.quality)} variant="outline">{review.quality ?? '?'} / 5</Badge>
+                  </td>
+                  <td className="border-b border-white/5 px-4 py-3 text-xs text-slate-400">{(review.llm_assessment || '').slice(0, 80) || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

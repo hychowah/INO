@@ -119,7 +119,7 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/concepts` | List concepts (filterable by `topic_id`, `search`, `page`, `per_page`, `sort`, `order`; returns a paginated `items`/`total` envelope with normalized `latest_remark`, `topic_ids`, and `topics` fields). |
+| `GET` | `/api/concepts` | List concepts (filterable by `topic_id`, `search`, `status`, `page`, `per_page`, `sort`, `order`; `status` supports `all`, `due`, `upcoming`, and `never`; returns a paginated `items`/`total` envelope with normalized `latest_remark`, `topic_ids`, and `topics` fields). |
 | `GET` | `/api/concepts/{id}` | Get a single concept with remarks. |
 | `POST` | `/api/concepts` | Create a new concept. |
 | `PUT` | `/api/concepts/{id}` | Update a concept. |
@@ -145,9 +145,9 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 | `GET` | `/api/action-summary` | Aggregated action counts for recent activity cards (`?days=7` by default). |
 | `GET` | `/api/actions` | Action log with optional filters (`action`, `source`, `q` or `search`, `time`, `page`, `per_page`). |
 | `GET` | `/api/actions/filters` | Distinct action and source values for building action-log filter UIs. |
-| `GET` | `/api/forecast` | Review forecast buckets used by the legacy forecast page. |
+| `GET` | `/api/forecast` | Review forecast buckets used by both the React forecast page and the companion legacy forecast page. |
 | `GET` | `/api/forecast/concepts` | Concept drill-down for one forecast bucket. |
-| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`). |
+| `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`) used by both the React graph page and the companion legacy graph page. |
 
 ### Persona
 
@@ -174,9 +174,16 @@ When `frontend/dist/index.html` exists, FastAPI serves the built React SPA entry
 |------|----------|
 | `/` | Built SPA entry for the React dashboard; otherwise falls back to the legacy dashboard HTML page. |
 | `/chat` | Built SPA entry for the React chat client; otherwise falls back to the legacy chat HTML page. |
+| `/topics` | Built SPA entry for the React topics list; otherwise falls back to the legacy topics HTML page. |
+| `/topic/{topic_id}` | Built SPA entry for the React topic detail page; otherwise falls back to the legacy topic-detail HTML page. |
+| `/concepts` | Built SPA entry for the React concepts list; otherwise falls back to the legacy concepts HTML page. |
+| `/concept/{concept_id}` | Built SPA entry for the React concept detail page; otherwise falls back to the legacy concept-detail HTML page. |
+| `/graph` | Built SPA entry for the React graph page; otherwise falls back to the legacy graph HTML page. |
 | `/reviews` | Built SPA entry for the React review-log page; otherwise falls back to the legacy reviews HTML page. |
+| `/forecast` | Built SPA entry for the React forecast page; otherwise falls back to the legacy forecast HTML page. |
+| `/actions` | Built SPA entry for the React activity log; otherwise falls back to the legacy actions HTML page. |
 
-Other browser routes still render server-side HTML from `webui/pages/*` through FastAPI page handlers, including `/topics`, `/topic/{id}`, `/concepts`, `/concept/{id}`, `/forecast`, `/actions`, and `/graph`.
+This SPA fallback is explicit, not catch-all: only the routes above serve `frontend/dist/index.html` when a build exists.
 
 ---
 
@@ -184,7 +191,7 @@ Other browser routes still render server-side HTML from `webui/pages/*` through 
 
 A local-only dashboard served on port `8050` (default) using Python's built-in HTTP server. Started automatically when `bot.py` starts. No authentication required (LAN/localhost only).
 
-> **Note:** The React SPA now owns `/`, `/chat`, and `/reviews` when served by FastAPI on port 8080. This companion Web UI on port 8050 remains the local-only legacy/operator surface.
+> **Note:** The React SPA now owns the main FastAPI-served browser routes on port 8080, including dashboard, topics, concepts, graph, reviews, forecast, and activity. This companion Web UI on port 8050 remains the local-only legacy/operator surface.
 
 ### Pages
 

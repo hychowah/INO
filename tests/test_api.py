@@ -449,6 +449,171 @@ class TestLegacyPages:
         assert '<div id="root">react reviews</div>' in resp.text
 
     @pytest.mark.anyio
+    async def test_topic_detail_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        topic_id = _make_topic("Operating Systems")
+
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get(f"/topic/{topic_id}")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Operating Systems" in resp.text
+
+    @pytest.mark.anyio
+    async def test_topic_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react topic detail</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/topic/123")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react topic detail</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_concept_detail_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        concept_id = _make_concept("Rust Ownership")
+
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get(f"/concept/{concept_id}")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Rust Ownership" in resp.text
+
+    @pytest.mark.anyio
+    async def test_concept_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react concept detail</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/concept/123")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react concept detail</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_topics_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        _make_topic("Systems")
+
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/topics")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Topics" in resp.text
+
+    @pytest.mark.anyio
+    async def test_topics_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react topics</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/topics")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react topics</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_concepts_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        _make_concept("Sorting Networks")
+
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/concepts")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "All Concepts" in resp.text
+
+    @pytest.mark.anyio
+    async def test_concepts_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react concepts</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/concepts")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react concepts</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_graph_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        _make_concept("Graph Node")
+
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/graph")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Knowledge graph visualization page" not in resp.text
+        assert "graph-controls" in resp.text
+
+    @pytest.mark.anyio
+    async def test_graph_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react graph</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/graph")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react graph</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_actions_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/actions")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Activity Log" in resp.text
+
+    @pytest.mark.anyio
+    async def test_actions_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react actions</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/actions")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react actions</div>' in resp.text
+
+    @pytest.mark.anyio
+    async def test_forecast_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+        with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
+            resp = await client.get("/forecast")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Review Forecast" in resp.text
+
+    @pytest.mark.anyio
+    async def test_forecast_page_serves_built_frontend_when_present(self, client, tmp_path):
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react forecast</div></body></html>", encoding="utf-8")
+
+        with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
+            resp = await client.get("/forecast")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert '<div id="root">react forecast</div>' in resp.text
+
+    @pytest.mark.anyio
     async def test_static_style_served_by_fastapi(self, client):
         resp = await client.get("/static/style.css")
 
@@ -744,6 +909,49 @@ class TestConceptCRUD:
         assert "Quantum Mechanics" in titles
         assert "Classical Mechanics" in titles
         assert all(item["topics"] == [{"id": tid, "title": "T"}] for item in data["items"])
+
+    @pytest.mark.anyio
+    async def test_list_concepts_filter_by_status(self, client):
+        tid = _make_topic("Status Topic")
+        due_id = _make_concept("Due Concept", topic_id=tid)
+        upcoming_id = _make_concept("Upcoming Concept", topic_id=tid)
+        never_id = _make_concept("Never Reviewed", topic_id=tid)
+
+        db.update_concept(
+            due_id,
+            review_count=3,
+            next_review_at="2000-01-01 00:00:00",
+            last_reviewed_at="1999-12-30 00:00:00",
+        )
+        db.update_concept(
+            upcoming_id,
+            review_count=2,
+            next_review_at="2999-01-01 00:00:00",
+            last_reviewed_at="1999-12-31 00:00:00",
+        )
+        db.update_concept(
+            never_id,
+            review_count=0,
+            next_review_at="2999-02-01 00:00:00",
+            last_reviewed_at=None,
+        )
+
+        due_resp = await client.get("/api/concepts?status=due")
+        assert due_resp.status_code == 200
+        due_titles = [item["title"] for item in due_resp.json()["items"]]
+        assert due_titles == ["Due Concept"]
+
+        upcoming_resp = await client.get("/api/concepts?status=upcoming")
+        assert upcoming_resp.status_code == 200
+        upcoming_titles = [item["title"] for item in upcoming_resp.json()["items"]]
+        assert "Upcoming Concept" in upcoming_titles
+        assert "Never Reviewed" in upcoming_titles
+        assert "Due Concept" not in upcoming_titles
+
+        never_resp = await client.get("/api/concepts?status=never")
+        assert never_resp.status_code == 200
+        never_titles = [item["title"] for item in never_resp.json()["items"]]
+        assert never_titles == ["Never Reviewed"]
 
     @pytest.mark.anyio
     async def test_list_concepts_pagination(self, client):
