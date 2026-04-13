@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConceptsListPage } from './ConceptsListPage';
+import { ConceptsCatalogView, ConceptsListPage } from './ConceptsListPage';
 
 function jsonResponse(data: Record<string, unknown> | Array<Record<string, unknown>>) {
   return Promise.resolve({
@@ -25,6 +25,24 @@ function renderConceptsPage() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <ConceptsListPage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderConceptsCatalogWithSelection(onSelectConcept: (conceptId: number) => void) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ConceptsCatalogView showHeader={false} onSelectConcept={onSelectConcept} />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -113,11 +131,51 @@ describe('ConceptsListPage', () => {
     expect(await screen.findByText('Delete Concept')).toBeInTheDocument();
     expect(screen.getAllByText('Borrow Checker')).toHaveLength(2);
 
-    await user.click(screen.getAllByRole('button', { name: 'Delete' })[1]);
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
       expect(screen.queryByRole('link', { name: 'Borrow Checker' })).not.toBeInTheDocument();
     });
     expect(await screen.findByText('No concepts matched the current filters.')).toBeInTheDocument();
+  });
+
+  it('uses inline selection instead of route links when embedded in Knowledge', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = String(input);
+      if (path === '/api/topics/flat') {
+        return jsonResponse([{ id: 1, title: 'Systems' }]);
+      }
+      if (path === '/api/concepts?sort=next_review_at&order=asc&page=1&per_page=20') {
+        return jsonResponse({
+          items: [
+            {
+              id: 7,
+              title: 'Borrow Checker',
+              mastery_level: 62,
+              interval_days: 4,
+              review_count: 3,
+              next_review_at: '2999-04-15 09:00:00',
+              last_reviewed_at: '2026-04-10 09:00:00',
+              latest_remark: 'Still mixing ownership and borrowing edge cases.',
+              topics: [{ id: 1, title: 'Systems' }],
+            },
+          ],
+          total: 1,
+          page: 1,
+          per_page: 20,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${path}`);
+    });
+
+    const user = userEvent.setup();
+    const onSelectConcept = vi.fn();
+    renderConceptsCatalogWithSelection(onSelectConcept);
+
+    await user.click(await screen.findByRole('button', { name: 'Borrow Checker' }));
+
+    expect(onSelectConcept).toHaveBeenCalledWith(7);
+    expect(screen.queryByRole('link', { name: 'Borrow Checker' })).not.toBeInTheDocument();
   });
 });

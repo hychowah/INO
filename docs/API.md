@@ -147,7 +147,7 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 | `GET` | `/api/action-summary` | Aggregated action counts for recent activity cards (`?days=7` by default). |
 | `GET` | `/api/actions` | Action log with optional filters (`action`, `source`, `q` or `search`, `time`, `page`, `per_page`). |
 | `GET` | `/api/actions/filters` | Distinct action and source values for building action-log filter UIs. |
-| `GET` | `/api/forecast` | Review forecast buckets used by the React forecast page. |
+| `GET` | `/api/forecast` | Review forecast buckets used by the Progress forecast tab in the React UI. |
 | `GET` | `/api/forecast/concepts` | Concept drill-down for one forecast bucket. |
 | `GET` | `/api/graph` | Topic/concept graph data for visualisation (filterable by `topic_id`, `min_mastery`, `max_mastery`, `max_nodes`) used by the React graph page. |
 
@@ -170,22 +170,39 @@ Declines a whitelisted action payload. Uses the same `ConfirmRequest` schema and
 
 FastAPI serves the browser routes from `api/routes/pages.py`.
 
-When `frontend/dist/index.html` exists, FastAPI serves the built React SPA entry for these routes:
+When `frontend/dist/index.html` exists, FastAPI serves the built React SPA for any request that:
+
+1. Is not under the reserved prefixes `/api`, `/assets`, or `/static`
+2. Accepts HTML (`text/html` or `*/*`)
+
+If the frontend bundle is missing, the same browser routes return a minimal HTML response instructing the operator to run `make build-ui`.
+
+Canonical browser routes inside the SPA are:
 
 | Path | Behavior |
 |------|----------|
-| `/` | Built SPA entry for the React dashboard; otherwise returns a minimal HTML response instructing the operator to run `make build-ui`. |
-| `/chat` | Built SPA entry for the React chat client; otherwise returns the same missing-build HTML response. |
-| `/topics` | Built SPA entry for the React topics list; otherwise returns the same missing-build HTML response. |
-| `/topic/{topic_id}` | Built SPA entry for the React topic detail page; otherwise returns the same missing-build HTML response. |
-| `/concepts` | Built SPA entry for the React concepts list; otherwise returns the same missing-build HTML response. |
-| `/concept/{concept_id}` | Built SPA entry for the React concept detail page; otherwise returns the same missing-build HTML response. |
-| `/graph` | Built SPA entry for the React graph page; otherwise returns the same missing-build HTML response. |
-| `/reviews` | Built SPA entry for the React review-log page; otherwise returns the same missing-build HTML response. |
-| `/forecast` | Built SPA entry for the React forecast page; otherwise returns the same missing-build HTML response. |
-| `/actions` | Built SPA entry for the React activity log; otherwise returns the same missing-build HTML response. |
+| `/` | Dashboard surface |
+| `/chat` | Chat surface |
+| `/knowledge` | Knowledge surface, Topics tab |
+| `/knowledge/concepts` | Knowledge surface, Concepts tab |
+| `/knowledge/graph` | Knowledge surface, Graph tab |
+| `/progress` | Progress surface, reviews tab |
+| `/progress/forecast` | Progress surface, forecast tab |
+| `/topic/{topic_id}` | Standalone topic detail compatibility route |
+| `/concept/{concept_id}` | Standalone concept detail compatibility route |
+| `/actions` | Standalone Activity compatibility route |
 
-This SPA fallback is explicit, not catch-all: only the routes above serve `frontend/dist/index.html` when a build exists.
+Legacy browser paths remain available as compatibility redirects inside the SPA:
+
+| Legacy path | Redirect target |
+|-------------|-----------------|
+| `/topics` | `/knowledge` |
+| `/concepts` | `/knowledge/concepts` |
+| `/graph` | `/knowledge/graph` |
+| `/reviews` | `/progress` |
+| `/forecast` | `/progress/forecast` |
+
+Activity is normally opened as a shell-owned drawer over the current surface. The `/actions` route remains available for compatibility and direct entry.
 
 ---
 

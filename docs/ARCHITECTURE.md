@@ -1,10 +1,10 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-12
+> Last updated: 2026-04-14
 
 ## Overview
 
-The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access is now centered on a React/TypeScript/Vite frontend under `frontend/` that owns the FastAPI-served SPA routes `/`, `/chat`, `/topics`, `/topic/:topicId`, `/concepts`, `/concept/:conceptId`, `/graph`, `/reviews`, `/forecast`, and `/actions` on port 8080, with the Vite dev server available on port 5173 during local development.
+The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access is now centered on a React/TypeScript/Vite frontend under `frontend/`, organized around a nested `AppShell` with Dashboard, Chat, Knowledge, and Progress as the primary surfaces. FastAPI serves the built SPA through an HTML catch-all for non-reserved paths on port 8080, while the Vite dev server serves the same client-routed app on port 5173 during local development.
 
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
@@ -149,14 +149,18 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 | **frontend/** | | |
-| `frontend/src/routes.tsx` | — | React Router entry point — owns SPA routes for `/`, `/actions`, `/chat`, `/concept/:conceptId`, `/concepts`, `/forecast`, `/graph`, `/topic/:topicId`, `/topics`, and `/reviews`; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |
+| `frontend/src/routes.tsx` | — | React Router entry point — owns nested shell routes for `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/actions`, detail routes, and legacy redirects; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |
 | `frontend/src/App.tsx` | — | Compatibility re-export for the chat page plus `resolveBackendHref()` |
-| `frontend/src/components/AppLayout.tsx` | — | Shared SPA navigation shell used by the migrated React pages |
+| `frontend/src/components/AppShell.tsx` | — | Router-owned shell wrapper — hosts the Activity drawer, Command palette, and routed content outlet |
+| `frontend/src/components/AppLayout.tsx` | — | Presentational desktop shell — sidebar, header, badges, and bounded content regions |
+| `frontend/src/components/ActivityDrawer.tsx` | — | Shell-owned Activity drawer used from the utility navigation flow |
+| `frontend/src/components/CommandPalette.tsx` | — | `cmdk`-based shell command palette opened with `Ctrl+K` |
 | `frontend/src/components/ui/*` | — | Local shadcn-style UI primitives used by the React app shell and migrated pages |
-| `frontend/src/pages/*.tsx` | — | Migrated React pages: dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews |
+| `frontend/src/components/ui/resizable-panels.tsx` | — | Shared wrapper around `react-resizable-panels` used by the embedded Knowledge split layouts |
+| `frontend/src/pages/*.tsx` | — | Migrated React pages: dashboard, activity compatibility page, chat, knowledge, progress, topic/concept detail, and supporting list/graph views |
 | `frontend/src/pages/*.test.tsx` | — | Vitest + Testing Library coverage for the migrated React pages |
 | `frontend/src/types.ts` | — | Shared TypeScript types for chat, topics, concepts, forecast, graph, reviews, and activity payloads |
-| `frontend/src/api.ts` | — | Fetch helpers for chat plus topic/concept/forecast/graph/review/activity API bundles |
+| `frontend/src/api.ts` | — | Fetch helpers for chat plus dashboard, knowledge, progress, graph, review, and activity API bundles |
 | `frontend/src/styles.css` | — | Tailwind layers plus shared app-level styles for the React SPA |
 | `frontend/tailwind.config.ts` | — | Tailwind configuration for the React SPA |
 | `frontend/components.json` | — | Local component metadata for the shadcn-style UI setup |
@@ -370,7 +374,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
 
 ### Flow 4: Browser UI (FastAPI + React)
 
-FastAPI serves the built React SPA for the explicit browser routes `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions` when `frontend/dist/index.html` exists. During local frontend development, Vite serves the same SPA on port 5173 and proxies backend requests to FastAPI on port 8080.
+FastAPI serves the built React SPA for any HTML request outside the reserved prefixes `/api`, `/assets`, and `/static` when `frontend/dist/index.html` exists. During local frontend development, Vite serves the same SPA on port 5173 and proxies only `/api`, `/assets`, and `/static` back to FastAPI on port 8080.
 
 ```
     Browser → http://localhost:8080   or   http://localhost:5173
@@ -378,14 +382,19 @@ FastAPI serves the built React SPA for the explicit browser routes `/`, `/chat`,
          ▼
     FastAPI routes + built SPA / Vite dev server
          │
-      ├── /                        → React dashboard entry
-      ├── /chat                    → React chat entry
-      ├── /topics, /topic/{id}     → React topic routes
-      ├── /concepts, /concept/{id} → React concept routes
-      ├── /reviews                 → React review log route
-      ├── /actions                 → React activity log route
-      ├── /forecast                → React forecast route
-      ├── /graph                   → React graph route
+   ├── /                        → React dashboard surface
+   ├── /chat                    → React chat surface
+   ├── /knowledge               → Knowledge surface (topics tab)
+   ├── /knowledge/concepts      → Knowledge surface (concepts tab)
+   ├── /knowledge/graph         → Knowledge surface (graph tab)
+   ├── /progress                → Progress surface
+   ├── /progress/forecast       → Progress forecast tab
+   ├── /topic/{id}              → Standalone topic detail compatibility route
+   ├── /concept/{id}            → Standalone concept detail compatibility route
+   ├── /actions                 → Standalone Activity compatibility route
+   ├── /topics, /concepts,
+   │   /graph, /reviews,
+   │   /forecast                → SPA compatibility redirects
       ├── /api/chat                → JSON chat endpoint
       ├── /api/chat/stream         → SSE chat endpoint
       ├── /api/chat/confirm        → Confirm pending action
@@ -605,7 +614,9 @@ The core brain of the system. Coordinates everything:
 - React/TypeScript/Vite SPA under `frontend/`
 - Served by FastAPI from `frontend/dist` on port 8080 when built
 - Served by Vite on port 5173 during local development
-- Owns the main browser routes for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity
+- Owns the main browser surfaces for Dashboard, Chat, Knowledge, Progress, and Activity compatibility entry
+- Uses `AppShell` for shell-owned behavior such as the Activity drawer and `Ctrl+K` command palette
+- Uses resizable split panels in Knowledge for embedded Topic and Concept detail workflows
 - Talks to FastAPI JSON and SSE endpoints instead of reading the databases directly
 - Uses shared typed API helpers from `frontend/src/api.ts` and route components under `frontend/src/pages/`
 

@@ -115,8 +115,8 @@ ROOT
 ├── frontend/              # React/TypeScript/Vite SPA frontend (dev :5173, built served by FastAPI :8080)
 │   ├── src/App.tsx        # Compatibility re-export for the main routed app shell
 │   ├── src/App.test.tsx   # Frontend chat/integration-style unit tests (Vitest + Testing Library)
-│   ├── src/routes.tsx     # SPA route ownership for dashboard, chat, topics, concepts, graph, reviews, forecast, actions
-│   ├── src/components/    # Shared layout and UI primitives
+│   ├── src/routes.tsx     # SPA route ownership for Dashboard, Chat, Knowledge, Progress, compatibility routes, and detail views
+│   ├── src/components/    # Shared shell components (AppShell/AppLayout) and local UI primitives
 │   ├── src/pages/         # Route components and page-level tests
 │   ├── src/types.ts       # Shared TypeScript types
 │   ├── src/api.ts         # API fetch helpers, including chat SSE parsing

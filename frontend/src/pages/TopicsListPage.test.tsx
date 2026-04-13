@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TopicsListPage } from './TopicsListPage';
+import { TopicsExplorerView, TopicsListPage } from './TopicsListPage';
 
 function jsonResponse(data: Record<string, unknown> | Array<Record<string, unknown>>) {
   return Promise.resolve({
@@ -25,6 +25,24 @@ function renderTopicsListPage() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <TopicsListPage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderTopicsExplorerWithSelection(onSelectTopic: (topicId: number) => void) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <TopicsExplorerView showHeader={false} onSelectTopic={onSelectTopic} />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -87,5 +105,34 @@ describe('TopicsListPage', () => {
 
     expect(await screen.findByRole('link', { name: 'Compiler Design' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Operating Systems' })).not.toBeInTheDocument();
+  });
+
+  it('uses inline selection instead of route links when embedded in Knowledge', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (String(input) === '/api/topic-map') {
+        return jsonResponse([
+          {
+            id: 1,
+            title: 'Systems',
+            description: null,
+            concept_count: 3,
+            avg_mastery: 50,
+            due_count: 1,
+            parent_ids: [],
+            child_ids: [],
+          },
+        ]);
+      }
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+
+    const user = userEvent.setup();
+    const onSelectTopic = vi.fn();
+    renderTopicsExplorerWithSelection(onSelectTopic);
+
+    await user.click(await screen.findByRole('button', { name: 'Systems' }));
+
+    expect(onSelectTopic).toHaveBeenCalledWith(1);
+    expect(screen.queryByRole('link', { name: 'Systems' })).not.toBeInTheDocument();
   });
 });

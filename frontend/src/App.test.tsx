@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, resolveBackendHref } from './App';
 
@@ -10,6 +11,14 @@ function jsonResponse(data: FetchJson) {
     ok: true,
     json: async () => data,
   } as Response);
+}
+
+function renderApp() {
+  render(
+    <MemoryRouter>
+      <App />
+    </MemoryRouter>
+  );
 }
 
 function streamResponse(events: Array<{ event: string; data: Record<string, unknown> }>) {
@@ -53,7 +62,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await user.click(await screen.findByRole('button', { name: 'Review' }));
 
@@ -111,7 +120,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, '/review');
@@ -175,7 +184,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, '/review');
@@ -250,7 +259,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, '/maintain');
@@ -320,7 +329,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, '/review');
@@ -384,7 +393,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, '/due');
@@ -417,7 +426,7 @@ describe('App', () => {
       throw new Error(`Unexpected fetch: ${String(input)}`);
     });
 
-    render(<App />);
+    renderApp();
 
     expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument();
     expect(screen.getByText('this')).toBeInTheDocument();
@@ -447,7 +456,7 @@ describe('App', () => {
     });
 
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     const input = await screen.findByPlaceholderText(/ask a question/i);
     await user.type(input, 'hello');

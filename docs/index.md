@@ -23,15 +23,16 @@
 
 | Path | Purpose |
 |---|---|
+| `CHANGELOG.md` | High-level change log, newest first, for major shipped behavior and architecture milestones |
 | `CODING.md` | Development instructions for AI coding assistants |
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `docs/API.md` | API reference: Discord commands, FastAPI routes, and FastAPI-served browser routes/endpoints |
-| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, diagrams; **§ Semantic Search & Vector Store** |
+| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, frontend shell/routing, diagrams; **§ Semantic Search & Vector Store** |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **§12 Hybrid Vector Search** |
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |
 | `docs/DOC_STANDARD.md` | Documentation writing and maintenance conventions |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds |
-| `docs/plans/` | Active feature design plans (see directory for current files) |
+| `docs/plans/` | Active feature design plans and implementation handoff notes (see directory for current files) |
 
 ## Skill Sets by Mode
 

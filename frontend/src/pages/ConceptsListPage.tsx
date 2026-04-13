@@ -4,8 +4,13 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingCard } from '@/components/LoadingCard';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { deleteConcept, fetchConcepts, fetchTopicsFlat } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import type {
   ConceptListItem,
   ConceptListResponse,
@@ -51,6 +56,12 @@ type ConceptsState = {
   sort: ConceptListSortField;
   order: 'asc' | 'desc';
   page: number;
+};
+
+type ConceptsCatalogViewProps = {
+  showHeader?: boolean;
+  selectedConceptId?: number | null;
+  onSelectConcept?: (conceptId: number) => void;
 };
 
 function loadState(): ConceptsState {
@@ -151,7 +162,7 @@ function scoreTone(score: number) {
   return 'bg-rose-400';
 }
 
-export function ConceptsListPage() {
+export function ConceptsCatalogView({ showHeader = true, selectedConceptId, onSelectConcept }: ConceptsCatalogViewProps) {
   const [state, setState] = useState<ConceptsState>(() => loadState());
   const [pendingDelete, setPendingDelete] = useState<ConceptListItem | null>(null);
   const deferredSearch = useDeferredValue(state.search.trim());
@@ -235,15 +246,17 @@ export function ConceptsListPage() {
   }
 
   return (
-    <AppLayout active="/concepts">
+    <>
       <section className="space-y-6">
-        <div className="flex flex-col gap-3">
-          <Badge className="w-fit">Knowledge Base</Badge>
-          <div>
-            <h2 className="text-3xl font-semibold tracking-tight text-white">Concepts</h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Search, filter, sort, and prune concepts without leaving the migrated React surface.</p>
+        {showHeader ? (
+          <div className="flex flex-col gap-3">
+            <Badge className="w-fit">Knowledge Base</Badge>
+            <div>
+              <h2 className="text-3xl font-semibold tracking-tight text-white">Concepts</h2>
+              <p className="mt-2 max-w-3xl text-sm text-slate-400">Search, filter, sort, and prune concepts without leaving the migrated React surface.</p>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -252,40 +265,35 @@ export function ConceptsListPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.7fr))]">
-              <input
-                type="text"
+              <Input
                 value={state.search}
                 onChange={(event) => updateState({ search: event.target.value })}
                 placeholder="Search concepts, topics, or remarks..."
-                className="h-11 w-full rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               />
-              <select
+              <Select
                 value={state.topicId}
                 onChange={(event) => updateState({ topicId: event.target.value })}
-                className="h-11 rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               >
                 <option value="">All Topics</option>
                 {(topicsQuery.data || []).map((topic) => (
                   <option key={topic.id} value={topic.id}>{topic.title}</option>
                 ))}
-              </select>
-              <select
+              </Select>
+              <Select
                 value={state.sort}
                 onChange={(event) => updateState({ sort: event.target.value as ConceptListSortField, order: DEFAULT_SORT_ORDER[event.target.value as ConceptListSortField] })}
-                className="h-11 rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               >
                 {Object.entries(SORT_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
-              </select>
-              <select
+              </Select>
+              <Select
                 value={state.order}
                 onChange={(event) => updateState({ order: event.target.value as 'asc' | 'desc' })}
-                className="h-11 rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               >
                 <option value="asc">Ascending</option>
                 <option value="desc">Descending</option>
-              </select>
+              </Select>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -304,11 +312,7 @@ export function ConceptsListPage() {
           </CardContent>
         </Card>
 
-        {conceptsQuery.isPending ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-slate-300">Loading concepts…</CardContent>
-          </Card>
-        ) : null}
+        {conceptsQuery.isPending ? <LoadingCard label="Loading concepts…" rows={4} /> : null}
 
         {conceptsQuery.isError ? (
           <Card className="border-red-500/30 bg-red-500/10">
@@ -326,18 +330,20 @@ export function ConceptsListPage() {
             onTopicFilter={(topicId) => updateState({ topicId: String(topicId) })}
             onDelete={setPendingDelete}
             emptyMessage={emptyMessage()}
+            selectedConceptId={selectedConceptId}
+            onSelectConcept={onSelectConcept}
           />
         ) : null}
       </section>
 
       {pendingDelete ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-sm">
-          <Card className="w-full max-w-lg border-red-500/30 bg-slate-950/95">
-            <CardHeader>
-              <CardTitle>Delete Concept</CardTitle>
-              <CardDescription>This permanently removes the concept, its remarks, relations, and review history.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <Dialog open={Boolean(pendingDelete)} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
+          <DialogContent className="max-w-lg border-red-500/30 bg-slate-950/95 p-0">
+            <DialogHeader>
+              <DialogTitle>Delete Concept</DialogTitle>
+              <DialogDescription>This permanently removes the concept, its remarks, relations, and review history.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 px-6 pb-6">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
                 <div className="font-medium text-white">{pendingDelete.title}</div>
                 <div className="mt-2 text-slate-400">{pendingDelete.review_count} review{pendingDelete.review_count === 1 ? '' : 's'} recorded</div>
@@ -345,7 +351,7 @@ export function ConceptsListPage() {
               {deleteMutation.isError ? (
                 <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{(deleteMutation.error as Error).message}</div>
               ) : null}
-              <div className="flex justify-end gap-2">
+              <DialogFooter className="px-0 pb-0">
                 <Button type="button" variant="secondary" onClick={() => setPendingDelete(null)} disabled={deleteMutation.isPending}>Cancel</Button>
                 <Button
                   type="button"
@@ -355,13 +361,17 @@ export function ConceptsListPage() {
                 >
                   {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
-    </AppLayout>
+    </>
   );
+}
+
+export function ConceptsListPage() {
+  return <ConceptsCatalogView />;
 }
 
 function ConceptsTable({
@@ -373,6 +383,8 @@ function ConceptsTable({
   onTopicFilter,
   onDelete,
   emptyMessage,
+  selectedConceptId,
+  onSelectConcept,
 }: {
   data: ConceptListResponse;
   currentState: ConceptsState;
@@ -382,6 +394,8 @@ function ConceptsTable({
   onTopicFilter: (topicId: number) => void;
   onDelete: (concept: ConceptListItem) => void;
   emptyMessage: string;
+  selectedConceptId?: number | null;
+  onSelectConcept?: (conceptId: number) => void;
 }) {
   if (!data.items.length) {
     return (
@@ -401,11 +415,11 @@ function ConceptsTable({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="overflow-x-auto">
-          <table className="w-full border-separate border-spacing-0 text-left text-sm text-slate-200">
-            <thead>
-              <tr className="text-xs uppercase tracking-[0.2em] text-slate-500">
+          <Table className="text-slate-200">
+            <TableHeader>
+              <TableRow className="text-slate-500">
                 {(['id', 'title', 'mastery_level', 'interval_days', 'review_count', 'next_review_at', 'last_reviewed_at'] as ConceptListSortField[]).map((field) => (
-                  <th key={field} className="border-b border-white/10 px-4 py-3">
+                  <TableHead key={field} className="border-b border-white/10">
                     <button
                       type="button"
                       className="inline-flex items-center gap-2 text-left transition-colors hover:text-slate-200"
@@ -414,33 +428,46 @@ function ConceptsTable({
                       <span>{SORT_LABELS[field]}</span>
                       {currentState.sort === field ? <span>{currentState.order === 'asc' ? '↑' : '↓'}</span> : null}
                     </button>
-                  </th>
+                  </TableHead>
                 ))}
-                <th className="border-b border-white/10 px-4 py-3">Topics</th>
-                <th className="border-b border-white/10 px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+                <TableHead className="border-b border-white/10">Topics</TableHead>
+                <TableHead className="border-b border-white/10 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.items.map((concept) => (
-                <tr key={concept.id} className="transition-colors hover:bg-white/5">
-                  <td className="border-b border-white/5 px-4 py-3 text-slate-400">#{concept.id}</td>
-                  <td className="border-b border-white/5 px-4 py-3">
-                    <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${concept.id}`}>{concept.title}</Link>
+                <TableRow key={concept.id} className="hover:bg-white/5">
+                  <TableCell className="border-b border-white/5 text-slate-400">#{concept.id}</TableCell>
+                  <TableCell className="border-b border-white/5">
+                    {onSelectConcept ? (
+                      <button
+                        type="button"
+                        className={cn(
+                          'font-medium transition-colors hover:text-sky-100',
+                          selectedConceptId === concept.id ? 'text-white' : 'text-sky-200'
+                        )}
+                        onClick={() => onSelectConcept(concept.id)}
+                      >
+                        {concept.title}
+                      </button>
+                    ) : (
+                      <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${concept.id}`}>{concept.title}</Link>
+                    )}
                     {previewRemark(concept.latest_remark) ? <div className="mt-1 text-xs text-slate-500">{previewRemark(concept.latest_remark)}</div> : null}
-                  </td>
-                  <td className="border-b border-white/5 px-4 py-3">
+                  </TableCell>
+                  <TableCell className="border-b border-white/5">
                     <div className="flex min-w-28 items-center gap-3">
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
                         <div className={`h-full rounded-full ${scoreTone(concept.mastery_level)}`} style={{ width: `${concept.mastery_level}%` }} />
                       </div>
                       <span>{concept.mastery_level}</span>
                     </div>
-                  </td>
-                  <td className="border-b border-white/5 px-4 py-3 text-slate-300">{concept.review_count > 0 ? `${concept.interval_days || 1}d` : '—'}</td>
-                  <td className="border-b border-white/5 px-4 py-3 text-slate-300">{concept.review_count}</td>
-                  <td className="border-b border-white/5 px-4 py-3 text-slate-300">{formatFutureRelative(concept.next_review_at)}</td>
-                  <td className="border-b border-white/5 px-4 py-3 text-slate-300">{formatPastRelative(concept.last_reviewed_at)}</td>
-                  <td className="border-b border-white/5 px-4 py-3">
+                  </TableCell>
+                  <TableCell className="border-b border-white/5 text-slate-300">{concept.review_count > 0 ? `${concept.interval_days || 1}d` : '—'}</TableCell>
+                  <TableCell className="border-b border-white/5 text-slate-300">{concept.review_count}</TableCell>
+                  <TableCell className="border-b border-white/5 text-slate-300">{formatFutureRelative(concept.next_review_at)}</TableCell>
+                  <TableCell className="border-b border-white/5 text-slate-300">{formatPastRelative(concept.last_reviewed_at)}</TableCell>
+                  <TableCell className="border-b border-white/5">
                     <div className="flex flex-wrap gap-2">
                       {concept.topics.length ? concept.topics.map((topic) => (
                         <button
@@ -453,8 +480,8 @@ function ConceptsTable({
                         </button>
                       )) : <span className="text-slate-500">untagged</span>}
                     </div>
-                  </td>
-                  <td className="border-b border-white/5 px-4 py-3 text-right">
+                  </TableCell>
+                  <TableCell className="border-b border-white/5 text-right">
                     <Button
                       type="button"
                       variant="secondary"
@@ -464,11 +491,11 @@ function ConceptsTable({
                     >
                       Delete
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
 
         <div className="flex items-center justify-between gap-3">

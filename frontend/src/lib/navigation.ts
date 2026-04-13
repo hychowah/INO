@@ -21,6 +21,24 @@ export function resolveBackendHref(path: string, locationLike: LocationLike = wi
   return `${locationLike.protocol}//${locationLike.hostname}:${BACKEND_PORT}${path}`;
 }
 
+export function resolvePreferredNavHref(activePath: string, itemHref: string) {
+  if (itemHref === '/knowledge') {
+    if (activePath === '/concepts' || activePath === '/knowledge/concepts') {
+      return '/knowledge/concepts';
+    }
+    if (activePath === '/graph' || activePath === '/knowledge/graph') {
+      return '/knowledge/graph';
+    }
+    return '/knowledge';
+  }
+
+  if (itemHref === '/progress' && (activePath === '/forecast' || activePath === '/progress/forecast')) {
+    return '/progress/forecast';
+  }
+
+  return itemHref;
+}
+
 export const primaryNavItems: readonly AppNavItem[] = [
   {
     label: 'Dashboard',
@@ -38,10 +56,10 @@ export const primaryNavItems: readonly AppNavItem[] = [
   },
   {
     label: 'Knowledge',
-    href: '/topics',
+    href: '/knowledge',
     icon: BookMarked,
     description: 'Topics, concepts, and graph exploration.',
-    matches: ['/topics', '/topic', '/concepts', '/concept', '/graph'],
+    matches: ['/knowledge', '/topics', '/topic', '/concepts', '/concept', '/graph'],
   },
   {
     label: 'Progress',

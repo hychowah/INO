@@ -2,11 +2,12 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(include_in_schema=False)
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+RESERVED_PREFIXES = ("api", "assets", "static")
 
 
 def _frontend_missing_response() -> HTMLResponse:
@@ -38,61 +39,23 @@ def _spa_entry_response() -> FileResponse | HTMLResponse:
     return _frontend_missing_response()
 
 
+def _path_is_reserved(path: str) -> bool:
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in RESERVED_PREFIXES)
+
+
+def _request_wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return not accept or "text/html" in accept or "*/*" in accept
+
+
+def _should_serve_spa(request: Request, path: str) -> bool:
+    return not _path_is_reserved(path) and _request_wants_html(request)
+
+
 @router.get("/", response_class=HTMLResponse)
-async def dashboard_page():
-    return _spa_entry_response()
+@router.get("/{path:path}", response_class=HTMLResponse)
+async def spa_page(request: Request, path: str = ""):
+    if not _should_serve_spa(request, path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-
-@router.get("/chat", response_class=HTMLResponse)
-async def chat_page():
-    return _spa_entry_response()
-
-
-@router.get("/topics", response_class=HTMLResponse)
-async def topics_page():
-    return _spa_entry_response()
-
-
-@router.get("/topic/{topic_id}", response_class=HTMLResponse)
-async def topic_detail_page(topic_id: int):
-    return _spa_entry_response()
-
-
-@router.get("/concepts", response_class=HTMLResponse)
-async def concepts_page():
-    return _spa_entry_response()
-
-
-@router.get("/concept/{concept_id}", response_class=HTMLResponse)
-async def concept_detail_page(concept_id: int):
-    return _spa_entry_response()
-
-
-@router.get("/graph", response_class=HTMLResponse)
-async def graph_page():
-    return _spa_entry_response()
-
-
-@router.get("/reviews", response_class=HTMLResponse)
-async def reviews_page():
-    return _spa_entry_response()
-
-
-@router.get("/progress", response_class=HTMLResponse)
-async def progress_page():
-    return _spa_entry_response()
-
-
-@router.get("/progress/forecast", response_class=HTMLResponse)
-async def progress_forecast_page():
-    return _spa_entry_response()
-
-
-@router.get("/forecast", response_class=HTMLResponse)
-async def forecast_page():
-    return _spa_entry_response()
-
-
-@router.get("/actions", response_class=HTMLResponse)
-async def actions_page():
     return _spa_entry_response()

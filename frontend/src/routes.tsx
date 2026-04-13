@@ -1,20 +1,16 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AppShell } from './components/AppShell';
 import { ChatPage } from './pages/ChatPage';
 import { ConceptDetailPage } from './pages/ConceptDetailPage';
-import { ConceptsListPage } from './pages/ConceptsListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { KnowledgePage } from './pages/KnowledgePage';
 import { ProgressPage } from './pages/ProgressPage';
 import { TopicDetailPage } from './pages/TopicDetailPage';
-import { TopicsListPage } from './pages/TopicsListPage';
 
 const queryClient = new QueryClient();
-const GraphPage = lazy(async () => {
-  const module = await import('./pages/GraphPage');
-  return { default: module.GraphPage };
-});
 
 function RouteFallback() {
   return (
@@ -30,18 +26,23 @@ export function AppRouter() {
       <BrowserRouter>
         <Suspense fallback={<RouteFallback />}>
           <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/actions" element={<ActivityPage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/concept/:conceptId" element={<ConceptDetailPage />} />
-            <Route path="/concepts" element={<ConceptsListPage />} />
-            <Route path="/forecast" element={<ProgressPage />} />
-            <Route path="/graph" element={<GraphPage />} />
-            <Route path="/progress" element={<ProgressPage />} />
-            <Route path="/progress/forecast" element={<ProgressPage />} />
-            <Route path="/topic/:topicId" element={<TopicDetailPage />} />
-            <Route path="/topics" element={<TopicsListPage />} />
-            <Route path="/reviews" element={<ProgressPage />} />
+            <Route element={<AppShell />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/actions" element={<ActivityPage />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/concept/:conceptId" element={<ConceptDetailPage />} />
+              <Route path="/concepts" element={<Navigate to="/knowledge/concepts" replace />} />
+              <Route path="/forecast" element={<Navigate to="/progress/forecast" replace />} />
+              <Route path="/graph" element={<Navigate to="/knowledge/graph" replace />} />
+              <Route path="/knowledge" element={<KnowledgePage />} />
+              <Route path="/knowledge/concepts" element={<KnowledgePage />} />
+              <Route path="/knowledge/graph" element={<KnowledgePage />} />
+              <Route path="/progress" element={<ProgressPage />} />
+              <Route path="/progress/forecast" element={<ProgressPage />} />
+              <Route path="/topic/:topicId" element={<TopicDetailPage />} />
+              <Route path="/topics" element={<Navigate to="/knowledge" replace />} />
+              <Route path="/reviews" element={<Navigate to="/progress" replace />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

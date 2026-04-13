@@ -15,7 +15,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
 - **Multiple interfaces** — Discord bot, FastAPI REST API, and the FastAPI-served React browser UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Web dashboard + React SPA** — FastAPI serves the React browser UI for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity routes
+- **Desktop-first browser shell** — FastAPI serves a React SPA organized around Dashboard, Chat, Knowledge, and Progress, with an Activity drawer, compatibility routes, a shell command palette, and resizable Knowledge detail panels
 - **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
 - **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
@@ -128,8 +128,9 @@ make dev-all           # API + Vite dev server + Discord bot together
 Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
-- If `frontend/dist/` exists, FastAPI serves the built React SPA entry for `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
-- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while backend requests are proxied to the FastAPI app on port 8080.
+- If `frontend/dist/` exists, FastAPI serves the built React SPA for any HTML request outside `/api`, `/assets`, and `/static`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
+- Canonical browser routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, and `/concept/{concept_id}`. Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain as SPA compatibility redirects, and `/actions` remains available as a standalone compatibility route even though Activity normally opens in a drawer.
+- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while only `/api`, `/assets`, and `/static` are proxied to the FastAPI app on port 8080.
 - `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
 
 ## Discord Bot Setup

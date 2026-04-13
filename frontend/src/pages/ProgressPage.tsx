@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { LoadingCard } from '@/components/LoadingCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageIntro } from '@/components/PageIntro';
 import { fetchForecast, fetchForecastConcepts, fetchReviews } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import type { ForecastBucket, ForecastConcept, ForecastSummary, ReviewLogEntry } from '../types';
 
 type ForecastBar = ForecastBucket & {
@@ -87,8 +89,7 @@ export function ProgressPage() {
   }
 
   return (
-    <AppLayout active={location.pathname}>
-      <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
         <PageIntro
           eyebrow="Progress"
           title="Review performance"
@@ -108,11 +109,7 @@ export function ProgressPage() {
           </TabsList>
 
           <TabsContent value="reviews" className="min-h-0">
-            {reviewsQuery.isPending ? (
-              <Card>
-                <CardContent className="py-6 text-sm text-muted-foreground">Loading reviews…</CardContent>
-              </Card>
-            ) : null}
+            {reviewsQuery.isPending ? <LoadingCard label="Loading reviews…" rows={4} /> : null}
 
             {reviewsQuery.isError ? (
               <Card className="border-red-500/30 bg-red-500/10">
@@ -147,11 +144,7 @@ export function ProgressPage() {
                 </CardContent>
               </Card>
 
-              {forecastQuery.isPending ? (
-                <Card>
-                  <CardContent className="py-6 text-sm text-muted-foreground">Loading forecast…</CardContent>
-                </Card>
-              ) : null}
+              {forecastQuery.isPending ? <LoadingCard label="Loading forecast…" rows={3} /> : null}
 
               {forecastQuery.isError ? (
                 <Card className="border-red-500/30 bg-red-500/10">
@@ -197,7 +190,13 @@ export function ProgressPage() {
                       <CardDescription>Concepts due in the selected bucket.</CardDescription>
                     </CardHeader>
                     <CardContent className="min-h-0 flex-1 space-y-3">
-                      {bucketConceptsQuery.isPending ? <p className="text-sm text-muted-foreground">Loading concepts…</p> : null}
+                      {bucketConceptsQuery.isPending ? (
+                        <div className="space-y-3" aria-label="Loading concepts">
+                          <Skeleton className="h-10 w-full" />
+                          <Skeleton className="h-10 w-full" />
+                          <Skeleton className="h-10 w-full" />
+                        </div>
+                      ) : null}
                       {bucketConceptsQuery.isError ? <p className="text-sm text-red-100">{(bucketConceptsQuery.error as Error).message}</p> : null}
                       {bucketConceptsQuery.data ? <ForecastConceptTable concepts={bucketConceptsQuery.data} /> : null}
                     </CardContent>
@@ -208,7 +207,6 @@ export function ProgressPage() {
           </TabsContent>
         </Tabs>
       </section>
-    </AppLayout>
   );
 }
 
@@ -229,34 +227,34 @@ function ReviewsPanel({ reviews }: { reviews: ReviewLogEntry[] }) {
       </CardHeader>
       <CardContent className="min-h-0 flex-1">
         <div className="app-scrollbar h-full overflow-auto">
-          <table className="w-full border-separate border-spacing-0 text-left text-sm text-foreground">
-            <thead>
-              <tr className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                <th className="border-b border-border/80 px-4 py-3">Date</th>
-                <th className="border-b border-border/80 px-4 py-3">Concept</th>
-                <th className="border-b border-border/80 px-4 py-3">Question</th>
-                <th className="border-b border-border/80 px-4 py-3">Answer</th>
-                <th className="border-b border-border/80 px-4 py-3 text-center">Quality</th>
-                <th className="border-b border-border/80 px-4 py-3">Assessment</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="text-foreground">
+            <TableHeader>
+              <TableRow className="text-muted-foreground">
+                <TableHead className="border-b border-border/80">Date</TableHead>
+                <TableHead className="border-b border-border/80">Concept</TableHead>
+                <TableHead className="border-b border-border/80">Question</TableHead>
+                <TableHead className="border-b border-border/80">Answer</TableHead>
+                <TableHead className="border-b border-border/80 text-center">Quality</TableHead>
+                <TableHead className="border-b border-border/80">Assessment</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {reviews.map((review) => (
-                <tr key={reviewRowKey(review)} className="align-top transition-colors hover:bg-secondary/50">
-                  <td className="border-b border-border/40 px-4 py-3 text-muted-foreground">{review.reviewed_at || '—'}</td>
-                  <td className="border-b border-border/40 px-4 py-3">
+                <TableRow key={reviewRowKey(review)} className="align-top hover:bg-secondary/50">
+                  <TableCell className="border-b border-border/40 text-muted-foreground">{review.reviewed_at || '—'}</TableCell>
+                  <TableCell className="border-b border-border/40">
                     <Link className="font-medium text-primary transition-colors hover:text-primary/80" to={`/concept/${review.concept_id}`}>{review.concept_title}</Link>
-                  </td>
-                  <td className="max-w-[220px] border-b border-border/40 px-4 py-3 text-muted-foreground">{review.question_asked || '—'}</td>
-                  <td className="max-w-[220px] border-b border-border/40 px-4 py-3 text-muted-foreground">{review.user_response || '—'}</td>
-                  <td className="border-b border-border/40 px-4 py-3 text-center">
+                  </TableCell>
+                  <TableCell className="max-w-[220px] border-b border-border/40 text-muted-foreground">{review.question_asked || '—'}</TableCell>
+                  <TableCell className="max-w-[220px] border-b border-border/40 text-muted-foreground">{review.user_response || '—'}</TableCell>
+                  <TableCell className="border-b border-border/40 text-center">
                     <Badge className={qualityTone(review.quality)} variant="outline">{review.quality ?? '?'} / 5</Badge>
-                  </td>
-                  <td className="border-b border-border/40 px-4 py-3 text-xs text-muted-foreground">{(review.llm_assessment || '').slice(0, 120) || '—'}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="border-b border-border/40 text-xs text-muted-foreground">{(review.llm_assessment || '').slice(0, 120) || '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </CardContent>
     </Card>
@@ -270,26 +268,26 @@ function ForecastConceptTable({ concepts }: { concepts: ForecastConcept[] }) {
 
   return (
     <div className="app-scrollbar h-full overflow-auto">
-      <table className="w-full border-separate border-spacing-0 text-left text-sm text-foreground">
-        <thead>
-          <tr className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            <th className="border-b border-border/80 px-3 py-3">Concept</th>
-            <th className="border-b border-border/80 px-3 py-3">Mastery</th>
-            <th className="border-b border-border/80 px-3 py-3">Next Review</th>
-            <th className="border-b border-border/80 px-3 py-3">Interval</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="text-foreground">
+        <TableHeader>
+          <TableRow className="text-muted-foreground">
+            <TableHead className="border-b border-border/80 px-3">Concept</TableHead>
+            <TableHead className="border-b border-border/80 px-3">Mastery</TableHead>
+            <TableHead className="border-b border-border/80 px-3">Next Review</TableHead>
+            <TableHead className="border-b border-border/80 px-3">Interval</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {concepts.map((concept) => (
-            <tr key={concept.id} className="transition-colors hover:bg-secondary/50">
-              <td className="border-b border-border/40 px-3 py-3"><Link className="font-medium text-primary transition-colors hover:text-primary/80" to={`/concept/${concept.id}`}>{concept.title}</Link></td>
-              <td className="border-b border-border/40 px-3 py-3">{concept.mastery_level}</td>
-              <td className="border-b border-border/40 px-3 py-3 text-muted-foreground">{concept.next_review_at || '—'}</td>
-              <td className="border-b border-border/40 px-3 py-3">{concept.interval_days != null ? `${concept.interval_days}d` : '—'}</td>
-            </tr>
+            <TableRow key={concept.id} className="hover:bg-secondary/50">
+              <TableCell className="border-b border-border/40 px-3"><Link className="font-medium text-primary transition-colors hover:text-primary/80" to={`/concept/${concept.id}`}>{concept.title}</Link></TableCell>
+              <TableCell className="border-b border-border/40 px-3">{concept.mastery_level}</TableCell>
+              <TableCell className="border-b border-border/40 px-3 text-muted-foreground">{concept.next_review_at || '—'}</TableCell>
+              <TableCell className="border-b border-border/40 px-3">{concept.interval_days != null ? `${concept.interval_days}d` : '—'}</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

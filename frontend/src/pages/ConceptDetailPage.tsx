@@ -1,14 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
+import { LoadingCard } from '@/components/LoadingCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchConceptDetail, fetchConceptRelations } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import type { ConceptDetail, ConceptRelation } from '../types';
 
 type ConceptDetailBundle = {
   concept: ConceptDetail;
   relations: ConceptRelation[];
+};
+
+type ConceptDetailViewProps = {
+  conceptId: number;
+  showHeader?: boolean;
+  embedded?: boolean;
+  onSelectConcept?: (conceptId: number) => void;
 };
 
 function qualityTone(quality?: number | null) {
@@ -22,6 +29,11 @@ function qualityTone(quality?: number | null) {
 export function ConceptDetailPage() {
   const params = useParams<{ conceptId: string }>();
   const conceptId = Number(params.conceptId);
+
+  return <ConceptDetailView conceptId={conceptId} />;
+}
+
+export function ConceptDetailView({ conceptId, showHeader = true, embedded = false, onSelectConcept }: ConceptDetailViewProps) {
   const isValidConceptId = Number.isInteger(conceptId) && conceptId > 0;
 
   const conceptQuery = useQuery<ConceptDetailBundle>({
@@ -37,15 +49,16 @@ export function ConceptDetailPage() {
   });
 
   return (
-    <AppLayout active="/concepts">
-      <section className="space-y-6">
-        <div className="flex flex-col gap-3">
-          <Badge className="w-fit">Concept</Badge>
-          <div>
-            <h2 className="text-3xl font-semibold tracking-tight text-white">Concept Detail</h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Review state, relations, remarks, and recent assessments for a single concept.</p>
+    <section className="space-y-6">
+        {showHeader ? (
+          <div className="flex flex-col gap-3">
+            <Badge className="w-fit">Concept</Badge>
+            <div>
+              <h2 className="text-3xl font-semibold tracking-tight text-white">Concept Detail</h2>
+              <p className="mt-2 max-w-3xl text-sm text-slate-400">Review state, relations, remarks, and recent assessments for a single concept.</p>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {!isValidConceptId ? (
           <Card className="border-red-500/30 bg-red-500/10">
@@ -53,11 +66,7 @@ export function ConceptDetailPage() {
           </Card>
         ) : null}
 
-        {conceptQuery.isPending ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-slate-300">Loading concept…</CardContent>
-          </Card>
-        ) : null}
+        {conceptQuery.isPending ? <LoadingCard label="Loading concept…" rows={3} /> : null}
 
         {conceptQuery.isError ? (
           <Card className="border-red-500/30 bg-red-500/10">
@@ -65,13 +74,31 @@ export function ConceptDetailPage() {
           </Card>
         ) : null}
 
-        {conceptQuery.data ? <ConceptDetailContent concept={conceptQuery.data.concept} relations={conceptQuery.data.relations} /> : null}
+        {conceptQuery.data ? (
+          <ConceptDetailContent
+            concept={conceptQuery.data.concept}
+            relations={conceptQuery.data.relations}
+            embedded={embedded}
+            onSelectConcept={onSelectConcept}
+          />
+        ) : null}
       </section>
-    </AppLayout>
   );
 }
 
-function ConceptDetailContent({ concept, relations }: ConceptDetailBundle) {
+function ConceptDetailContent({ concept, relations, onSelectConcept }: ConceptDetailBundle & Pick<ConceptDetailViewProps, 'embedded' | 'onSelectConcept'>) {
+  function renderConceptLink(conceptId: number, title: string, className: string) {
+    if (onSelectConcept) {
+      return (
+        <button type="button" className={className} onClick={() => onSelectConcept(conceptId)}>
+          {title}
+        </button>
+      );
+    }
+
+    return <Link className={className} to={`/concept/${conceptId}`}>{title}</Link>;
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -137,7 +164,7 @@ function ConceptDetailContent({ concept, relations }: ConceptDetailBundle) {
               {relations.length ? relations.map((relation) => (
                 <div key={relation.id} className="rounded-2xl border border-white/10 bg-slate-950/40 p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link className="font-medium text-sky-200 transition-colors hover:text-sky-100" to={`/concept/${relation.other_concept_id}`}>{relation.other_title}</Link>
+                    {renderConceptLink(relation.other_concept_id, relation.other_title, 'font-medium text-sky-200 transition-colors hover:text-sky-100')}
                     <Badge variant="outline">{relation.relation_type.replace(/_/g, ' ')}</Badge>
                     <Badge variant="outline">{relation.other_mastery}/100</Badge>
                   </div>

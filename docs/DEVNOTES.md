@@ -322,10 +322,15 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 ## 25. React SPA Routing & Shared Chat Session
 
 **Architecture:** The React/TypeScript/Vite frontend (`frontend/`) is now served two ways:
-- **Dev mode:** Vite dev server on port 5173 (`make dev-ui`). React Router owns the SPA routes there, while Vite proxies backend/static requests such as `/api`, `/assets`, `/static`, and the current `/reviews` compatibility path to FastAPI on port 8080.
-- **Built mode:** `make build-ui` builds `frontend/dist`; FastAPI mounts `frontend/dist/assets` at `/assets` and serves `frontend/dist/index.html` for the explicit SPA-owned routes `/`, `/chat`, `/topics`, `/topic/{topic_id}`, `/concepts`, `/concept/{concept_id}`, `/graph`, `/reviews`, `/forecast`, and `/actions`.
+- **Dev mode:** Vite dev server on port 5173 (`make dev-ui`). React Router owns the SPA routes there, while Vite proxies only `/api`, `/assets`, and `/static` to FastAPI on port 8080.
+- **Built mode:** `make build-ui` builds `frontend/dist`; FastAPI mounts `frontend/dist/assets` at `/assets` and serves `frontend/dist/index.html` for any non-reserved request that accepts HTML. The reserved prefixes are `/api`, `/assets`, and `/static`.
 
-**Route ownership:** Browser routing now lives in `frontend/src/routes.tsx`. `frontend/src/App.tsx` is just a compatibility re-export for the chat page and `resolveBackendHref()` helper. Shared chat execution lives in `services/chat_session.py`. As of this checkpoint, the React route set includes dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews. The graph page is also the first route split out with `React.lazy` + `Suspense` so the force-graph dependency stays out of the main entry chunk.
+**Route ownership:** Browser routing now lives in `frontend/src/routes.tsx` under a nested `AppShell`. Canonical routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/:topicId`, `/concept/:conceptId`, and `/actions`, while `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` remain as compatibility redirects. `frontend/src/App.tsx` is just a compatibility re-export for the chat page and `resolveBackendHref()` helper. Shared chat execution lives in `services/chat_session.py`. `GraphPage` remains lazy-loaded so the force-graph dependency stays out of the main entry chunk.
+
+**Shell behavior:** `frontend/src/components/AppShell.tsx` now owns shell-level interaction surfaces that are not page routes:
+- Activity normally opens as a drawer over the current surface, with `/actions` preserved as a compatibility entry route.
+- A `cmdk`-based command palette opens with `Ctrl+K` and reuses centralized navigation metadata.
+- Knowledge now embeds Topic and Concept detail panels directly and uses `react-resizable-panels` for desktop split resizing.
 
 **Non-obvious trap — href navigation vs. fetch proxy:** The Vite proxy only intercepts XHR / `fetch()` calls. Plain HTML `href` navigation (for links that still point at legacy routes) is a full browser redirect — the browser sends it to the same origin (port 5173), so client-side routing can swallow the navigation unless links targeting backend-owned pages are rewritten to the FastAPI origin.
 
@@ -333,15 +338,17 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Auth:** `api/auth.py` now permits bearer-token-free access from `localhost` on `API_PORT` (8080). Before this fix, the React frontend's `/api/chat/bootstrap` call from a browser on port 8080 was rejected with 401 even though it was a localhost request.
 
-**Later migration status update (2026-04-12):**
-- SPA-owned routes expanded to `/`, `/actions`, `/chat`, `/concept/:conceptId`, `/concepts`, `/forecast`, `/graph`, `/topic/:topicId`, `/topics`, and `/reviews`.
-- The migrated React page set now includes dashboard, activity, chat, topics list/detail, concepts list/detail, forecast, graph, and reviews.
-- The frontend foundation now includes Tailwind CSS plus local shadcn-style UI primitives under `frontend/src/components/ui`.
-- Shared chat logic moved into `services/chat_session.py`, which now backs both JSON and SSE browser chat routes.
-- The dedicated frontend workflow now runs typecheck, Vitest, Playwright browser install, and Chromium E2E smoke tests in `.github/workflows/frontend.yml`.
+**Current migration status (2026-04-14):**
+- The top-level browser IA is now consolidated around Dashboard, Chat, Knowledge, and Progress.
+- Knowledge embeds Topic and Concept detail panels inside the main surface, while standalone detail routes remain available as fallback.
+- Progress owns both review history and forecast views.
+- Activity is drawer-backed in normal shell flow.
+- The frontend foundation now includes Tailwind CSS plus local shadcn-style UI primitives under `frontend/src/components/ui`, a command palette, and resizable Knowledge split panels.
+- Shared chat logic moved into `services/chat_session.py`, which backs both JSON and SSE browser chat routes.
+- The dedicated frontend workflow runs typecheck, Vitest, Playwright browser install, and Chromium E2E smoke tests in `.github/workflows/frontend.yml`.
 - Playwright preview serves the current `frontend/dist` output. When running `npx playwright test` directly after frontend changes, rebuild first with `npm run build` or the preview server can serve stale assets and make route mocks look broken.
 
-**Key files:** `frontend/src/routes.tsx`, `frontend/src/lib/navigation.ts`, `frontend/src/pages/ChatPage.tsx`, `frontend/src/pages/DashboardPage.tsx`, `frontend/src/pages/TopicsListPage.tsx`, `frontend/src/pages/ConceptsListPage.tsx`, `frontend/src/pages/ForecastPage.tsx`, `frontend/src/pages/GraphPage.tsx`, `services/chat_session.py`, `api/routes/pages.py`, `api/auth.py`, `.github/workflows/frontend.yml`, `frontend/playwright.config.ts`, `frontend/e2e/knowledge-surfaces.spec.ts`.
+**Key files:** `frontend/src/routes.tsx`, `frontend/src/lib/navigation.ts`, `frontend/src/components/AppShell.tsx`, `frontend/src/components/AppLayout.tsx`, `frontend/src/components/ActivityDrawer.tsx`, `frontend/src/components/CommandPalette.tsx`, `frontend/src/components/ui/resizable-panels.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/ProgressPage.tsx`, `frontend/src/pages/TopicsListPage.tsx`, `frontend/src/pages/ConceptsListPage.tsx`, `frontend/src/pages/GraphPage.tsx`, `services/chat_session.py`, `api/routes/pages.py`, `api/auth.py`, `.github/workflows/frontend.yml`, `frontend/playwright.config.ts`, `frontend/e2e/knowledge-surfaces.spec.ts`.
 
 ## 21. Preference-Edit Isolated Skill Path
 

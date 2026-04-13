@@ -18,7 +18,6 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8080',
       '/assets': 'http://127.0.0.1:8080',
       '/static': 'http://127.0.0.1:8080',
-      '/reviews': 'http://127.0.0.1:8080',
     }
   },
   build: {

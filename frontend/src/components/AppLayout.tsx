@@ -1,16 +1,20 @@
 import type { ReactNode } from 'react';
-import { ArrowUpRight, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Search, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Link, useInRouterContext } from 'react-router-dom';
-import { isNavItemActive, primaryNavItems, resolveActiveNavItem, resolveBackendHref, utilityNavItems } from '@/lib/navigation';
+import { isNavItemActive, primaryNavItems, resolveActiveNavItem, resolveBackendHref, resolvePreferredNavHref, utilityNavItems } from '@/lib/navigation';
 
 type AppLayoutProps = {
   active: string;
   children: ReactNode;
+  activityDrawerOpen?: boolean;
+  onOpenActivityDrawer?: () => void;
+  onOpenCommandPalette?: () => void;
 };
 
-export function AppLayout({ active, children }: AppLayoutProps) {
+export function AppLayout({ active, children, activityDrawerOpen = false, onOpenActivityDrawer, onOpenCommandPalette }: AppLayoutProps) {
   const inRouterContext = useInRouterContext();
   const currentNavItem = resolveActiveNavItem(active);
 
@@ -19,8 +23,9 @@ export function AppLayout({ active, children }: AppLayoutProps) {
 
     return items.map((item) => {
       const Icon = item.icon;
-      const isActive = isNavItemActive(active, item);
-      const targetHref = item.href === '/progress' && (active === '/forecast' || active === '/progress/forecast') ? '/progress/forecast' : item.href;
+      const drawerBackedItem = item.href === '/actions' && Boolean(onOpenActivityDrawer) && active !== '/actions';
+      const isActive = drawerBackedItem ? activityDrawerOpen : isNavItemActive(active, item);
+      const targetHref = resolvePreferredNavHref(active, item.href);
       const className = cn(
         'group flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition-all',
         isActive
@@ -47,6 +52,14 @@ export function AppLayout({ active, children }: AppLayoutProps) {
           <ArrowUpRight className={cn('h-4 w-4 shrink-0 transition-opacity', isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-60')} />
         </>
       );
+
+      if (drawerBackedItem) {
+        return (
+          <button key={item.href} type="button" onClick={onOpenActivityDrawer} className={className}>
+            {content}
+          </button>
+        );
+      }
 
       if (inRouterContext) {
         return (
@@ -103,9 +116,20 @@ export function AppLayout({ active, children }: AppLayoutProps) {
               <div className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">Workspace</div>
               <div className="mt-1 text-sm font-medium text-foreground">{currentNavItem.label}</div>
             </div>
-            <div className="hidden items-center gap-2 lg:flex">
+            <div className="flex items-center gap-2">
+              {onOpenCommandPalette ? (
+                <Button type="button" variant="secondary" size="sm" onClick={onOpenCommandPalette}>
+                  <Search className="h-4 w-4" />
+                  Command
+                  <kbd className="hidden rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-muted-foreground sm:inline-flex">
+                    Ctrl K
+                  </kbd>
+                </Button>
+              ) : null}
+              <div className="hidden items-center gap-2 lg:flex">
               <Badge variant="outline">FastAPI + Vite</Badge>
               <Badge variant="muted">Legacy routes preserved</Badge>
+              </div>
             </div>
           </header>
 

@@ -6,9 +6,22 @@ Key changes, newest first.
 
 ## April 2026
 
+### Added
+
+- **Desktop-first browser shell redesign** — the React frontend now uses a nested `AppShell` with Dashboard, Chat, Knowledge, and Progress as the primary surfaces; legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths are preserved as compatibility redirects inside the SPA
+- **Knowledge consolidation** — Topics, Concepts, and Graph now live under `/knowledge`, with inline Topic and Concept detail panels, compatibility drill-in routes (`/topic/{id}`, `/concept/{id}`), and resizable split panels for embedded detail workflows
+- **Progress consolidation** — Reviews and Forecast now live under `/progress` and `/progress/forecast`; old standalone forecast/reviews pages were removed after the consolidated surface landed
+- **Shell utilities** — Activity now opens as a drawer in normal shell flow while `/actions` remains as a compatibility route; a `cmdk`-based command palette is available from the shell and opens with `Ctrl+K`
+
+### Changed
+
+- **FastAPI SPA serving** — the backend no longer serves only an explicit allowlist of page routes; it now serves the built SPA for HTML requests outside the reserved prefixes `/api`, `/assets`, and `/static`
+- **Vite dev behavior** — the frontend dev server now proxies only `/api`, `/assets`, and `/static`; client-side browser routes stay inside the SPA
+- **Frontend documentation** — README, API, setup, architecture, dev notes, and docs index were refreshed to reflect the consolidated Knowledge/Progress surfaces, Activity drawer, command palette, and resizable Knowledge panels
+
 ### Removed
 
-- **Legacy `webui/` runtime** — the separate Python-rendered browser stack and companion `8050` flow have been retired; FastAPI now serves the built React SPA on the explicit browser routes, and browser chat uses the shared FastAPI chat controller with buffered SSE replay via `/api/chat/stream`
+- **Legacy `webui/` runtime** — the separate Python-rendered browser stack and companion `8050` flow have been retired; FastAPI now serves the built React SPA through its HTML fallback route, and browser chat uses the shared FastAPI chat controller with buffered SSE replay via `/api/chat/stream`
 
 ### Added
 

@@ -5,7 +5,6 @@ import { PageIntro } from '@/components/PageIntro';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { confirmPending, declinePending, fetchBootstrap, runChatAction, streamChat } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import { resolveBackendHref } from '../lib/navigation';
 import type { ActionBlock, ButtonAction, ChatEntry, ChatEnvelope } from '../types';
 
@@ -638,8 +637,7 @@ export function ChatPage() {
   }
 
   return (
-    <AppLayout active="/chat">
-      <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
         <PageIntro
           eyebrow="Assistant"
           title="Chat"
@@ -766,6 +764,5 @@ export function ChatPage() {
           </aside>
         </div>
       </section>
-    </AppLayout>
   );
 }

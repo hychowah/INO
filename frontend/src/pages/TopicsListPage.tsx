@@ -4,11 +4,19 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingCard } from '@/components/LoadingCard';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { fetchTopicMap } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import type { TopicMapNode } from '../types';
 
 const STORAGE_KEY = 'learning-react-topics-expanded';
+
+type TopicsExplorerViewProps = {
+  showHeader?: boolean;
+  selectedTopicId?: number | null;
+  onSelectTopic?: (topicId: number) => void;
+};
 
 function loadExpandedIds(topicMap: TopicMapNode[]) {
   try {
@@ -49,6 +57,8 @@ function TopicTreeNode({
   onToggle,
   query,
   matchMemo,
+  selectedTopicId,
+  onSelectTopic,
 }: {
   topic: TopicMapNode;
   byId: Map<number, TopicMapNode>;
@@ -56,6 +66,8 @@ function TopicTreeNode({
   onToggle: (topicId: number) => void;
   query: string;
   matchMemo: Map<number, boolean>;
+  selectedTopicId?: number | null;
+  onSelectTopic?: (topicId: number) => void;
 }) {
   const children = topic.child_ids
     .map((childId) => byId.get(childId))
@@ -71,6 +83,11 @@ function TopicTreeNode({
 
   const ownMatch = topic.title.toLowerCase().includes(query);
   const expanded = queryActive ? true : expandedIds.has(topic.id);
+  const selected = selectedTopicId === topic.id;
+  const topicLabelClassName = cn(
+    'font-medium transition-colors hover:text-sky-100',
+    selected ? 'text-white' : ownMatch ? 'text-white' : 'text-sky-200'
+  );
 
   return (
     <li className="space-y-3">
@@ -86,7 +103,17 @@ function TopicTreeNode({
           </button>
         ) : <span className="inline-flex h-7 w-7 items-center justify-center text-slate-600">•</span>}
 
-        <Link className={`font-medium transition-colors hover:text-sky-100 ${ownMatch ? 'text-white' : 'text-sky-200'}`} to={`/topic/${topic.id}`}>{topic.title}</Link>
+        {onSelectTopic ? (
+          <button
+            type="button"
+            className={topicLabelClassName}
+            onClick={() => onSelectTopic(topic.id)}
+          >
+            {topic.title}
+          </button>
+        ) : (
+          <Link className={topicLabelClassName} to={`/topic/${topic.id}`}>{topic.title}</Link>
+        )}
         <span className="text-slate-500">{topic.concept_count} concepts</span>
         <span className="text-slate-500">{topic.due_count} due</span>
         <span className="text-slate-500">avg {topic.avg_mastery}/100</span>
@@ -103,6 +130,8 @@ function TopicTreeNode({
               onToggle={onToggle}
               query={query}
               matchMemo={matchMemo}
+              selectedTopicId={selectedTopicId}
+              onSelectTopic={onSelectTopic}
             />
           ))}
         </ul>
@@ -111,7 +140,7 @@ function TopicTreeNode({
   );
 }
 
-export function TopicsListPage() {
+export function TopicsExplorerView({ showHeader = true, selectedTopicId, onSelectTopic }: TopicsExplorerViewProps) {
   const [query, setQuery] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const topicsQuery = useQuery<TopicMapNode[]>({
@@ -151,8 +180,8 @@ export function TopicsListPage() {
   }
 
   return (
-    <AppLayout active="/topics">
-      <section className="space-y-6">
+    <section className="space-y-6">
+      {showHeader ? (
         <div className="flex flex-col gap-3">
           <Badge className="w-fit">Topic Map</Badge>
           <div>
@@ -160,23 +189,35 @@ export function TopicsListPage() {
             <p className="mt-2 max-w-3xl text-sm text-slate-400">Browse the topic hierarchy, inspect due counts, and navigate into migrated detail views.</p>
           </div>
         </div>
+      ) : null}
 
-        {topicsQuery.isPending ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-slate-300">Loading topics…</CardContent>
-          </Card>
-        ) : null}
+      {topicsQuery.isPending ? <LoadingCard label="Loading topics…" rows={3} /> : null}
 
-        {topicsQuery.isError ? (
-          <Card className="border-red-500/30 bg-red-500/10">
-            <CardContent className="py-6 text-sm text-red-100">{(topicsQuery.error as Error).message}</CardContent>
-          </Card>
-        ) : null}
+      {topicsQuery.isError ? (
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="py-6 text-sm text-red-100">{(topicsQuery.error as Error).message}</CardContent>
+        </Card>
+      ) : null}
 
-        {topicsQuery.data ? <TopicsContent topicMap={topicsQuery.data} query={query} onQueryChange={setQuery} expandedIds={expandedIds} onToggle={toggleTopic} onExpandAll={expandAll} onCollapseAll={collapseAll} /> : null}
-      </section>
-    </AppLayout>
+      {topicsQuery.data ? (
+        <TopicsContent
+          topicMap={topicsQuery.data}
+          query={query}
+          onQueryChange={setQuery}
+          expandedIds={expandedIds}
+          onToggle={toggleTopic}
+          onExpandAll={expandAll}
+          onCollapseAll={collapseAll}
+          selectedTopicId={selectedTopicId}
+          onSelectTopic={onSelectTopic}
+        />
+      ) : null}
+    </section>
   );
+}
+
+export function TopicsListPage() {
+  return <TopicsExplorerView />;
 }
 
 function TopicsContent({
@@ -187,6 +228,8 @@ function TopicsContent({
   onToggle,
   onExpandAll,
   onCollapseAll,
+  selectedTopicId,
+  onSelectTopic,
 }: {
   topicMap: TopicMapNode[];
   query: string;
@@ -195,6 +238,8 @@ function TopicsContent({
   onToggle: (topicId: number) => void;
   onExpandAll: (topicMap: TopicMapNode[]) => void;
   onCollapseAll: (topicMap: TopicMapNode[]) => void;
+  selectedTopicId?: number | null;
+  onSelectTopic?: (topicId: number) => void;
 }) {
   const byId = useMemo(() => new Map(topicMap.map((topic) => [topic.id, topic])), [topicMap]);
   const roots = useMemo(
@@ -222,12 +267,11 @@ function TopicsContent({
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                type="text"
+              <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder="Search topics..."
-                className="h-11 w-full rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20 sm:max-w-md"
+                className="sm:max-w-md"
               />
               <span className="text-sm text-slate-500">{normalizedQuery ? `${matchCount} match${matchCount === 1 ? '' : 'es'}` : 'Type to filter the tree'}</span>
             </div>
@@ -249,6 +293,8 @@ function TopicsContent({
                     onToggle={onToggle}
                     query={normalizedQuery}
                     matchMemo={matchMemo}
+                    selectedTopicId={selectedTopicId}
+                    onSelectTopic={onSelectTopic}
                   />
                 ))}
                 {orphans.map((topic) => (
@@ -260,6 +306,8 @@ function TopicsContent({
                     onToggle={onToggle}
                     query={normalizedQuery}
                     matchMemo={matchMemo}
+                    selectedTopicId={selectedTopicId}
+                    onSelectTopic={onSelectTopic}
                   />
                 ))}
               </ul>

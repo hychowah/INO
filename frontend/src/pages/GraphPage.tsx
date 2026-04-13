@@ -6,8 +6,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingCard } from '@/components/LoadingCard';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { fetchGraph } from '../api';
-import { AppLayout } from '../components/AppLayout';
 import type { GraphResponse } from '../types';
 
 const DEFAULT_MAX_NODES = 500;
@@ -53,6 +55,10 @@ type GraphViewLink = {
   edgeType: 'relation' | 'membership' | 'hierarchy';
   relationType?: string;
   note?: string | null;
+};
+
+type GraphExplorerViewProps = {
+  showHeader?: boolean;
 };
 
 function formatDue(dateStr?: string | null) {
@@ -163,7 +169,7 @@ function buildGraphView(data: GraphResponse) {
   return { nodes, links };
 }
 
-export function GraphPage() {
+export function GraphExplorerView({ showHeader = true }: GraphExplorerViewProps) {
   const navigate = useNavigate();
   const graphRef = useRef<any>(null);
   const { ref: containerRef, size } = useElementSize();
@@ -342,8 +348,8 @@ export function GraphPage() {
   }
 
   return (
-    <AppLayout active="/graph">
-      <section className="space-y-6">
+    <section className="space-y-6">
+      {showHeader ? (
         <div className="flex flex-col gap-3">
           <Badge className="w-fit">Knowledge Graph</Badge>
           <div>
@@ -351,6 +357,7 @@ export function GraphPage() {
             <p className="mt-2 max-w-3xl text-sm text-slate-400">Explore concept relations, topic membership, and hierarchy inside the migrated React graph surface.</p>
           </div>
         </div>
+      ) : null}
 
         {graphQuery.data && graphQuery.data.total_concepts > graphQuery.data.concept_nodes.length ? (
           <Card className="border-amber-400/20 bg-amber-400/10">
@@ -365,23 +372,20 @@ export function GraphPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]">
-              <input
-                type="text"
+              <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search graph nodes..."
-                className="h-11 w-full rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               />
-              <select
+              <Select
                 value={topicId}
                 onChange={(event) => setTopicId(event.target.value)}
-                className="h-11 rounded-full border border-white/10 bg-slate-950/70 px-4 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20"
               >
                 <option value="">All Topics</option>
                 {topicOptions.map((topic) => (
                   <option key={topic.id} value={topic.id}>{topic.title}</option>
                 ))}
-              </select>
+              </Select>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant={layoutMode === 'force' ? 'default' : 'secondary'} onClick={() => setLayoutMode('force')}>Free Layout</Button>
                 <Button type="button" size="sm" variant={layoutMode === 'cluster' ? 'default' : 'secondary'} onClick={() => setLayoutMode('cluster')}>Group by Topic</Button>
@@ -404,11 +408,7 @@ export function GraphPage() {
           </CardContent>
         </Card>
 
-        {graphQuery.isPending ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-slate-300">Loading graph…</CardContent>
-          </Card>
-        ) : null}
+        {graphQuery.isPending ? <LoadingCard label="Loading graph…" rows={3} /> : null}
 
         {graphQuery.isError ? (
           <Card className="border-red-500/30 bg-red-500/10">
@@ -518,9 +518,12 @@ export function GraphPage() {
             </div>
           </div>
         ) : null}
-      </section>
-    </AppLayout>
+    </section>
   );
+}
+
+export function GraphPage() {
+  return <GraphExplorerView />;
 }
 
 function LegendRow({ color, label }: { color: string; label: string }) {

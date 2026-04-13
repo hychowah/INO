@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ForecastPage } from './ForecastPage';
+import { ProgressPage } from './ProgressPage';
 
 function jsonResponse(data: Record<string, unknown> | Array<Record<string, unknown>>) {
   return Promise.resolve({
@@ -12,7 +12,7 @@ function jsonResponse(data: Record<string, unknown> | Array<Record<string, unkno
   } as Response);
 }
 
-function renderForecastPage() {
+function renderProgressPage(initialEntry = '/progress') {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -23,21 +23,34 @@ function renderForecastPage() {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <ForecastPage />
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <ProgressPage />
       </MemoryRouter>
     </QueryClientProvider>
   );
 }
 
-describe('ForecastPage', () => {
+describe('ProgressPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('renders forecast buckets and loads concept detail for the selected bucket', async () => {
+  it('renders reviews by default and switches to forecast without leaving the consolidated page', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       switch (String(input)) {
+        case '/api/reviews?limit=50':
+          return jsonResponse([
+            {
+              id: 11,
+              concept_id: 7,
+              concept_title: 'Rust Ownership',
+              question_asked: 'What does ownership prevent?',
+              user_response: 'Data races and double free bugs.',
+              quality: 4,
+              llm_assessment: 'Strong answer with the right tradeoff focus.',
+              reviewed_at: '2026-04-12 08:30:00',
+            },
+          ]);
         case '/api/forecast?range=weeks':
           return jsonResponse({
             range_type: 'weeks',
@@ -51,24 +64,21 @@ describe('ForecastPage', () => {
           return jsonResponse([
             { id: 7, title: 'Rust Ownership', mastery_level: 45, next_review_at: '2026-04-12 08:00:00', interval_days: 3, review_count: 4 },
           ]);
-        case '/api/forecast/concepts?range=weeks&bucket=0':
-          return jsonResponse([
-            { id: 9, title: 'Borrow Checker', mastery_level: 62, next_review_at: '2026-04-15 08:00:00', interval_days: 5, review_count: 6 },
-          ]);
         default:
           throw new Error(`Unexpected fetch: ${String(input)}`);
       }
     });
 
     const user = userEvent.setup();
-    renderForecastPage();
+    renderProgressPage();
 
-    expect(await screen.findByRole('heading', { name: 'Forecast' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Review performance' })).toBeInTheDocument();
     expect(await screen.findByText('Rust Ownership')).toBeInTheDocument();
+    expect(await screen.findByText('What does ownership prevent?')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /This week/i }));
+    await user.click(screen.getByRole('tab', { name: 'Forecast' }));
 
-    expect(await screen.findByText('Borrow Checker')).toBeInTheDocument();
-    expect(screen.queryByText('Rust Ownership')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bucket Detail' })).toBeInTheDocument();
+    expect(await screen.findAllByText('Rust Ownership')).not.toHaveLength(0);
   });
 });

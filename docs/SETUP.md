@@ -215,15 +215,17 @@ make dev-ui
 
 - Opens the React SPA at `http://127.0.0.1:5173`
 - React Router owns the SPA routes in dev mode; backend requests are proxied to FastAPI on `http://127.0.0.1:8080`
-- The current Vite proxy covers `/api`, `/assets`, `/static`, and `/reviews`; browser navigation for SPA routes stays inside the Vite app
+- The current Vite proxy covers `/api`, `/assets`, and `/static`; browser navigation for SPA routes stays inside the Vite app
 - Requires the FastAPI backend (`make run-api`) to be running
 
-To build the production frontend (FastAPI serves the built SPA on `http://localhost:8080/`, `http://localhost:8080/chat`, `http://localhost:8080/topics`, `http://localhost:8080/concepts`, `http://localhost:8080/graph`, `http://localhost:8080/reviews`, `http://localhost:8080/forecast`, and `http://localhost:8080/actions`, with matching detail routes for topics and concepts):
+To build the production frontend (FastAPI serves the built SPA for HTML requests outside `/api`, `/assets`, and `/static`, with canonical routes under `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, `/concept/{concept_id}`, and `/actions`):
 
 ```bash
 make build-ui
 # equivalent to: cd frontend && npm run build
 ```
+
+Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain available as SPA compatibility redirects after the build is served by FastAPI.
 
 These same frontend commands are also exercised in `.github/workflows/frontend.yml`, which typechecks the frontend, runs Vitest, installs the Chromium Playwright browser, and runs the browser smoke suite so local validation matches CI.
 

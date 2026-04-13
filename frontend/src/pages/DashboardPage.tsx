@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
+import { LoadingCard } from '@/components/LoadingCard';
 import { PageIntro } from '@/components/PageIntro';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AppLayout } from '../components/AppLayout';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchActionSummary, fetchDueConcepts, fetchReviewStats, fetchTopicMap } from '../api';
 import type { ActionSummary, DueConcept, ReviewStats, TopicMapNode } from '../types';
 
@@ -72,42 +73,36 @@ export function DashboardPage() {
   });
 
   return (
-    <AppLayout active="/">
-      <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
-        <PageIntro
-          eyebrow="Overview"
-          title="Dashboard"
-          description="A compact operational view of due work, knowledge coverage, and recent movement across the learning system."
-          aside={
-            <>
-              <Badge variant="outline">Due + activity</Badge>
-              <Badge variant="muted">Desktop panel layout</Badge>
-            </>
-          }
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+      <PageIntro
+        eyebrow="Overview"
+        title="Dashboard"
+        description="A compact operational view of due work, knowledge coverage, and recent movement across the learning system."
+        aside={
+          <>
+            <Badge variant="outline">Due + activity</Badge>
+            <Badge variant="muted">Desktop panel layout</Badge>
+          </>
+        }
+      />
+
+      {dashboardQuery.isPending ? <LoadingCard label="Loading dashboard…" rows={4} /> : null}
+
+      {dashboardQuery.isError ? (
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="py-6 text-sm text-red-100">{(dashboardQuery.error as Error).message}</CardContent>
+        </Card>
+      ) : null}
+
+      {dashboardQuery.data ? (
+        <DashboardContent
+          stats={dashboardQuery.data.stats}
+          dueConcepts={dashboardQuery.data.dueConcepts}
+          actionSummary={dashboardQuery.data.actionSummary}
+          topicMap={dashboardQuery.data.topicMap}
         />
-
-        {dashboardQuery.isPending ? (
-          <Card>
-            <CardContent className="py-6 text-sm text-muted-foreground">Loading dashboard…</CardContent>
-          </Card>
-        ) : null}
-
-        {dashboardQuery.isError ? (
-          <Card className="border-red-500/30 bg-red-500/10">
-            <CardContent className="py-6 text-sm text-red-100">{(dashboardQuery.error as Error).message}</CardContent>
-          </Card>
-        ) : null}
-
-        {dashboardQuery.data ? (
-          <DashboardContent
-            stats={dashboardQuery.data.stats}
-            dueConcepts={dashboardQuery.data.dueConcepts}
-            actionSummary={dashboardQuery.data.actionSummary}
-            topicMap={dashboardQuery.data.topicMap}
-          />
-        ) : null}
-      </section>
-    </AppLayout>
+      ) : null}
+    </section>
   );
 }
 
@@ -152,22 +147,24 @@ function DashboardContent({
         <CardContent className="min-h-0 flex-1">
         {dueConcepts.length ? (
           <div className="app-scrollbar h-full overflow-auto">
-            <table className="w-full border-separate border-spacing-0 text-left text-sm text-slate-200">
-              <thead>
-                <tr className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  <th className="border-b border-border/80 px-4 py-3">Concept</th><th className="border-b border-border/80 px-4 py-3">Score</th><th className="border-b border-border/80 px-4 py-3">Due</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="text-foreground">
+              <TableHeader>
+                <TableRow className="text-muted-foreground">
+                  <TableHead className="border-b border-border/80">Concept</TableHead>
+                  <TableHead className="border-b border-border/80">Score</TableHead>
+                  <TableHead className="border-b border-border/80">Due</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {dueConcepts.map((concept) => (
-                  <tr key={concept.id} className="transition-colors hover:bg-secondary/50">
-                    <td className="border-b border-border/40 px-4 py-3"><Link className="font-medium text-primary transition-colors hover:text-primary/80" to={`/concept/${concept.id}`}>{concept.title}</Link></td>
-                    <td className="border-b border-border/40 px-4 py-3 text-foreground">{concept.mastery_level}/100</td>
-                    <td className="border-b border-border/40 px-4 py-3 text-muted-foreground">{concept.next_review_at || '—'}</td>
-                  </tr>
+                  <TableRow key={concept.id} className="hover:bg-secondary/50">
+                    <TableCell className="border-b border-border/40"><Link className="font-medium text-primary transition-colors hover:text-primary/80" to={`/concept/${concept.id}`}>{concept.title}</Link></TableCell>
+                    <TableCell className="border-b border-border/40 text-foreground">{concept.mastery_level}/100</TableCell>
+                    <TableCell className="border-b border-border/40 text-muted-foreground">{concept.next_review_at || '—'}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : <p className="text-sm text-muted-foreground">No concepts due for review right now.</p>}
         </CardContent>
