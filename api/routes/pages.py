@@ -78,6 +78,16 @@ async def reviews_page():
     return _spa_entry_response()
 
 
+@router.get("/progress", response_class=HTMLResponse)
+async def progress_page():
+    return _spa_entry_response()
+
+
+@router.get("/progress/forecast", response_class=HTMLResponse)
+async def progress_forecast_page():
+    return _spa_entry_response()
+
+
 @router.get("/forecast", response_class=HTMLResponse)
 async def forecast_page():
     return _spa_entry_response()

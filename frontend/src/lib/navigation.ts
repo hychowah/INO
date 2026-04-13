@@ -1,7 +1,18 @@
+import type { LucideIcon } from 'lucide-react';
+import { Activity, BookMarked, LayoutDashboard, MessageSquareMore, TrendingUp } from 'lucide-react';
+
 const DEV_SERVER_PORT = '5173';
 const BACKEND_PORT = '8080';
 
 type LocationLike = Pick<Location, 'protocol' | 'hostname' | 'port'>;
+
+export type AppNavItem = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  description: string;
+  matches: string[];
+};
 
 export function resolveBackendHref(path: string, locationLike: LocationLike = window.location) {
   if (locationLike.port !== DEV_SERVER_PORT) {
@@ -10,13 +21,55 @@ export function resolveBackendHref(path: string, locationLike: LocationLike = wi
   return `${locationLike.protocol}//${locationLike.hostname}:${BACKEND_PORT}${path}`;
 }
 
-export const navItems = [
-  { label: 'Dashboard', href: '/' },
-  { label: 'Chat', href: '/chat' },
-  { label: 'Topics', href: '/topics' },
-  { label: 'Concepts', href: '/concepts' },
-  { label: 'Graph', href: '/graph' },
-  { label: 'Reviews', href: '/reviews' },
-  { label: 'Forecast', href: '/forecast' },
-  { label: 'Activity', href: '/actions' },
+export const primaryNavItems: readonly AppNavItem[] = [
+  {
+    label: 'Dashboard',
+    href: '/',
+    icon: LayoutDashboard,
+    description: 'Overview, due work, and live system health.',
+    matches: ['/'],
+  },
+  {
+    label: 'Chat',
+    href: '/chat',
+    icon: MessageSquareMore,
+    description: 'Direct agent interaction with command actions and notes.',
+    matches: ['/chat'],
+  },
+  {
+    label: 'Knowledge',
+    href: '/topics',
+    icon: BookMarked,
+    description: 'Topics, concepts, and graph exploration.',
+    matches: ['/topics', '/topic', '/concepts', '/concept', '/graph'],
+  },
+  {
+    label: 'Progress',
+    href: '/progress',
+    icon: TrendingUp,
+    description: 'Review history, forecast load, and performance trends.',
+    matches: ['/reviews', '/forecast', '/progress'],
+  },
 ] as const;
+
+export const utilityNavItems: readonly AppNavItem[] = [
+  {
+    label: 'Activity',
+    href: '/actions',
+    icon: Activity,
+    description: 'Operational log with filters and event detail.',
+    matches: ['/actions'],
+  },
+] as const;
+
+export function isNavItemActive(activePath: string, item: AppNavItem) {
+  if (item.href === '/') {
+    return activePath === '/';
+  }
+
+  return item.matches.some((match) => activePath === match || activePath.startsWith(`${match}/`));
+}
+
+export function resolveActiveNavItem(activePath: string) {
+  return [...primaryNavItems, ...utilityNavItems].find((item) => isNavItemActive(activePath, item)) ?? primaryNavItems[0];
+}

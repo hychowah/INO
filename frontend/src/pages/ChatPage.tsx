@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
+import { PageIntro } from '@/components/PageIntro';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { confirmPending, declinePending, fetchBootstrap, runChatAction, streamChat } from '../api';
@@ -638,20 +639,24 @@ export function ChatPage() {
 
   return (
     <AppLayout active="/chat">
-      <section className="space-y-6">
-        <div className="flex flex-col gap-3">
-          <Badge className="w-fit">Assistant</Badge>
-          <div>
-            <h2 className="text-3xl font-semibold tracking-tight text-white">Chat</h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Talk to the learning agent from the React chat shell.</p>
-          </div>
-        </div>
+      <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+        <PageIntro
+          eyebrow="Assistant"
+          title="Chat"
+          description="Agent conversation, action approvals, and command shortcuts in a fixed desktop workspace."
+          aside={
+            <>
+              <Badge variant="outline">SSE streaming</Badge>
+              <Badge variant="muted">{commands.length} quick commands</Badge>
+            </>
+          }
+        />
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-6">
-            <Card className="overflow-hidden">
-              <CardContent className="p-0">
-                <div ref={threadRef} className="flex min-h-[26rem] flex-col gap-4 overflow-y-auto bg-slate-950/40 p-4 sm:p-5">
+        <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="flex min-h-0 flex-col gap-4">
+            <Card className="min-h-0 flex-1 overflow-hidden">
+              <CardContent className="h-full p-0">
+                <div ref={threadRef} className="app-scrollbar flex h-full min-h-0 flex-col gap-4 overflow-y-auto bg-background/35 p-4 sm:p-5">
             {messages.length ? messages.map((message) => (
               <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} key={message.id}>
                 <div className="space-y-2">
@@ -661,19 +666,19 @@ export function ChatPage() {
                   ) : null}
                 </div>
               </div>
-            )) : <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] px-4 py-6 text-sm text-slate-400">No chat history yet. Start the conversation below.</div>}
+            )) : <div className="rounded-[24px] border border-dashed border-border bg-secondary/20 px-4 py-6 text-sm text-muted-foreground">No chat history yet. Start the conversation below.</div>}
                 </div>
               </CardContent>
             </Card>
 
             {pendingAction ? (
-              <Card className="border-amber-400/25 bg-amber-400/8">
+              <Card className="shrink-0 border-amber-400/25 bg-amber-400/8">
                 <CardContent className="space-y-4 py-6">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-100">Pending confirmation</div>
                     <Badge className="border-amber-300/20 bg-amber-300/10 text-amber-50" variant="outline">Action required</Badge>
                   </div>
-                  <div className="rounded-[22px] border border-white/10 bg-slate-950/45 px-4 py-3">
+                  <div className="rounded-[22px] border border-border/70 bg-background/45 px-4 py-3">
                     <RichTextContent content={pendingAction.message || 'Resolve the pending action before continuing.'} tone="pending" />
                   </div>
                   {pendingError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{pendingError}</div> : null}
@@ -685,16 +690,16 @@ export function ChatPage() {
               </Card>
             ) : null}
 
-            <Card>
+            <Card className="shrink-0">
               <CardContent className="space-y-4 py-5">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Composer</div>
-                  <span className="text-xs text-slate-500">Enter to send, Shift+Enter for newline</span>
+                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Composer</div>
+                  <span className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline</span>
                 </div>
                 <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleSend(); }}>
                   <textarea
                     ref={inputRef}
-                    className={`min-h-[3.5rem] w-full resize-none rounded-3xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400/50 focus:ring-2 focus:ring-sky-400/20${dragActive ? ' border-sky-400/60 ring-2 ring-sky-400/20' : ''}`}
+                    className={`min-h-[3.5rem] w-full resize-none rounded-3xl border border-border bg-background/70 px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20${dragActive ? ' border-primary/60 ring-2 ring-primary/20' : ''}`}
                     disabled={requestInFlight}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
@@ -709,7 +714,7 @@ export function ChatPage() {
                     placeholder="Ask a question, request a quiz, or tell the agent what you want to learn..."
                   />
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="min-h-5 text-sm text-slate-400">{status}</span>
+                    <span className="min-h-5 text-sm text-muted-foreground">{status}</span>
                     <Button disabled={requestInFlight} type="submit">{requestInFlight ? 'Working...' : 'Send'}</Button>
                   </div>
                 </form>
@@ -717,12 +722,12 @@ export function ChatPage() {
             </Card>
           </div>
 
-          <aside className="space-y-6">
+          <aside className="flex min-h-0 flex-col gap-4">
             <Card>
               <CardContent className="space-y-4 py-5">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Commands</div>
-                  <span className="text-xs text-slate-500">Click or drag into the input</span>
+                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Commands</div>
+                  <span className="text-xs text-muted-foreground">Click or drag into the input</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {commands.map((item) => (
@@ -746,14 +751,14 @@ export function ChatPage() {
                       {item.label}
                     </Button>
                   ))}
-                  {!commands.length ? <p className="text-sm text-slate-500">No suggested commands right now.</p> : null}
+                  {!commands.length ? <p className="text-sm text-muted-foreground">No suggested commands right now.</p> : null}
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-slate-900/55">
-              <CardContent className="space-y-3 py-5 text-sm text-slate-400">
-                <div className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-300">Notes</div>
+            <Card className="flex-1 bg-panel-muted/65">
+              <CardContent className="space-y-3 py-5 text-sm text-muted-foreground">
+                <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Notes</div>
                 <p>The conversation thread now renders rich text and assistant actions with React components instead of injected HTML.</p>
                 <p>Chat replies stream through the SSE endpoint and replay progressively in the thread once the final envelope arrives.</p>
               </CardContent>

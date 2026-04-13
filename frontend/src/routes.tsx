@@ -6,8 +6,7 @@ import { ConceptDetailPage } from './pages/ConceptDetailPage';
 import { ConceptsListPage } from './pages/ConceptsListPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ActivityPage } from './pages/ActivityPage';
-import { ForecastPage } from './pages/ForecastPage';
-import { ReviewsPage } from './pages/ReviewsPage';
+import { ProgressPage } from './pages/ProgressPage';
 import { TopicDetailPage } from './pages/TopicDetailPage';
 import { TopicsListPage } from './pages/TopicsListPage';
 
@@ -36,11 +35,13 @@ export function AppRouter() {
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/concept/:conceptId" element={<ConceptDetailPage />} />
             <Route path="/concepts" element={<ConceptsListPage />} />
-            <Route path="/forecast" element={<ForecastPage />} />
+            <Route path="/forecast" element={<ProgressPage />} />
             <Route path="/graph" element={<GraphPage />} />
+            <Route path="/progress" element={<ProgressPage />} />
+            <Route path="/progress/forecast" element={<ProgressPage />} />
             <Route path="/topic/:topicId" element={<TopicDetailPage />} />
             <Route path="/topics" element={<TopicsListPage />} />
-            <Route path="/reviews" element={<ReviewsPage />} />
+            <Route path="/reviews" element={<ProgressPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
