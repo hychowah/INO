@@ -2,8 +2,8 @@
 Topic CRUD operations, topic maps, and hierarchy queries.
 """
 
-import os
 import logging
+import os
 import sqlite3
 from typing import Dict, List, Optional
 
@@ -52,8 +52,11 @@ def _vector_delete(topic_id: int):
 
 
 def add_topic(
-    title: str, description: Optional[str] = None, parent_ids: Optional[List[int]] = None,
-    *, user_id: Optional[str] = None,
+    title: str,
+    description: Optional[str] = None,
+    parent_ids: Optional[List[int]] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> int:
     """Create a topic and optionally link it as a child of parent topic(s).
     Returns the new topic ID."""
@@ -61,7 +64,11 @@ def add_topic(
     conn = _conn()
     now = _now_iso()
     cursor = conn.execute(
-        "INSERT INTO topics (title, description, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+        (
+            "INSERT INTO topics "
+            "(title, description, created_at, updated_at, user_id) "
+            "VALUES (?, ?, ?, ?, ?)"
+        ),
         (title, description, now, now, uid),
     )
     topic_id = cursor.lastrowid
@@ -92,7 +99,9 @@ def get_topic(topic_id: int, *, user_id: Optional[str] = None) -> Optional[Dict]
     """Get a single topic by ID."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM topics WHERE id = ? AND user_id = ?", (topic_id, uid)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM topics WHERE id = ? AND user_id = ?", (topic_id, uid)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -101,7 +110,9 @@ def find_topic_by_title(title: str, *, user_id: Optional[str] = None) -> Optiona
     """Find a topic by exact title (case-insensitive). Returns topic dict or None."""
     uid = user_id or _uid()
     conn = _conn()
-    row = conn.execute("SELECT * FROM topics WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM topics WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -343,7 +354,9 @@ def get_topic_map(*, user_id: Optional[str] = None) -> List[Dict]:
     conn = _conn()
     now = _now_iso()
 
-    topics = conn.execute("SELECT * FROM topics WHERE user_id = ? ORDER BY title", (uid,)).fetchall()
+    topics = conn.execute(
+        "SELECT * FROM topics WHERE user_id = ? ORDER BY title", (uid,)
+    ).fetchall()
     relations = conn.execute(
         "SELECT tr.parent_id, tr.child_id FROM topic_relations tr "
         "JOIN topics t ON t.id = tr.parent_id WHERE t.user_id = ?",

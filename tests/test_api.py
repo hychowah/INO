@@ -92,12 +92,12 @@ class TestChat:
     async def test_chat_normal_reply(self, client):
         with (
             patch(
-                    "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
-                patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
+            patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
             patch(
-                    "services.chat_session.pipeline.execute_llm_response",
+                "services.chat_session.pipeline.execute_llm_response",
                 new=AsyncMock(return_value="REPLY: Final answer"),
             ),
         ):
@@ -142,11 +142,11 @@ class TestChat:
         }
         with (
             patch(
-                    "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
-                    "services.chat_session.parse_llm_response",
+                "services.chat_session.parse_llm_response",
                 return_value=("FETCH", "Add this concept?", action_data),
             ),
         ):
@@ -173,11 +173,11 @@ class TestChat:
         }
         with (
             patch(
-                    "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.pipeline.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
-                    "services.chat_session.parse_llm_response",
+                "services.chat_session.parse_llm_response",
                 return_value=("FETCH", "Want me to add this topic?", action_data),
             ),
         ):
@@ -197,7 +197,9 @@ class TestChat:
             "message": "Add this concept?",
             "params": {"title": "Ownership"},
         }
-        with patch("services.chat_session.execute_action", return_value=("reply", "Added concept #7")):
+        with patch(
+            "services.chat_session.execute_action", return_value=("reply", "Added concept #7")
+        ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
 
         assert resp.status_code == 200
@@ -328,7 +330,12 @@ class TestChat:
         ):
             resp = await client.post(
                 "/api/chat/action",
-                json={"action": {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"}},
+                json={
+                    "action": {
+                        "kind": "send_message",
+                        "message": "[BUTTON] Quiz me on the next due concept",
+                    }
+                },
             )
 
         assert resp.status_code == 200
@@ -408,7 +415,9 @@ class TestLegacyPages:
     async def test_dashboard_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react dashboard</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react dashboard</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/")
@@ -428,7 +437,9 @@ class TestLegacyPages:
     async def test_chat_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react chat</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react chat</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/chat")
@@ -448,7 +459,9 @@ class TestLegacyPages:
     async def test_reviews_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react reviews</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react reviews</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/reviews")
@@ -458,7 +471,9 @@ class TestLegacyPages:
         assert '<div id="root">react reviews</div>' in resp.text
 
     @pytest.mark.anyio
-    async def test_topic_detail_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+    async def test_topic_detail_page_served_by_fastapi_without_built_frontend(
+        self, client, tmp_path
+    ):
         topic_id = _make_topic("Operating Systems")
 
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
@@ -470,7 +485,9 @@ class TestLegacyPages:
     async def test_topic_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react topic detail</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react topic detail</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/topic/123")
@@ -480,7 +497,9 @@ class TestLegacyPages:
         assert '<div id="root">react topic detail</div>' in resp.text
 
     @pytest.mark.anyio
-    async def test_concept_detail_page_served_by_fastapi_without_built_frontend(self, client, tmp_path):
+    async def test_concept_detail_page_served_by_fastapi_without_built_frontend(
+        self, client, tmp_path
+    ):
         concept_id = _make_concept("Rust Ownership")
 
         with patch("api.routes.pages.FRONTEND_DIST", tmp_path / "missing-dist"):
@@ -492,7 +511,9 @@ class TestLegacyPages:
     async def test_concept_detail_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react concept detail</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react concept detail</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/concept/123")
@@ -514,7 +535,9 @@ class TestLegacyPages:
     async def test_topics_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react topics</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react topics</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/topics")
@@ -536,7 +559,9 @@ class TestLegacyPages:
     async def test_concepts_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react concepts</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react concepts</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/concepts")
@@ -558,7 +583,9 @@ class TestLegacyPages:
     async def test_graph_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react graph</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react graph</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/graph")
@@ -578,7 +605,9 @@ class TestLegacyPages:
     async def test_actions_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react actions</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react actions</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/actions")
@@ -598,7 +627,9 @@ class TestLegacyPages:
     async def test_forecast_page_serves_built_frontend_when_present(self, client, tmp_path):
         dist_dir = tmp_path / "dist"
         dist_dir.mkdir()
-        (dist_dir / "index.html").write_text("<html><body><div id=\"root\">react forecast</div></body></html>", encoding="utf-8")
+        (dist_dir / "index.html").write_text(
+            '<html><body><div id="root">react forecast</div></body></html>', encoding="utf-8"
+        )
 
         with patch("api.routes.pages.FRONTEND_DIST", dist_dir):
             resp = await client.get("/forecast")

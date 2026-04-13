@@ -79,11 +79,14 @@ class TestMigration12:
 
         # Create old chat DB and insert test data
         _create_old_schema_chat_db(chat)
-        _insert_old_session_rows(chat, [
-            ("active_concept_id", "42"),
-            ("quiz_anchor_concept_id", "7"),
-            ("persona", "buddy"),
-        ])
+        _insert_old_session_rows(
+            chat,
+            [
+                ("active_concept_id", "42"),
+                ("quiz_anchor_concept_id", "7"),
+                ("persona", "buddy"),
+            ],
+        )
 
         # Run migration
         with (
@@ -91,6 +94,7 @@ class TestMigration12:
             patch.object(core, "CHAT_DB", chat),
         ):
             from db import migrations
+
             migrations._run_migrations()
 
         # Verify schema
@@ -102,9 +106,7 @@ class TestMigration12:
 
         # Verify data preserved with user_id='default'
         conn = sqlite3.connect(chat)
-        rows = conn.execute(
-            "SELECT user_id, key, value FROM session_state ORDER BY key"
-        ).fetchall()
+        rows = conn.execute("SELECT user_id, key, value FROM session_state ORDER BY key").fetchall()
         conn.close()
         assert len(rows) == 3
         for user_id, _key, _value in rows:
@@ -137,6 +139,7 @@ class TestMigration12:
             patch.object(core, "CHAT_DB", chat),
         ):
             from db import migrations
+
             # First run
             migrations._run_migrations()
             # Reset version so migration block runs again

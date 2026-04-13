@@ -20,8 +20,8 @@ logger = logging.getLogger("llm")
 # full chain at startup — before the event loop starts — so every
 # subsequent .chat access is an instant sys.modules hit.
 try:
-    from openai import AsyncOpenAI as _AsyncOpenAI
     import openai.resources.chat  # noqa: F401 — triggers full lazy-import cascade
+    from openai import AsyncOpenAI as _AsyncOpenAI
 
     _OPENAI_AVAILABLE = True
 except ImportError:

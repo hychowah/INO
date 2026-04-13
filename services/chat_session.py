@@ -409,7 +409,11 @@ def _due_summary() -> str:
         for concept in due:
             remark = concept.get("latest_remark", "")
             lines.append(
-                f"- {concept['title']} [concept:{concept['id']}] — score {concept['mastery_level']}/100, interval {concept['interval_days']}d"
+                (
+                    f"- {concept['title']} [concept:{concept['id']}] "
+                    f"— score {concept['mastery_level']}/100, "
+                    f"interval {concept['interval_days']}d"
+                )
             )
             if remark:
                 lines.append(f"  {remark[:80]}")
@@ -601,7 +605,10 @@ async def handle_chat_message(text: str, author: str = "chat", source: str = "ch
             try:
                 db.set_persona(target)
             except ValueError:
-                message = f"Unknown persona '{target}'. Available: {', '.join(db.get_available_personas())}"
+                message = (
+                    f"Unknown persona '{target}'. Available: "
+                    f"{', '.join(db.get_available_personas())}"
+                )
                 _record_exchange(text, message)
                 return _response(message, msg_type="error")
 

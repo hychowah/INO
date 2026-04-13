@@ -15,7 +15,9 @@ def test_format_quiz_action_prefers_formatted_question():
     result = format_quiz_action(
         {
             "question": "What does ASGI stand for?",
-            "formatted_question": "Let's zoom in: what does ASGI stand for, and why does it matter here?",
+            "formatted_question": (
+                "Let's zoom in: what does ASGI stand for, and why does it matter here?"
+            ),
         },
         7,
     )

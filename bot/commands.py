@@ -358,7 +358,9 @@ async def review_command(ctx):
                                 raise LLMError("No concept_id in payload", retryable=True)
                         except LLMError as e:
                             logger.warning(
-                                f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
+                                "Two-prompt pipeline failed (%s), falling back to "
+                                "single-prompt flow",
+                                e,
                             )
                             llm_response = await pipeline.call_with_fetch_loop(
                                 mode="reply",
@@ -542,7 +544,11 @@ async def preference_command(ctx, *, text: str = ""):
                 preview_text, proposed_content = await pipeline.call_preference_edit(text)
 
         view = PreferenceUpdateView(proposed_content, pipeline.execute_preference_update)
-        msg = f"📝 **Proposed preference update**\n\n{preview_text}\n\n*Review the change and confirm below.*"
+        msg = (
+            "📝 **Proposed preference update**\n\n"
+            f"{preview_text}\n\n"
+            "*Review the change and confirm below.*"
+        )
         if is_interaction:
             await ctx.interaction.followup.send(content=msg, view=view)
         else:

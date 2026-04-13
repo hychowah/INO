@@ -50,7 +50,9 @@ async def chat(req: ChatRequest):
 
     try:
         async with state.pipeline_serialized():
-            payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
+            payload = await handle_chat_message(
+                req.message.strip(), author="solo_user", source="api"
+            )
             return payload
     except Exception as e:
         logger.exception("Chat endpoint error")
@@ -67,7 +69,9 @@ async def chat_stream(req: ChatRequest):
         yield _sse_event("status", {"message": "Waiting for the learning agent..."})
         try:
             async with state.pipeline_serialized():
-                payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
+                payload = await handle_chat_message(
+                    req.message.strip(), author="solo_user", source="api"
+                )
             yield _sse_event("done", payload)
         except Exception as e:
             logger.exception("Chat stream endpoint error")

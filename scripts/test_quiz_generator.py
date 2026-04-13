@@ -19,9 +19,9 @@ Examples:
 
 import argparse
 import asyncio
-from datetime import datetime
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Ensure UTF-8 output
@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db
 from db import preferences
 from services import context as ctx
-
 
 LOG_DIR = Path(__file__).resolve().parent / "prompt_logs"
 QUESTION_TYPES = {

@@ -146,7 +146,9 @@ async def run_maintenance() -> None:
 
     system_prompt, user_prompt = _build_full_prompt("maintenance", action_text)
 
-    _section("SYSTEM PROMPT  (core + maintenance + knowledge skills + persona + prefs)", system_prompt)
+    _section(
+        "SYSTEM PROMPT  (core + maintenance + knowledge skills + persona + prefs)", system_prompt
+    )
     _section("USER PROMPT  (dynamic context + diagnostic report + action budget)", user_prompt)
 
     await _call_and_print(system_prompt, user_prompt, session_name="test_maintenance_prompt")
@@ -215,6 +217,7 @@ async def run_reorganize() -> None:
 # Interactive quiz mode
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _list_concepts() -> None:
     """Print a concept table so the user can pick an ID."""
     due = db.get_due_concepts(limit=20)
@@ -225,7 +228,7 @@ def _list_concepts() -> None:
     label = "due concepts" if due else "all concepts (none due)"
     print(f"\n  Showing {label}:\n")
     print(f"  {'ID':>5}  {'Score':>5}  {'Reviews':>7}  Title")
-    print(f"  {'-'*5}  {'-'*5}  {'-'*7}  {'-'*35}")
+    print(f"  {'-' * 5}  {'-' * 5}  {'-' * 7}  {'-' * 35}")
     for c in pool:
         print(
             f"  {c['id']:>5}  "
@@ -303,7 +306,7 @@ async def run_quiz(concept_id: int | None) -> None:
 
         print(f"\n{SEP_THIN}")
         print(f"  ↳ Fetch action detected: {fetch_params}")
-        print(f"  ↳ Executing fetch and calling LLM again (prompt 2)…")
+        print("  ↳ Executing fetch and calling LLM again (prompt 2)…")
         print(SEP_THIN)
 
         msg_type, fetch_data = tools.execute_action("fetch", fetch_params)
@@ -346,6 +349,7 @@ async def run_quiz(concept_id: int | None) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI entry point
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

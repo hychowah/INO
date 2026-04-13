@@ -114,8 +114,8 @@ from db.reviews import (
     add_remark,
     add_review,
     get_latest_remark,
-    get_recent_reviews_all,
     get_recent_reviews,
+    get_recent_reviews_all,
     get_remarks,
     get_review_stats,
 )

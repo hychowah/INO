@@ -79,7 +79,10 @@ class TestRelationshipCandidates:
             "Stainless Steel Corrosion", "Corrosion resistance of stainless steel", [tid]
         )
 
-        with patch("db.vectors.find_nearest_concepts", return_value=[{"id": 999999, "title": "stale", "score": 0.95}]):
+        with patch(
+            "db.vectors.find_nearest_concepts",
+            return_value=[{"id": 999999, "title": "stale", "score": 0.95}],
+        ):
             diag = db.get_maintenance_diagnostics()
 
         ids_in_candidates = set()

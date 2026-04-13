@@ -33,16 +33,24 @@ def _normalize_concept_list_item(
     topic_id_hint: int | None = None,
 ) -> dict:
     normalized = dict(item)
-    normalized["latest_remark"] = normalized.get("latest_remark") or normalized.get("remark_summary")
+    normalized["latest_remark"] = normalized.get("latest_remark") or normalized.get(
+        "remark_summary"
+    )
 
     if "topics" in normalized and isinstance(normalized["topics"], list):
-        normalized["topic_ids"] = [int(topic["id"]) for topic in normalized["topics"] if "id" in topic]
+        normalized["topic_ids"] = [
+            int(topic["id"]) for topic in normalized["topics"] if "id" in topic
+        ]
         return normalized
 
     topic_ids = normalized.get("topic_ids")
     if not topic_ids:
         concept = db.get_concept(normalized["id"])
-        topic_ids = concept.get("topic_ids", []) if concept else ([] if topic_id_hint is None else [topic_id_hint])
+        topic_ids = (
+            concept.get("topic_ids", [])
+            if concept
+            else ([] if topic_id_hint is None else [topic_id_hint])
+        )
 
     normalized["topic_ids"] = [int(topic_id) for topic_id in topic_ids]
     normalized["topics"] = [
@@ -121,7 +129,9 @@ async def list_concepts(
         normalized_items = [item for item in normalized_items if matches_status(item)]
 
     if sort:
-        normalized_items.sort(key=lambda item: _concept_sort_value(item, sort), reverse=order == "desc")
+        normalized_items.sort(
+            key=lambda item: _concept_sort_value(item, sort), reverse=order == "desc"
+        )
 
     total = len(normalized_items)
     offset = (page - 1) * per_page

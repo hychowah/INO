@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -124,16 +123,12 @@ def test_perform_backup_atomic_on_failure(env):
     """On failure, no final backup dir is left and the temp dir is cleaned up."""
     from services import backup as backup_module
 
-    with patch.object(
-        backup_module, "_backup_sqlite", side_effect=OSError("disk full")
-    ):
+    with patch.object(backup_module, "_backup_sqlite", side_effect=OSError("disk full")):
         with pytest.raises(OSError, match="disk full"):
             backup_module.perform_backup()
 
     final_dirs = [
-        d
-        for d in env["backup_dir"].iterdir()
-        if d.is_dir() and not d.name.startswith(".tmp_")
+        d for d in env["backup_dir"].iterdir() if d.is_dir() and not d.name.startswith(".tmp_")
     ]
     tmp_dirs = list(env["backup_dir"].glob(".tmp_*"))
 

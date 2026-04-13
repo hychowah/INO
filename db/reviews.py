@@ -24,7 +24,11 @@ def add_remark(concept_id: int, content: str, *, user_id: Optional[str] = None) 
     conn = _conn()
     # Append-only row in concept_remarks (source of truth)
     cursor = conn.execute(
-        "INSERT INTO concept_remarks (concept_id, content, created_at, user_id) VALUES (?, ?, ?, ?)",
+        (
+            "INSERT INTO concept_remarks "
+            "(concept_id, content, created_at, user_id) "
+            "VALUES (?, ?, ?, ?)"
+        ),
         (concept_id, content, now, uid),
     )
     remark_id = cursor.lastrowid
@@ -160,7 +164,11 @@ def get_review_stats(*, user_id: Optional[str] = None) -> Dict[str, Any]:
         "SELECT COUNT(*) FROM review_log WHERE user_id = ?", (uid,)
     ).fetchone()[0]
     due_now = conn.execute(
-        "SELECT COUNT(*) FROM concepts WHERE next_review_at IS NOT NULL AND next_review_at <= ? AND user_id = ?",
+        (
+            "SELECT COUNT(*) FROM concepts "
+            "WHERE next_review_at IS NOT NULL "
+            "AND next_review_at <= ? AND user_id = ?"
+        ),
         (_now_iso(), uid),
     ).fetchone()[0]
 

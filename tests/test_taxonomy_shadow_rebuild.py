@@ -187,7 +187,10 @@ def test_write_structure_snapshot_writes_latest_and_archive(tmp_path):
 def test_taxonomy_loop_reuses_session_and_records_created_topic(monkeypatch):
     responses = [
         '{"action": "add_topic", "params": {"title": "Group"}, "message": "Create parent"}',
-        '{"action": "link_topics", "params": {"parent_id": 3, "child_id": 2}, "message": "Nest child"}',
+        (
+            '{"action": "link_topics", "params": {"parent_id": 3, "child_id": 2}, '
+            '"message": "Nest child"}'
+        ),
         "REPLY: done",
     ]
     seen_sessions = []

@@ -12,9 +12,9 @@ Run from the learning_agent directory:
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -272,7 +272,10 @@ class TestConceptCountIntegrity:
         tid = db.add_topic(title="TestTopic")
         cid = db.add_concept(title="Vector Fallback Concept", topic_ids=[tid])
 
-        with patch("db.vectors.search_similar_concepts", return_value=[{"id": 999999, "title": "stale", "score": 0.9}]):
+        with patch(
+            "db.vectors.search_similar_concepts",
+            return_value=[{"id": 999999, "title": "stale", "score": 0.9}],
+        ):
             matches = db.search_concepts("Vector Fallback Concept", limit=10)
 
         assert len(matches) == 1

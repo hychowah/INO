@@ -372,7 +372,9 @@ class TestStalenessHelper:
 
         db.set_session("active_concept_id", "1")
         # Simulate old timestamp by patching
-        old_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        old_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+        ).strftime("%Y-%m-%d %H:%M:%S")
         with patch("db.get_session_updated_at", return_value=old_time):
             assert _is_quiz_stale() is True
 

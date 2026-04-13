@@ -75,7 +75,9 @@ def _db_template(tmp_path_factory):
         ]
 
         # Temporarily redirect all modules to the template paths
-        original_knowledge = {mod: mod.KNOWLEDGE_DB for mod in modules_to_patch if hasattr(mod, "KNOWLEDGE_DB")}
+        original_knowledge = {
+            mod: mod.KNOWLEDGE_DB for mod in modules_to_patch if hasattr(mod, "KNOWLEDGE_DB")
+        }
         original_chat_db = db.chat.CHAT_DB
 
         for mod in modules_to_patch:
@@ -85,6 +87,7 @@ def _db_template(tmp_path_factory):
 
         core.DATA_DIR.mkdir(parents=True, exist_ok=True)
         import db as _db
+
         _db.init_databases()
 
         # Restore originals before leaving the patch context

@@ -690,6 +690,13 @@ def _handle_fetch_cluster(params: Dict) -> Tuple[str, Any]:
 # ============================================================================
 
 
+def execute_suggest_topic_accept(action_data: dict) -> tuple[bool, str, int | None]:
+    """Compatibility wrapper for the suggest-topic confirm flow."""
+    from services.tools_assess import execute_suggest_topic_accept as _accept
+
+    return _accept(action_data)
+
+
 def _handle_none(params: Dict) -> Tuple[str, Any]:
     """Pass-through for pure conversational replies where the LLM
     chose action='none' or action='reply' — no DB side-effects."""
@@ -703,7 +710,6 @@ from services.tools_assess import (  # noqa: E402
     _handle_multi_quiz,
     _handle_quiz,
     _handle_suggest_topic,
-    execute_suggest_topic_accept,
 )
 
 ACTION_HANDLERS = {

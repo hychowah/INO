@@ -27,7 +27,9 @@ def is_intercepted_action(action_data: dict | str | None) -> bool:
     return normalize_action(action_data) in INTERCEPTED_ACTIONS
 
 
-def require_confirmable_action(action_data: dict, allowed_actions: frozenset[str], target: str) -> str:
+def require_confirmable_action(
+    action_data: dict, allowed_actions: frozenset[str], target: str
+) -> str:
     action = normalize_action(action_data)
     if not action:
         raise ValueError("Missing 'action' in action_data")

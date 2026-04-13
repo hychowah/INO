@@ -376,9 +376,9 @@ async def _apply_internal(args: argparse.Namespace) -> int:
     preview = _read_json(Path(args.preview_file))
     _ensure_project_imports()
 
+    import config
     import db
     import db.vectors
-    import config
     from services import tools
     from services.backup import perform_backup
     from services.pipeline import execute_action
@@ -397,9 +397,7 @@ async def _apply_internal(args: argparse.Namespace) -> int:
         except PermissionError as exc:
             backup_dir = config.BACKUP_DIR
             print(f"[apply] backup failed: {exc}")
-            print(
-                "[apply] This is usually a Windows file-lock issue, not an admin-rights issue."
-            )
+            print("[apply] This is usually a Windows file-lock issue, not an admin-rights issue.")
             if _looks_like_onedrive_path(backup_dir):
                 print(
                     "[apply] The backup directory is inside OneDrive, which commonly grabs fresh "
@@ -431,7 +429,9 @@ async def _apply_internal(args: argparse.Namespace) -> int:
         if proposed_actions:
             print(f"[apply] approval-gated actions still pending: {len(proposed_actions)}")
             for index, action in enumerate(proposed_actions, start=1):
-                print(f"  [{index}] {action.get('action', '?')} — {action.get('message', '')[:120]}")
+                print(
+                    f"  [{index}] {action.get('action', '?')} — {action.get('message', '')[:120]}"
+                )
         return 0
     finally:
         db.vectors.close_client()
@@ -455,7 +455,9 @@ def _print_preview(payload: dict[str, Any]) -> None:
             suffix = ""
             if entry["action"] == "add_topic" and entry.get("created_topic_id") is not None:
                 suffix = f" -> topic #{entry['created_topic_id']}"
-            print(f"  [{entry['step']}] {entry['action']} — {entry.get('message', '')[:100]}{suffix}")
+            print(
+                f"  [{entry['step']}] {entry['action']} — {entry.get('message', '')[:100]}{suffix}"
+            )
     else:
         print("\nReplayable safe actions: none")
 
@@ -538,7 +540,7 @@ def _orchestrate(args: argparse.Namespace) -> int:
                 "preview-internal",
                 "--result-file",
                 str(preview_file),
-                *( ["--conservative"] if not args.aggressive else [] ),
+                *(["--conservative"] if not args.aggressive else []),
                 "--max-actions",
                 str(args.max_actions),
                 "--continuation-context-limit",

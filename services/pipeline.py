@@ -15,18 +15,23 @@ import config
 import db
 from db.preferences import get_persona, get_persona_content
 from services import context as ctx
-from services import state
-from services import tools
+from services import state, tools
 from services.llm import LLMError, get_provider, get_reasoning_provider
 from services.parser import (
     extract_fetch_params,
     extract_llm_action,
     parse_llm_response,
-    process_output,
 )
 from services.repair import repair_action
 
 logger = logging.getLogger("pipeline")
+
+
+def process_output(output: str) -> tuple[str, str]:
+    """Compatibility wrapper for callers that patch or import pipeline.process_output."""
+    from services.parser import process_output as _process_output
+
+    return _process_output(output)
 
 SKILLS_DIR = config.SKILLS_DIR
 PREFERENCES_MD_PATH = config.PREFERENCES_MD

@@ -64,7 +64,9 @@ def _title_similarity(a: str, b: str) -> float:
     return max(jaccard, containment)
 
 
-def _get_relationship_candidates(conn, limit: int = 20, *, user_id: Optional[str] = None) -> List[Dict]:
+def _get_relationship_candidates(
+    conn, limit: int = 20, *, user_id: Optional[str] = None
+) -> List[Dict]:
     """Find semantically related concept pairs that don't have a relation yet.
 
     Uses vector store nearest-neighbor search when available (semantic matching).
@@ -199,17 +201,21 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
     conn = _conn()
 
     # 1. Untagged concepts (no topic link)
-    untagged = conn.execute("""
+    untagged = conn.execute(
+        """
         SELECT c.id, c.title, c.mastery_level, c.review_count, c.created_at
         FROM concepts c
         LEFT JOIN concept_topics ct ON c.id = ct.concept_id
         WHERE ct.topic_id IS NULL AND c.user_id = ?
         ORDER BY c.created_at DESC
         LIMIT 20
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # 2. Empty topics (no concepts linked AND no child topics)
-    empty_topics = conn.execute("""
+    empty_topics = conn.execute(
+        """
         SELECT t.id, t.title, t.created_at
         FROM topics t
         LEFT JOIN concept_topics ct ON t.id = ct.topic_id
@@ -217,10 +223,13 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
         WHERE ct.concept_id IS NULL AND tr.child_id IS NULL AND t.user_id = ?
         ORDER BY t.created_at DESC
         LIMIT 20
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # 3. Oversized topics (>15 concepts)
-    oversized = conn.execute("""
+    oversized = conn.execute(
+        """
         SELECT t.id, t.title, COUNT(ct.concept_id) as concept_count
         FROM topics t
         JOIN concept_topics ct ON t.id = ct.topic_id
@@ -229,7 +238,9 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
         HAVING concept_count > 15
         ORDER BY concept_count DESC
         LIMIT 20
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # 4. Stale concepts (created >14 days ago, never reviewed)
     fourteen_days_ago = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
@@ -245,16 +256,20 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
     ).fetchall()
 
     # 5. Low score concepts with many reviews (struggling)
-    struggling = conn.execute("""
+    struggling = conn.execute(
+        """
         SELECT c.id, c.title, c.mastery_level, c.ease_factor, c.review_count
         FROM concepts c
         WHERE c.review_count >= 5 AND c.mastery_level <= 25 AND c.user_id = ?
         ORDER BY c.review_count DESC
         LIMIT 20
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # 6. Concepts in many topics (>3 — potential over-tagging)
-    over_tagged = conn.execute("""
+    over_tagged = conn.execute(
+        """
         SELECT c.id, c.title, COUNT(ct.topic_id) as topic_count
         FROM concepts c
         JOIN concept_topics ct ON c.id = ct.concept_id
@@ -263,10 +278,14 @@ def get_maintenance_diagnostics(*, user_id: Optional[str] = None) -> Dict[str, A
         HAVING topic_count > 3
         ORDER BY topic_count DESC
         LIMIT 20
-    """, (uid,)).fetchall()
+    """,
+        (uid,),
+    ).fetchall()
 
     # 7. Potential duplicate concepts (word-overlap similarity)
-    all_concepts = conn.execute("SELECT id, title FROM concepts WHERE user_id = ? ORDER BY id", (uid,)).fetchall()
+    all_concepts = conn.execute(
+        "SELECT id, title FROM concepts WHERE user_id = ? ORDER BY id", (uid,)
+    ).fetchall()
     potential_dupes = []
     concept_list = [dict(c) for c in all_concepts]
     for i, a in enumerate(concept_list):
