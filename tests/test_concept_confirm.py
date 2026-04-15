@@ -8,6 +8,7 @@ Run from the learning_agent directory:
     python -m pytest tests/test_concept_confirm.py -v
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -17,8 +18,36 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
+import db.chat as db_chat
 from db import core as db_core
+from services import views as concept_views
 from services.context import build_lightweight_context
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class _MockResponse:
+    def __init__(self):
+        self.calls = []
+
+    async def edit_message(self, *, content=None, view=None):
+        self.calls.append({"content": content, "view": view})
+
+
+class _MockInteraction:
+    def __init__(self, content="Educational answer"):
+        self.response = _MockResponse()
+        self.message = type("Message", (), {"content": content})()
+
+
+def _get_button(view: concept_views.AddConceptConfirmView, label: str):
+    for child in view.children:
+        if getattr(child, "label", None) == label:
+            return child
+    raise AssertionError(f"Button not found: {label}")
+
 
 # ============================================================================
 # Fixtures
@@ -28,9 +57,11 @@ from services.context import build_lightweight_context
 @pytest.fixture(autouse=True)
 def _temp_db(tmp_path, monkeypatch):
     """Redirect all DB operations to a temp directory so tests don't touch real data."""
+    chat_path = tmp_path / "chat_history.db"
     monkeypatch.setattr(db_core, "KNOWLEDGE_DB", tmp_path / "knowledge.db")
-    monkeypatch.setattr(db_core, "CHAT_DB", tmp_path / "chat_history.db")
+    monkeypatch.setattr(db_core, "CHAT_DB", chat_path)
     monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(db_chat, "CHAT_DB", chat_path)
     db.init_databases()
     yield
 
@@ -183,48 +214,60 @@ class TestKnowledgeMapPrefixes:
 
 
 class TestConfirmationChatHistory:
-    """Simulate what views.py/bot.py do after execute_action succeeds."""
+    """Use AddConceptConfirmView so history checks hit the real UI handler path."""
 
     def test_confirmation_saved_to_chat_history(self):
         """After button confirm, both user action and result should be in history."""
-        # Simulate what views.py accept() now does:
-        db.add_chat_message("user", "[confirmed: add concept]")
-        db.add_chat_message(
-            "assistant",
-            "✅ Added concept **GIL** (#70) under Python. First review scheduled for tomorrow.",
-        )
+        action_data = {
+            "action": "add_concept",
+            "params": {
+                "title": "GIL",
+                "topic_titles": ["Python"],
+            },
+        }
+        view = concept_views.AddConceptConfirmView(action_data)
+        interaction = _MockInteraction()
+
+        button = _get_button(view, "Add concept")
+        _run(button.callback(interaction))
 
         history = db.get_chat_history(limit=5)
         assert len(history) >= 2
 
         contents = [m["content"] for m in history]
-        assert any("[confirmed: add concept]" in c for c in contents)
-        assert any("#70" in c for c in contents)
+        stashed_id = db.get_session("last_added_concept_id")
+
+        assert any("[confirmed: add concept]" == c for c in contents)
+        assert any(f"#{stashed_id}" in c for c in contents)
+        assert interaction.response.calls
 
     def test_decline_saved_to_chat_history(self):
         """After decline, the action should be in history."""
-        db.add_chat_message("user", "[declined: add concept]")
+        view = concept_views.AddConceptConfirmView({"action": "add_concept", "params": {}})
+        interaction = _MockInteraction()
+
+        button = _get_button(view, "No thanks")
+        _run(button.callback(interaction))
 
         history = db.get_chat_history(limit=5)
         contents = [m["content"] for m in history]
-        assert any("[declined: add concept]" in c for c in contents)
+        assert any("[declined: add concept]" == c for c in contents)
+        assert interaction.response.calls
 
     def test_concept_id_visible_in_context_after_confirm(self):
         """After confirmation, build_lightweight_context should show the concept."""
-        from services.tools import execute_action
-
-        msg_type, result = execute_action(
-            "add_concept",
-            {
+        action_data = {
+            "action": "add_concept",
+            "params": {
                 "title": "Python GIL",
                 "topic_titles": ["Python"],
             },
-        )
-        assert msg_type == "reply"
+        }
+        view = concept_views.AddConceptConfirmView(action_data)
+        interaction = _MockInteraction()
 
-        # Simulate confirmation flow
-        db.add_chat_message("user", "[confirmed: add concept]")
-        db.add_chat_message("assistant", f"✅ {result}")
+        button = _get_button(view, "Add concept")
+        _run(button.callback(interaction))
 
         # Now build context — the concept_id should appear
         ctx = build_lightweight_context("command")

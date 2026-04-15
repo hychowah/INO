@@ -103,7 +103,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 - 24h auto-expiry on both View timeout and DB rows
 - Safe maintenance actions (`link_concept`, `delete_topic` for empty topics, `remark`, `fetch`, `list_topics`) execute immediately; destructive ones become proposals
 - Dedup prompt tightened: only merge concepts that are the **same thing with different wording**
-- **`_CONFIRMABLE_ACTIONS` whitelist** (`api/routes/chat.py`): `/api/chat/confirm` now validates the incoming action type against `{'add_concept', 'suggest_topic', 'add_topic', 'link_concept'}`. Any other action type returns HTTP 400. Prevents confirmation of arbitrary or malformed action types that should never reach this endpoint.
+- **Chat confirm whitelist** (`services/chat_session.py`): `/api/chat/confirm` now routes through the shared chat confirmation controller and validates the incoming action type against `{'add_concept', 'suggest_topic', 'preference_update', 'maintenance_review', 'taxonomy_review'}`. Any other action type returns HTTP 400. Prevents confirmation of arbitrary or malformed action types that should never reach this endpoint.
 
 ---
 

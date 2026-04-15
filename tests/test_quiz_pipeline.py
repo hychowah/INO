@@ -74,8 +74,8 @@ async def test_generate_quiz_question_requests_json_response_format():
         patch("services.pipeline.ctx.build_quiz_generator_context", return_value="context"),
         patch("services.pipeline._quiz_generator_system_prompt", return_value="sys"),
         patch("services.pipeline.get_reasoning_provider", return_value=provider),
-        patch("services.pipeline.db.update_concept"),
-        patch("services.pipeline.db.set_session"),
+        patch("services.pipeline.db.update_concept") as update_concept,
+        patch("services.pipeline.db.set_session") as set_session,
     ):
         from services.pipeline import generate_quiz_question
 
@@ -83,6 +83,11 @@ async def test_generate_quiz_question_requests_json_response_format():
 
     assert result["formatted_question"].startswith("Quick check:")
     assert provider.send.await_args.kwargs["response_format"] == {"type": "json_object"}
+    set_session.assert_any_call("p1_question_type", "definition")
+    set_session.assert_any_call("p1_target_facet", "framework purpose")
+    set_session.assert_any_call("p1_difficulty", "35")
+    update_concept.assert_called_once()
+    assert update_concept.call_args.kwargs["last_quiz_generator_output"]
 
 
 @pytest.mark.anyio

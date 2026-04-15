@@ -663,11 +663,7 @@ def _handle_fetch_cluster(params: Dict) -> Tuple[str, Any]:
     if len(cluster_concepts) < 2:
         relations = db.get_relations(primary_id)
         for rel in relations[:limit]:
-            related_id = (
-                rel["concept_id_b"]
-                if rel.get("concept_id_a") == primary_id
-                else rel.get("concept_id_a", rel.get("concept_id_low"))
-            )
+            related_id = rel.get("other_concept_id")
             if related_id and related_id != primary_id:
                 detail = db.get_concept_detail(related_id)
                 if detail:

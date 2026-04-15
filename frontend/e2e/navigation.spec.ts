@@ -7,7 +7,7 @@ function json(body: unknown) {
   };
 }
 
-test('reviews page links through to concept detail', async ({ page }) => {
+test('legacy reviews alias renders progress and links through to concept detail', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -74,7 +74,8 @@ test('reviews page links through to concept detail', async ({ page }) => {
 
   await page.goto('/reviews');
 
-  await expect(page.getByRole('heading', { name: 'Review Log' })).toBeVisible();
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect(page.getByRole('heading', { name: 'Review performance' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Borrow Checker' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Borrow Checker' }).click();
@@ -85,7 +86,7 @@ test('reviews page links through to concept detail', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Ownership' })).toBeVisible();
 });
 
-test('topics search filters the tree and navigates into topic detail', async ({ page }) => {
+test('legacy topics alias renders the consolidated topic explorer and navigates into topic detail', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -156,19 +157,20 @@ test('topics search filters the tree and navigates into topic detail', async ({ 
 
   await page.goto('/topics');
 
-  await expect(page.getByRole('heading', { name: 'Topics' })).toBeVisible();
+  await expect(page).toHaveURL(/\/knowledge$/);
+  await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Topic Explorer' })).toBeVisible();
 
   const search = page.getByPlaceholder('Search topics...');
   await search.fill('Operating');
 
   await expect(page.getByText('1 match')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Operating Systems' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Operating Systems', exact: true })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Operating Systems' }).click();
+  await page.getByRole('button', { name: 'Operating Systems', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'Topic Detail' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Operating Systems' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Systems' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Systems', exact: true }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Process Scheduling' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Processes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Processes', exact: true })).toBeVisible();
 });

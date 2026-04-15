@@ -89,7 +89,7 @@ Only a fixed chat-layer whitelist may be confirmed via this endpoint:
 | `maintenance_review` | Apply maintenance changes from a review block |
 | `taxonomy_review` | Apply taxonomy changes from a review block |
 
-In the normal `/api/chat` flow, the API currently emits `pending_confirm` only for the intercepted actions `add_concept` and `suggest_topic`. The wider whitelist exists because the shared chat controller also supports confirming review-style chat payloads.
+In the normal `/api/chat` flow, the API currently emits `pending_confirm` only for the intercepted actions `add_concept` and `suggest_topic`. The same confirm endpoint also accepts review-style chat payloads for `preference_update`, `maintenance_review`, and `taxonomy_review` because it delegates to the shared chat controller in `services/chat_session.py`.
 
 Any other action returns HTTP **400**:
 ```json

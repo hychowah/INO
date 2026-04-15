@@ -1,30 +1,21 @@
-"""
-Tests for the concept dedup guard:
-  1. Exact-title duplicate is caught and reuses existing concept
-  2. Fuzzy-similar title triggers a warning but still creates
-  3. DB-level UNIQUE constraint catches duplicates as a safety net
-  4. find_concept_by_title works case-insensitively
-  5. API interception returns pending_confirm for add_concept
+"""Tests for the tool- and DB-level concept dedup guard.
 
-Run from the learning_agent directory:
-    python -m pytest tests/test_dedup_guard.py -v
+Covers:
+1. Exact-title duplicate reuse through the add_concept flow
+2. Case-insensitive duplicate detection helpers
+3. DB-level duplicate safety net behavior
+4. Concept-count integrity across repeated add_concept calls
+
+Direct services.dedup coverage lives in tests/test_dedup.py.
 """
 
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import db
 from db import core as db_core
 from services.tools import _check_concept_duplicate, execute_action
-
-# ============================================================================
-# Fixtures
-# ============================================================================
 
 
 @pytest.fixture(autouse=True)
@@ -35,11 +26,6 @@ def _temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
     db.init_databases()
     yield
-
-
-# ============================================================================
-# find_concept_by_title
-# ============================================================================
 
 
 class TestFindConceptByTitle:
@@ -70,11 +56,6 @@ class TestFindConceptByTitle:
         assert set(result["topic_ids"]) == {t1, t2}
 
 
-# ============================================================================
-# _check_concept_duplicate
-# ============================================================================
-
-
 class TestCheckConceptDuplicate:
     def test_no_duplicate_returns_none(self):
         result = _check_concept_duplicate("Brand New Concept", [])
@@ -103,11 +84,6 @@ class TestCheckConceptDuplicate:
         assert result is None
 
 
-# ============================================================================
-# _handle_add_concept dedup integration
-# ============================================================================
-
-
 class TestAddConceptDedup:
     def test_first_add_succeeds(self):
         tid = db.add_topic(title="TestTopic")
@@ -124,7 +100,6 @@ class TestAddConceptDedup:
 
     def test_duplicate_add_reuses_existing(self):
         tid = db.add_topic(title="TestTopic")
-        # First add
         msg_type1, result1 = execute_action(
             "add_concept",
             {
@@ -135,7 +110,6 @@ class TestAddConceptDedup:
         assert msg_type1 == "reply"
         assert "Added concept" in result1
 
-        # Second add with exact same title
         msg_type2, result2 = execute_action(
             "add_concept",
             {
@@ -150,7 +124,6 @@ class TestAddConceptDedup:
         t1 = db.add_topic(title="Topic A")
         t2 = db.add_topic(title="Topic B")
 
-        # Create concept under topic A
         execute_action(
             "add_concept",
             {
@@ -159,7 +132,6 @@ class TestAddConceptDedup:
             },
         )
 
-        # Try to add same concept under topic B
         msg_type, result = execute_action(
             "add_concept",
             {
@@ -171,7 +143,6 @@ class TestAddConceptDedup:
         assert "already exists" in result
         assert "Linked" in result or "linked" in result.lower()
 
-        # Verify concept is now linked to both topics
         concept = db.find_concept_by_title("Cross-Topic Concept")
         assert concept is not None
         assert set(concept["topic_ids"]) == {t1, t2}
@@ -216,25 +187,16 @@ class TestAddConceptDedup:
         assert "Beta" in result
 
 
-# ============================================================================
-# DB-level UNIQUE constraint (safety net)
-# ============================================================================
-
-
 class TestDBUniqueConstraint:
     def test_unique_index_prevents_duplicate_insert(self):
-        """If the application-level guard is somehow bypassed,
-        the DB constraint still prevents duplicates."""
-
+        """If the application-level guard is bypassed, the DB still reuses the row."""
         tid = db.add_topic(title="TestTopic")
 
-        # First insert
         cid1 = db.add_concept(title="DB Guard Test", topic_ids=[tid])
         assert cid1 > 0
 
-        # Second insert with same title — should return existing ID, not crash
         cid2 = db.add_concept(title="DB Guard Test", topic_ids=[tid])
-        assert cid2 == cid1  # Same concept reused
+        assert cid2 == cid1
 
     def test_unique_index_case_insensitive(self):
         tid = db.add_topic(title="TestTopic")
@@ -243,18 +205,12 @@ class TestDBUniqueConstraint:
         assert cid2 == cid1
 
 
-# ============================================================================
-# Concept count integrity
-# ============================================================================
-
-
 class TestConceptCountIntegrity:
     def test_rapid_adds_produce_only_one_concept(self):
-        """Simulate the scenario that caused the original bug:
-        multiple add_concept calls with the same title."""
+        """Repeated add_concept calls for the same title must not duplicate the row."""
         tid = db.add_topic(title="TestTopic")
 
-        for i in range(5):
+        for _ in range(5):
             execute_action(
                 "add_concept",
                 {
@@ -263,7 +219,6 @@ class TestConceptCountIntegrity:
                 },
             )
 
-        # Should only have 1 concept, not 5
         all_concepts = db.search_concepts("Rapid Fire Concept", limit=10)
         assert len(all_concepts) == 1
 

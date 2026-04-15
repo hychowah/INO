@@ -2,6 +2,8 @@
 Tests for topic hierarchy: cycle detection in link_topics, unlink_topics.
 """
 
+import pytest
+
 import db
 
 # ============================================================================
@@ -23,28 +25,23 @@ class TestCycleDetection:
         t1 = _make_topic("A")
         assert db.link_topics(t1, t1) is False
 
-    def test_direct_cycle_rejected(self, test_db):
-        """A→B already exists. B→A should be rejected."""
-        t1 = _make_topic("A")
-        t2 = _make_topic("B")
-        assert db.link_topics(t1, t2) is True
-        assert db.link_topics(t2, t1) is False
+    @pytest.mark.parametrize(
+        "titles",
+        [
+            ["A", "B"],
+            ["A", "B", "C"],
+            ["T0", "T1", "T2", "T3", "T4"],
+        ],
+        ids=["direct", "transitive", "long-chain"],
+    )
+    def test_cycle_chain_rejected(self, test_db, titles):
+        """Closing an existing parent chain back to its root must be rejected."""
+        topic_ids = [_make_topic(title) for title in titles]
 
-    def test_transitive_cycle_rejected(self, test_db):
-        """A→B→C exists. C→A should be rejected."""
-        t1 = _make_topic("A")
-        t2 = _make_topic("B")
-        t3 = _make_topic("C")
-        db.link_topics(t1, t2)
-        db.link_topics(t2, t3)
-        assert db.link_topics(t3, t1) is False
+        for left_id, right_id in zip(topic_ids, topic_ids[1:]):
+            assert db.link_topics(left_id, right_id) is True
 
-    def test_long_chain_cycle_rejected(self, test_db):
-        """A→B→C→D→E exists. E→A should be rejected."""
-        topics = [_make_topic(f"T{i}") for i in range(5)]
-        for i in range(4):
-            db.link_topics(topics[i], topics[i + 1])
-        assert db.link_topics(topics[4], topics[0]) is False
+        assert db.link_topics(topic_ids[-1], topic_ids[0]) is False
 
     def test_valid_link_allowed(self, test_db):
         """A→B, A→C — linking C→D should be fine (no cycle)."""
@@ -158,101 +155,3 @@ class TestAddTopicParentIds:
         topic_id = _make_topic("Standalone")
         parents = db.get_topic_parents(topic_id)
         assert len(parents) == 0
-
-
-# ============================================================================
-# delete_topic guard (via action handler)
-# ============================================================================
-
-
-class TestDeleteTopicGuard:
-    """Tests for _handle_delete_topic refusing non-empty topics."""
-
-    def test_delete_empty_topic_succeeds(self, test_db):
-        """Truly empty topic (no concepts, no children) can be deleted."""
-        from services.tools import _handle_delete_topic
-
-        tid = _make_topic("Empty")
-        result_type, msg = _handle_delete_topic({"topic_id": tid})
-        assert result_type == "reply"
-        assert db.get_topic(tid) is None
-
-    def test_delete_topic_with_concepts_blocked(self, test_db):
-        """Topic with linked concepts cannot be deleted."""
-        from services.tools import _handle_delete_topic
-
-        tid = _make_topic("Has Concepts")
-        cid = db.add_concept("Some Concept", "desc")
-        db.link_concept(cid, [tid])
-
-        result_type, msg = _handle_delete_topic({"topic_id": tid})
-        assert result_type == "error"
-        assert "1 concept(s)" in msg
-        # Topic must still exist
-        assert db.get_topic(tid) is not None
-
-    def test_delete_topic_with_children_blocked(self, test_db):
-        """Topic with child topics cannot be deleted."""
-        from services.tools import _handle_delete_topic
-
-        parent = _make_topic("Parent")
-        child = _make_topic("Child")
-        db.link_topics(parent, child)
-
-        result_type, msg = _handle_delete_topic({"topic_id": parent})
-        assert result_type == "error"
-        assert "1 child topic(s)" in msg
-        assert db.get_topic(parent) is not None
-
-    def test_delete_nonexistent_topic_error(self, test_db):
-        from services.tools import _handle_delete_topic
-
-        result_type, msg = _handle_delete_topic({"topic_id": 9999})
-        assert result_type == "error"
-        assert "not found" in msg
-
-    def test_delete_topic_after_unlinking_concepts(self, test_db):
-        """Topic can be deleted after its concepts are unlinked."""
-        from services.tools import _handle_delete_topic
-
-        tid = _make_topic("Will Empty")
-        cid = db.add_concept("Concept", "desc")
-        db.link_concept(cid, [tid])
-
-        # Can't delete yet
-        assert _handle_delete_topic({"topic_id": tid})[0] == "error"
-
-        # Unlink the concept
-        db.unlink_concept(cid, tid)
-
-        # Now deletion succeeds
-        result_type, msg = _handle_delete_topic({"topic_id": tid})
-        assert result_type == "reply"
-        assert db.get_topic(tid) is None
-
-
-# ============================================================================
-# Diagnostics: empty_topics excludes topics with children
-# ============================================================================
-
-
-class TestEmptyTopicsDiagnostics:
-    def test_topic_with_children_not_in_empty_list(self, test_db):
-        """Topics with child subtopics should not appear in empty_topics."""
-        parent = _make_topic("Parent")
-        child = _make_topic("Child")
-        db.link_topics(parent, child)
-
-        diag = db.get_maintenance_diagnostics()
-        empty_ids = [t["id"] for t in diag["empty_topics"]]
-        # Child (no concepts, no children) should be empty
-        assert child in empty_ids
-        # Parent has a child topic, so should NOT be in the empty list
-        assert parent not in empty_ids
-
-    def test_truly_empty_topic_in_empty_list(self, test_db):
-        """Topic with no concepts and no children appears in empty_topics."""
-        tid = _make_topic("Lonely")
-        diag = db.get_maintenance_diagnostics()
-        empty_ids = [t["id"] for t in diag["empty_topics"]]
-        assert tid in empty_ids

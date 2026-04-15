@@ -1,21 +1,19 @@
 """
-Test script for maintenance and dedup agents.
+Manual maintenance and dedup smoke script.
+
 Run from the learning_agent directory:
-    python tests/test_maintenance.py              # run both
-    python tests/test_maintenance.py --maint      # maintenance only
-    python tests/test_maintenance.py --dedup      # dedup only
-    python tests/test_maintenance.py --dry-run    # dedup without executing merges
-    python tests/test_maintenance.py --similarity # show similarity matrix from live DB
+    python scripts/maintenance_smoke.py              # run both
+    python scripts/maintenance_smoke.py --maint      # maintenance only
+    python scripts/maintenance_smoke.py --dedup      # dedup only
+    python scripts/maintenance_smoke.py --dry-run    # dedup without executing merges
+    python scripts/maintenance_smoke.py --similarity # show similarity matrix from live DB
+
+This file is intentionally not part of the automated pytest suite.
 """
 
 import argparse
 import asyncio
 import logging
-import sys
-from pathlib import Path
-
-# Ensure we can import from the project root
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
 from services import context as ctx
@@ -41,32 +39,33 @@ def run_similarity_test():
         print("  Not enough concepts to compare.\n")
         return True
 
-    # Print header
     print(f"\n  {'':40s}", end="")
-    for c in concepts:
-        print(f"  #{c['id']:>3}", end="")
+    for concept in concepts:
+        print(f"  #{concept['id']:>3}", end="")
     print()
 
     flagged = []
-    for i, a in enumerate(concepts):
-        label = f"#{a['id']} {a['title'][:35]}"
+    for left_index, left in enumerate(concepts):
+        label = f"#{left['id']} {left['title'][:35]}"
         print(f"  {label:40s}", end="")
-        for j, b in enumerate(concepts):
-            if j <= i:
+        for right_index, right in enumerate(concepts):
+            if right_index <= left_index:
                 print("     .", end="")
             else:
-                sim = db._title_similarity(a["title"], b["title"])
-                marker = " *" if sim >= 0.5 else "  "
-                print(f"  {sim:.2f}{marker}", end="")
-                if sim >= 0.5:
-                    flagged.append((a, b, sim))
+                similarity = db._title_similarity(left["title"], right["title"])
+                marker = " *" if similarity >= 0.5 else "  "
+                print(f"  {similarity:.2f}{marker}", end="")
+                if similarity >= 0.5:
+                    flagged.append((left, right, similarity))
         print()
 
     print("\n  * = similarity >= 0.5 (would be caught by dedup agent)")
     if flagged:
         print(f"\n  Flagged pairs ({len(flagged)}):")
-        for a, b, sim in flagged:
-            print(f'    {sim:.2f}  #{a["id"]} "{a["title"]}" ↔ #{b["id"]} "{b["title"]}"')
+        for left, right, similarity in flagged:
+            print(
+                f'    {similarity:.2f}  #{left["id"]} "{left["title"]}" ↔ #{right["id"]} "{right["title"]}"'
+            )
     else:
         print("\n  No similar pairs found.")
     print()
@@ -85,7 +84,7 @@ def run_maintenance_test():
     if "No issues found" in maint_context:
         print("\n  Result: HEALTHY — no issues to triage")
     else:
-        issue_lines = [ln for ln in maint_context.split("\n") if ln.startswith("- [")]
+        issue_lines = [line for line in maint_context.split("\n") if line.startswith("- [")]
         print(f"\n  Result: {len(issue_lines)} issue(s) found")
     print()
 
@@ -96,13 +95,12 @@ async def run_dedup_test(dry_run: bool = False):
     print("DEDUP SUB-AGENT")
     print("=" * 60)
 
-    # Show concept list
     concepts = db.get_all_concepts_summary()
     print(f"\nAll concepts ({len(concepts)}):")
-    for c in concepts:
-        desc = f" — {c['description'][:60]}" if c.get("description") else ""
-        topics = f" [{c['topic_names']}]" if c.get("topic_names") else " [untagged]"
-        print(f"  #{c['id']}: {c['title']}{desc}{topics}")
+    for concept in concepts:
+        description = f" — {concept['description'][:60]}" if concept.get("description") else ""
+        topics = f" [{concept['topic_names']}]" if concept.get("topic_names") else " [untagged]"
+        print(f"  #{concept['id']}: {concept['title']}{description}{topics}")
 
     print("\nCalling LLM dedup agent...")
     groups = await pipeline.handle_dedup_check()
@@ -112,9 +110,9 @@ async def run_dedup_test(dry_run: bool = False):
         return
 
     print(f"\n  Found {len(groups)} duplicate group(s):")
-    for g in groups:
-        merge_str = ", ".join(f"#{m}" for m in g["merge"])
-        print(f"    KEEP #{g['keep']} ← merge {merge_str}  ({g.get('reason', '')})")
+    for group in groups:
+        merge_str = ", ".join(f"#{merge_id}" for merge_id in group["merge"])
+        print(f"    KEEP #{group['keep']} ← merge {merge_str}  ({group.get('reason', '')})")
 
     if dry_run:
         print("\n  [DRY RUN] Skipping merges.\n")
@@ -122,13 +120,13 @@ async def run_dedup_test(dry_run: bool = False):
 
     print("\n  Executing merges...")
     summaries = await pipeline.execute_dedup_merges(groups)
-    for s in summaries:
-        print(f"    ✓ {s}")
+    for summary in summaries:
+        print(f"    ✓ {summary}")
     print(f"\n  Done — {len(summaries)} merge(s) executed.\n")
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Test maintenance & dedup agents")
+    parser = argparse.ArgumentParser(description="Maintenance and dedup smoke script")
     parser.add_argument("--maint", action="store_true", help="Run maintenance only")
     parser.add_argument("--dedup", action="store_true", help="Run dedup only")
     parser.add_argument(
@@ -142,22 +140,20 @@ async def main():
 
     setup_logging(args.verbose)
 
-    # Initialize
     db.init_databases()
     pipeline.init_databases()
 
     if args.similarity:
         ok = run_similarity_test()
-        sys.exit(0 if ok else 1)
+        raise SystemExit(0 if ok else 1)
 
-    # Default: run both unless one is specified
     run_maint = args.maint or (not args.maint and not args.dedup)
-    run_ded = args.dedup or (not args.maint and not args.dedup)
+    run_dedup = args.dedup or (not args.maint and not args.dedup)
 
     if run_maint:
         run_maintenance_test()
 
-    if run_ded:
+    if run_dedup:
         await run_dedup_test(dry_run=args.dry_run)
 
 

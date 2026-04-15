@@ -166,7 +166,9 @@ cd frontend
 npx playwright install chromium
 ```
 
-The test suite uses mocked LLM responses and an in-memory SQLite database — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing. Parallel execution is the default through `pyproject.toml` (`-n 4 --dist loadfile --tb=short`), while `make test-fast` runs only tests marked `unit`.
+The test suite uses mocked LLM responses plus isolated temporary SQLite database copies seeded from the shared fixtures in `tests/conftest.py` — no real API keys or Discord tokens are required. `make test` also injects safe default values for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` when they are missing. Parallel execution is the default through `pyproject.toml` (`-n 4 --dist loadfile --tb=short`), while `make test-fast` runs only tests marked `unit`.
+
+The Python CI workflow in `.github/workflows/tests.yml` now runs a `pytest --collect-only tests/` guard on Python 3.12 before the full matrix test run so non-test scripts cannot silently slip back under `tests/`.
 
 ---
 
@@ -258,17 +260,21 @@ INO/
 │   ├── preferences.md  # Runtime preferences file (local, git-ignored)
 │   └── personas/       # Persona presets (mentor, coach, buddy)
 ├── tests/              # pytest test suite
-├── frontend/           # React/TypeScript/Vite SPA frontend
+│   ├── ...             # Includes route-focused API tests, tool-handler tests, and frontend-aligned backend coverage
+├── frontend/
 │   ├── src/            # Routes, pages, API client, Tailwind styles, local UI primitives, frontend tests
 │   ├── e2e/            # Playwright browser smoke tests
 │   └── package.json    # npm scripts and frontend dependencies
-├── scripts/            # Operational scripts (migrations, manual tests)
+├── scripts/            # Operational scripts, migrations, and manual smoke paths
+│   ├── maintenance_smoke.py   # Manual maintenance/dedup smoke script (not part of pytest)
+│   ├── test_quiz_generator.py # Manual quiz-generator harness with pytest companion coverage
+│   └── test_similarity.py     # Manual similarity harness
 ├── docs/               # Developer documentation
 │   ├── ARCHITECTURE.md
 │   ├── API.md          # API reference
 │   ├── SETUP.md        # This file
 │   └── DEVNOTES.md
-├── .github/workflows/  # CI workflows (tests, lint)
+├── .github/workflows/  # CI workflows (tests, lint, frontend)
 ├── pyproject.toml      # pytest + Ruff configuration
 ├── requirements.txt    # Runtime dependencies
 └── requirements-dev.txt # Development/test/lint dependencies
@@ -323,8 +329,9 @@ Run `/sync` in your Discord server after starting the bot for the first time, or
 |--------|---------|
 | `scripts/dev_all.py` | Run the full local dev stack: API + React frontend dev server + Discord bot |
 | `scripts/agent.py` | Run the standalone maintenance agent |
+| `scripts/maintenance_smoke.py` | Manual maintenance + dedup smoke script against live local data; intentionally not part of pytest/CI |
 | `scripts/migrate_vectors.py` | Migrate vector embeddings between Qdrant collections |
-| `scripts/test_quiz_generator.py` | Manual integration test for quiz generation (not in pytest suite) |
+| `scripts/test_quiz_generator.py` | Manual integration test for quiz generation (paired with `tests/test_quiz_generator_script.py` for CI-safe coverage) |
 | `scripts/test_similarity.py` | Manual integration test for similarity search (not in pytest suite) |
 
-> **Note:** `scripts/test_quiz_generator.py` and `scripts/test_similarity.py` are manual integration scripts that require live API keys. They live in `scripts/` rather than `tests/` because they cannot run in CI without real credentials. A future PR will add proper mock-based versions to `tests/`.
+> **Note:** `scripts/test_similarity.py` and `scripts/maintenance_smoke.py` remain intentionally manual because they operate against live local state. `scripts/test_quiz_generator.py` still exists as a manual harness, but CI-safe companion coverage now lives in `tests/test_quiz_generator_script.py`.

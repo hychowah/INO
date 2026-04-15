@@ -7,7 +7,7 @@ function json(body: unknown) {
   };
 }
 
-test('concepts page renders and filters by topic', async ({ page }) => {
+test('legacy concepts alias renders the consolidated concepts view and filters by topic', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -76,18 +76,20 @@ test('concepts page renders and filters by topic', async ({ page }) => {
 
   await page.goto('/concepts');
 
-  await expect(page.getByRole('heading', { name: 'Concepts' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Borrow Checker' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Type Inference' })).toBeVisible();
+  await expect(page).toHaveURL(/\/knowledge\/concepts$/);
+  await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Filters' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Borrow Checker' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Type Inference' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Systems' }).click();
 
-  await expect(page.getByRole('link', { name: 'Borrow Checker' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Borrow Checker' })).toBeVisible();
   await expect(page.getByText('1 concept matched. Page 1 of 1.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Type Inference' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Type Inference' })).toHaveCount(0);
 });
 
-test('graph page renders and refetches when topic filter changes', async ({ page }) => {
+test('legacy graph alias renders the consolidated graph view and refetches when topic filter changes', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -138,7 +140,9 @@ test('graph page renders and refetches when topic filter changes', async ({ page
 
   await page.goto('/graph');
 
-  await expect(page.getByRole('heading', { name: 'Graph' })).toBeVisible();
+  await expect(page).toHaveURL(/\/knowledge\/graph$/);
+  await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Filters' })).toBeVisible();
   await expect(page.getByText('2 concepts, 2 topics, 4 edges.')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Legend' })).toBeVisible();
 

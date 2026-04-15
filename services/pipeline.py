@@ -33,6 +33,7 @@ def process_output(output: str) -> tuple[str, str]:
 
     return _process_output(output)
 
+
 SKILLS_DIR = config.SKILLS_DIR
 PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3

@@ -241,7 +241,8 @@ def test_run_backup_cycle_success_string(env):
     result = run_backup_cycle()
 
     assert isinstance(result, str)
-    assert "backup" in result.lower()
+    assert result.startswith("Backup saved: `")
+    assert "Pruning failed" not in result
 
 
 def test_backup_sqlite_missing_source_raises(env):
@@ -259,5 +260,5 @@ def test_backup_sqlite_missing_source_raises(env):
     # Patch SQLITE_TARGETS to point at the non-existent file
     targets = [(missing_db, "ghost.db"), (env["chat_db"], "chat_history.db")]
     with patch("services.backup.SQLITE_TARGETS", targets):
-        with pytest.raises(Exception):
+        with pytest.raises(FileNotFoundError):
             backup_module.perform_backup()

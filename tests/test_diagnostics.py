@@ -67,10 +67,12 @@ class TestRelationshipCandidates:
         db.add_concept("Steel Welding Basics", "Intro to welding steel", [tid])
         db.add_concept("Steel Welding Techniques", "Advanced welding methods for steel", [tid])
         diag = db.get_maintenance_diagnostics()
-        if diag["relationship_candidates"]:
-            cand = diag["relationship_candidates"][0]
-            assert "similarity" in cand
-            assert 0.0 < cand["similarity"] <= 1.0
+        candidates = diag["relationship_candidates"]
+        assert candidates, "expected at least one relationship candidate for similar titles"
+
+        cand = candidates[0]
+        assert "similarity" in cand
+        assert 0.0 < cand["similarity"] <= 1.0
 
     def test_candidates_fall_back_when_vector_neighbors_are_stale(self, test_db):
         tid = db.add_topic("Steel", "")
@@ -141,39 +143,21 @@ class TestClutteredRootTopics:
         assert child not in cluttered_ids
 
 
-class TestRemoveRelationHandler:
-    """Test the remove_relation action handler in tools.py."""
+class TestEmptyTopicsDiagnostics:
+    def test_topic_with_children_not_in_empty_list(self, test_db):
+        """Topics with child subtopics should not appear in empty_topics."""
+        parent = db.add_topic("Parent", "")
+        child = db.add_topic("Child", "")
+        db.link_topics(parent, child)
 
-    def test_remove_existing_relation(self, test_db):
-        from services.tools import execute_action
+        diag = db.get_maintenance_diagnostics()
+        empty_ids = [t["id"] for t in diag["empty_topics"]]
+        assert child in empty_ids
+        assert parent not in empty_ids
 
-        tid = db.add_topic("Test", "")
-        c1 = db.add_concept("A", "", [tid])
-        c2 = db.add_concept("B", "", [tid])
-        db.add_relation(c1, c2, "builds_on")
-        msg_type, result = execute_action(
-            "remove_relation", {"concept_id_a": c1, "concept_id_b": c2}
-        )
-        assert msg_type == "reply"
-        assert "Removed" in result
-        # Verify it's gone
-        assert db.get_relations(c1) == []
-
-    def test_remove_nonexistent_relation(self, test_db):
-        from services.tools import execute_action
-
-        tid = db.add_topic("Test", "")
-        c1 = db.add_concept("A", "", [tid])
-        c2 = db.add_concept("B", "", [tid])
-        msg_type, result = execute_action(
-            "remove_relation", {"concept_id_a": c1, "concept_id_b": c2}
-        )
-        assert msg_type == "error"
-        assert "No relation" in result
-
-    def test_remove_missing_params(self, test_db):
-        from services.tools import execute_action
-
-        msg_type, result = execute_action("remove_relation", {"concept_id_a": 1})
-        assert msg_type == "error"
-        assert "requires" in result
+    def test_truly_empty_topic_in_empty_list(self, test_db):
+        """Topic with no concepts and no children appears in empty_topics."""
+        tid = db.add_topic("Lonely", "")
+        diag = db.get_maintenance_diagnostics()
+        empty_ids = [t["id"] for t in diag["empty_topics"]]
+        assert tid in empty_ids

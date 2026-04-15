@@ -245,4 +245,9 @@ class TestFetchCluster:
 
         assert msg_type == "fetch"
         cluster = result["concept_cluster"]
-        assert len(cluster) >= 1  # At least primary concept
+        cluster_ids = {concept["id"] for concept in cluster}
+
+        assert len(cluster) >= 2
+        assert result["primary_concept_id"] == c1
+        assert c1 in cluster_ids
+        assert c2 in cluster_ids

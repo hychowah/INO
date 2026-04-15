@@ -9,17 +9,20 @@ See DEVNOTES.md §6 for bug history.
 Run:  pytest tests/test_score_guard.py -v
 """
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import db
 from db import core as db_core
 from services import tools
+
+SCORE_FIELDS = {
+    "mastery_level": 80,
+    "ease_factor": 3.0,
+    "interval_days": 30,
+    "next_review_at": "2026-06-01 00:00:00",
+    "last_reviewed_at": "2026-03-16 00:00:00",
+    "review_count": 10,
+}
 
 # ============================================================================
 # Fixtures
@@ -33,7 +36,9 @@ def _temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db_core, "CHAT_DB", tmp_path / "chat_history.db")
     monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
     db.init_databases()
+    tools.set_action_source("discord")
     yield
+    tools.set_action_source("discord")
 
 
 @pytest.fixture
@@ -52,38 +57,31 @@ def concept_id():
 class TestMaintenanceBlocked:
     """Maintenance source must not be able to change score/scheduling fields."""
 
-    SCORE_FIELDS = {
-        "mastery_level": 80,
-        "ease_factor": 3.0,
-        "interval_days": 30,
-        "next_review_at": "2026-06-01 00:00:00",
-        "last_reviewed_at": "2026-03-16 00:00:00",
-        "review_count": 10,
-    }
-
-    def test_mastery_level_blocked(self, concept_id):
+    @pytest.mark.parametrize("field,value", SCORE_FIELDS.items())
+    def test_each_score_field_blocked(self, concept_id, field, value):
         tools.set_action_source("maintenance")
+        before = db.get_concept(concept_id)
+
         tools.execute_action(
             "update_concept",
             {
                 "concept_id": concept_id,
-                "mastery_level": 80,
+                field: value,
             },
         )
-        concept = db.get_concept(concept_id)
-        assert concept["mastery_level"] == 0, (
-            "Maintenance should not be able to change mastery_level"
-        )
+
+        after = db.get_concept(concept_id)
+        assert after[field] == before[field], f"Maintenance should not change {field}"
 
     def test_all_score_fields_blocked(self, concept_id):
         tools.set_action_source("maintenance")
-        params = {"concept_id": concept_id, **self.SCORE_FIELDS}
+        before = db.get_concept(concept_id)
+        params = {"concept_id": concept_id, **SCORE_FIELDS}
         tools.execute_action("update_concept", params)
 
         concept = db.get_concept(concept_id)
-        assert concept["mastery_level"] == 0
-        assert concept["interval_days"] == 1  # default
-        assert concept["review_count"] == 0
+        for field in SCORE_FIELDS:
+            assert concept[field] == before[field], f"Maintenance should not change {field}"
 
     def test_title_description_still_allowed(self, concept_id):
         tools.set_action_source("maintenance")
@@ -146,30 +144,24 @@ class TestNonMaintenanceAllowed:
     """Normal sources (discord, api, cli) should still update score fields."""
 
     @pytest.mark.parametrize("source", ["discord", "api", "cli", "scheduler"])
-    def test_mastery_level_allowed(self, concept_id, source):
+    @pytest.mark.parametrize("field,value", SCORE_FIELDS.items())
+    def test_each_score_field_allowed(self, concept_id, source, field, value):
         tools.set_action_source(source)
         tools.execute_action(
             "update_concept",
             {
                 "concept_id": concept_id,
-                "mastery_level": 75,
+                field: value,
             },
         )
+
         concept = db.get_concept(concept_id)
-        assert concept["mastery_level"] == 75
+        assert concept[field] == value
 
     def test_all_score_fields_allowed_from_discord(self, concept_id):
         tools.set_action_source("discord")
-        tools.execute_action(
-            "update_concept",
-            {
-                "concept_id": concept_id,
-                "mastery_level": 60,
-                "interval_days": 14,
-                "review_count": 5,
-            },
-        )
+        tools.execute_action("update_concept", {"concept_id": concept_id, **SCORE_FIELDS})
+
         concept = db.get_concept(concept_id)
-        assert concept["mastery_level"] == 60
-        assert concept["interval_days"] == 14
-        assert concept["review_count"] == 5
+        for field, value in SCORE_FIELDS.items():
+            assert concept[field] == value

@@ -1,21 +1,7 @@
-"""
-Tests for modular skill loading and session isolation.
+"""Tests for modular skill loading and prompt composition."""
 
-Covers:
-- Skill file existence and structure
-- _mode_to_skill_set mapping
-- Conditional skill loading per mode
-- Cache invalidation on file changes
-- Session isolation for maintenance/review-check
-"""
+import pytest
 
-import sys
-from pathlib import Path
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import db
 from services.pipeline import (
     SKILL_SETS,
     SKILLS_DIR,
@@ -24,6 +10,13 @@ from services.pipeline import (
     build_system_prompt,
     invalidate_prompt_cache,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_prompt_db(test_db):
+    """Initialize prompt-building tests against the shared isolated DB fixture."""
+    return test_db
+
 
 # ── Skill file structure ──────────────────────────────────────────────
 
@@ -141,7 +134,6 @@ def test_maintenance_has_knowledge_and_maintenance():
 
 def test_different_skill_sets_produce_different_prompts():
     """build_system_prompt for different modes returns different content."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     interactive_prompt = build_system_prompt("mentor", mode="command")
@@ -158,7 +150,6 @@ def test_different_skill_sets_produce_different_prompts():
 
 def test_interactive_prompt_has_quiz_and_knowledge_content():
     """Interactive mode prompt includes content from both quiz.md and knowledge.md."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     prompt = build_system_prompt("mentor", mode="command")
@@ -170,7 +161,6 @@ def test_interactive_prompt_has_quiz_and_knowledge_content():
 
 def test_review_prompt_has_quiz_no_knowledge_crud():
     """Review mode prompt includes quiz but not knowledge action definitions."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     prompt = build_system_prompt("mentor", mode="review-check")
@@ -191,7 +181,6 @@ def test_review_prompt_has_quiz_no_knowledge_crud():
 
 def test_maintenance_prompt_has_maintenance_rules():
     """Maintenance mode prompt includes maintenance rules."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     prompt = build_system_prompt("mentor", mode="maintenance")
@@ -205,7 +194,6 @@ def test_maintenance_prompt_has_maintenance_rules():
 
 def test_command_and_reply_produce_same_prompt():
     """COMMAND and REPLY modes use the same interactive skill set."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     command_prompt = build_system_prompt("mentor", mode="command")
@@ -220,7 +208,6 @@ def test_command_and_reply_produce_same_prompt():
 
 def test_cache_returns_same_object_on_repeated_calls():
     """Consecutive calls with same params return cached result."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     p1 = build_system_prompt("mentor", mode="command")
@@ -230,7 +217,6 @@ def test_cache_returns_same_object_on_repeated_calls():
 
 def test_invalidate_clears_cache():
     """After invalidation, the prompt is rebuilt."""
-    db.init_databases()
     invalidate_prompt_cache()
 
     p1 = build_system_prompt("mentor", mode="command")

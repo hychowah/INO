@@ -14,6 +14,7 @@ Each concern has one owning document. Cross-links are fine; duplication is not.
 | Discord bot commands | `docs/API.md` | — |
 | Browser SPA routes | `docs/API.md` | `docs/ARCHITECTURE.md` (Flow 4 diagram) |
 | Module structure / file roles | `docs/ARCHITECTURE.md` | `CODING.md` (project structure tree) |
+| Test layout / CI workflows / manual smoke scripts | `docs/SETUP.md` | `docs/ARCHITECTURE.md`, `docs/index.md`, `docs/DOC_INDEX.md` |
 | Runtime LLM skill files | `AGENTS.md` (table) | `docs/index.md`, `docs/ARCHITECTURE.md` (file map) |
 | Pipeline mode routing | `docs/index.md` | `AGENTS.md` (Skill sets section) |
 | Import conventions / async rules | `CODING.md` | — |
@@ -58,6 +59,12 @@ Each concern has one owning document. Cross-links are fine; duplication is not.
 1. Update `docs/ARCHITECTURE.md` file map (remove old row, add new rows)
 2. Update `CODING.md` project structure tree
 3. Add entry to `CHANGELOG.md` under Refactored
+
+### Test suite or CI workflow change
+1. Update `docs/SETUP.md` for the command surface, CI-equivalent local checks, and any manual smoke scripts
+2. If tests or scripts were moved/renamed: update `docs/ARCHITECTURE.md` file map
+3. If the docs inventory or active plan changed: update `docs/index.md` and `docs/DOC_INDEX.md`
+4. Add one-line entry to `CHANGELOG.md` under Changed or Refactored
 
 ### New environment variable
 1. Add row to the Environment Variables table in `docs/API.md`

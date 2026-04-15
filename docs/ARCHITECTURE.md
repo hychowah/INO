@@ -141,12 +141,18 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
+| `scripts/maintenance_smoke.py` | ~160 | Manual maintenance and dedup smoke script; intentionally kept outside automated pytest/CI runs |
 | `scripts/test_prompts.py` | ~180 | Prompt-debugging harness for maintenance, reorganize, and quiz prompt assembly |
 | `scripts/test_quiz_generator.py` | ~120 | Manual test harness for the two-prompt quiz generation pipeline |
 | `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
 | **tests/** | | |
-| `tests/test_maintenance.py` | ~160 | Test maintenance diagnostics and dedup sub-agent |
-| `tests/test_dedup_guard.py` | ~35 | Quick test for title similarity and duplicate detection |
+| `tests/test_api.py` | ~1000 | Backend API/chat/auth coverage for REST routes and shared chat controller behavior |
+| `tests/test_api_pages.py` | ~155 | FastAPI-served SPA alias and HTML-fallback coverage for browser routes |
+| `tests/test_concept_dedup_tools.py` | ~235 | Tool- and DB-level concept dedup guard coverage |
+| `tests/test_tools_topics.py` | ~75 | Topic handler guard coverage (`delete_topic`) |
+| `tests/test_tools_relations.py` | ~40 | Relation handler coverage (`remove_relation`) |
+| `tests/test_quiz_views.py` | ~310 | Discord quiz view delivery, navigation metadata, and skip-button regression coverage |
+| `tests/test_topic_parent_heuristics.py` | ~165 | Topic auto-parenting and candidate-parent heuristic coverage |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 | **frontend/** | | |
 | `frontend/src/routes.tsx` | — | React Router entry point — owns nested shell routes for `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/actions`, detail routes, and legacy redirects; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |

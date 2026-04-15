@@ -48,8 +48,14 @@ class TestAssessWithoutRelations:
         cid = _make_concept("Basic Concept")
         params = _base_assess_params(cid)
         result_type, msg = _handle_assess(params)
+
         assert result_type == "reply"
-        assert "Well done!" in msg
+        assert msg == "Well done!"
+
+        concept = db.get_concept(cid)
+        assert concept["review_count"] == 1
+        assert concept["mastery_level"] > 0
+        assert db.get_relations(cid) == []
 
     def test_no_related_ids_key(self, test_db):
         """When related_concept_ids is not in params, no error."""

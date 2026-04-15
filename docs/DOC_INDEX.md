@@ -47,7 +47,10 @@ Do not edit these casually — every word affects bot behaviour.
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `CHANGELOG.md` | Key changes, newest first |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds — preview vs apply, aggressive vs conservative, rollback, Windows/OneDrive troubleshooting |
-| `docs/plans/` | Active feature design plans (see directory for current files) |
+| `.github/workflows/tests.yml` | Python CI workflow — dependency install, pytest collection guard, full matrix run |
+| `.github/workflows/lint.yml` | Ruff CI workflow |
+| `.github/workflows/frontend.yml` | Frontend CI workflow — typecheck, Vitest, Playwright |
+| `docs/plans/ci-test-suite-overhaul-2026-04-15.md` | Active CI and test-suite overhaul implementation plan |
 
 ---
 

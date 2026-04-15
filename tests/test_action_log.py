@@ -1,15 +1,9 @@
 """Tests for db.action_log and the tools.py logging hook."""
 
-import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
-# Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import db
 from db import action_log
 from db import core as db_core
 from services import state
@@ -20,14 +14,9 @@ from services import state
 
 
 @pytest.fixture(autouse=True)
-def _temp_db(tmp_path, monkeypatch):
-    """Redirect all DB operations to a temp directory so tests don't touch real data."""
-    test_db = tmp_path / "knowledge.db"
-    monkeypatch.setattr(db_core, "KNOWLEDGE_DB", test_db)
-    monkeypatch.setattr(db_core, "CHAT_DB", tmp_path / "chat_history.db")
-    monkeypatch.setattr(db_core, "DATA_DIR", tmp_path)
-    db.init_databases()
-    yield
+def _isolated_db(test_db):
+    """Use the shared isolated DB fixture for action-log tests."""
+    return test_db
 
 
 # ============================================================================
@@ -115,22 +104,22 @@ class TestGetActionLog:
         ids = [e["id"] for e in entries]
         assert ids == sorted(ids, reverse=True)
 
-    def test_filter_by_action(self):
+    @pytest.mark.parametrize(
+        ("filters", "expected_len", "field", "expected_value"),
+        [
+            ({"action_filter": "add_concept"}, 1, "action", "add_concept"),
+            ({"source_filter": "scheduler"}, 1, "source", "scheduler"),
+            ({"search": "quality"}, 1, None, None),
+        ],
+        ids=["action", "source", "search"],
+    )
+    def test_single_filter_cases(self, filters, expected_len, field, expected_value):
         self._populate()
-        entries = action_log.get_action_log(action_filter="add_concept")
-        assert len(entries) == 1
-        assert entries[0]["action"] == "add_concept"
+        entries = action_log.get_action_log(**filters)
 
-    def test_filter_by_source(self):
-        self._populate()
-        entries = action_log.get_action_log(source_filter="scheduler")
-        assert len(entries) == 1
-        assert entries[0]["source"] == "scheduler"
-
-    def test_filter_by_search(self):
-        self._populate()
-        entries = action_log.get_action_log(search="quality")
-        assert len(entries) == 1  # only the assess entry has "quality" in params
+        assert len(entries) == expected_len
+        if field is not None:
+            assert entries[0][field] == expected_value
 
     def test_filter_by_since(self):
         self._populate()

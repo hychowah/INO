@@ -15,6 +15,7 @@ Key changes, newest first.
 
 ### Changed
 
+- **CI and test-suite maintenance** — `.github/workflows/tests.yml` now performs a `pytest --collect-only tests/` guard before the Python matrix run; docs and test inventory were refreshed to match the current split API/page/tool/quiz test layout and the manual `scripts/maintenance_smoke.py` path
 - **FastAPI SPA serving** — the backend no longer serves only an explicit allowlist of page routes; it now serves the built SPA for HTML requests outside the reserved prefixes `/api`, `/assets`, and `/static`
 - **Vite dev behavior** — the frontend dev server now proxies only `/api`, `/assets`, and `/static`; client-side browser routes stay inside the SPA
 - **Frontend documentation** — README, API, setup, architecture, dev notes, and docs index were refreshed to reflect the consolidated Knowledge/Progress surfaces, Activity drawer, command palette, and resizable Knowledge panels

@@ -32,7 +32,10 @@
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |
 | `docs/DOC_STANDARD.md` | Documentation writing and maintenance conventions |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds |
-| `docs/plans/` | Active feature design plans and implementation handoff notes (see directory for current files) |
+| `.github/workflows/tests.yml` | Python CI matrix and pytest collection guard |
+| `.github/workflows/lint.yml` | Ruff lint/format CI workflow |
+| `.github/workflows/frontend.yml` | Frontend typecheck, Vitest, and Playwright CI workflow |
+| `docs/plans/ci-test-suite-overhaul-2026-04-15.md` | Active CI and test-suite overhaul plan |
 
 ## Skill Sets by Mode
 
@@ -51,3 +54,4 @@ Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS
 - **Skill files** (`data/skills/*.md`): These are the LLM's runtime instructions. Every word affects behavior. Test changes by chatting with the bot. Preserve `<!-- DO NOT REMOVE -->` comments — they prevent formatting regressions (see DEVNOTES.md §1).
 - **AGENTS.md**: Pointer file only. Do not put instructions here — edit skill files instead.
 - **Persona files**: Communication style only — no action formats or scoring rules. ~600 token budget per file.
+- **Workflow files** (`.github/workflows/*.yml`): Keep these aligned with `docs/SETUP.md`, `docs/DOC_INDEX.md`, and the active plan file when test or CI behavior changes.
