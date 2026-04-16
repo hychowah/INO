@@ -1,8 +1,10 @@
 """Tests for Phase 6: maintenance diagnostics — relationship candidates + cluttered roots."""
 
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import db
+from db import core as db_core
 
 
 class TestRelationshipCandidates:
@@ -161,3 +163,65 @@ class TestEmptyTopicsDiagnostics:
         diag = db.get_maintenance_diagnostics()
         empty_ids = [t["id"] for t in diag["empty_topics"]]
         assert tid in empty_ids
+
+
+class TestRemainingDiagnosticBuckets:
+    def test_untagged_concept_reported(self, test_db):
+        cid = db.add_concept("Untagged", "No topic")
+
+        diag = db.get_maintenance_diagnostics()
+
+        assert [concept["id"] for concept in diag["untagged_concepts"]] == [cid]
+
+    def test_oversized_topic_reported(self, test_db):
+        tid = db.add_topic("Large Topic", "")
+        for index in range(16):
+            db.add_concept(f"Large Concept {index}", "", [tid])
+
+        diag = db.get_maintenance_diagnostics()
+
+        assert diag["oversized_topics"][0]["id"] == tid
+        assert diag["oversized_topics"][0]["concept_count"] == 16
+
+    def test_stale_concept_reported(self, test_db):
+        cid = db.add_concept("Old Concept", "Old")
+        conn = db_core._conn()
+        old_date = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("UPDATE concepts SET created_at = ? WHERE id = ?", (old_date, cid))
+        conn.commit()
+        conn.close()
+
+        diag = db.get_maintenance_diagnostics()
+
+        assert [concept["id"] for concept in diag["stale_concepts"]] == [cid]
+
+    def test_struggling_concept_reported(self, test_db):
+        tid = db.add_topic("Practice", "")
+        cid = db.add_concept("Hard Concept", "", [tid])
+        db.update_concept(cid, mastery_level=20, review_count=6)
+
+        diag = db.get_maintenance_diagnostics()
+
+        assert [concept["id"] for concept in diag["struggling_concepts"]] == [cid]
+
+    def test_over_tagged_concept_reported(self, test_db):
+        topic_ids = [db.add_topic(f"Topic {index}", "") for index in range(4)]
+        cid = db.add_concept("Shared Concept", "", topic_ids)
+
+        diag = db.get_maintenance_diagnostics()
+
+        assert diag["over_tagged_concepts"][0]["id"] == cid
+        assert diag["over_tagged_concepts"][0]["topic_count"] == 4
+
+    def test_potential_duplicates_reported(self, test_db):
+        tid = db.add_topic("Steel", "")
+        c1 = db.add_concept("Bootloader Basics", "", [tid])
+        c2 = db.add_concept("Bootloader in Embedded Systems", "", [tid])
+
+        diag = db.get_maintenance_diagnostics()
+
+        pairs = {
+            (pair["concept_a"]["id"], pair["concept_b"]["id"])
+            for pair in diag["potential_duplicates"]
+        }
+        assert (c1, c2) in pairs

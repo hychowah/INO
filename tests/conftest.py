@@ -15,6 +15,38 @@ import pytest
 from db import core
 
 
+_UNIT_TEST_MODULES = {
+    "test_formatting.py",
+    "test_forecast.py",
+    "test_llm.py",
+    "test_llm_errors.py",
+    "test_parser_json.py",
+    "test_persona.py",
+    "test_quiz_generator_script.py",
+    "test_skill_loading.py",
+    "test_state_lock.py",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Require every collected test to carry either the unit or integration marker.
+
+    Pure logic modules stay on the unit lane; everything else defaults to
+    integration unless a test already opted into one of the suite markers.
+    """
+    del config
+
+    for item in items:
+        if item.get_closest_marker("unit") or item.get_closest_marker("integration"):
+            continue
+
+        if item.path.name in _UNIT_TEST_MODULES:
+            item.add_marker(pytest.mark.unit)
+            continue
+
+        item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _disable_vector_sync_for_tests():
     """Keep ordinary tests from loading the embedding model via add/update helpers."""

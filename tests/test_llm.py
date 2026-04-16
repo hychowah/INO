@@ -8,7 +8,6 @@ Covers:
     4. Live smoke test — optional, requires real API credentials (--live flag)
 """
 
-import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,76 +79,66 @@ class TestLLMError:
 
 
 class TestOpenAICompatibleProvider:
-    def test_basic_send(self):
+    @pytest.mark.anyio
+    async def test_basic_send(self):
         mock_client, _ = _make_mock_client()
 
-        async def _test():
-            p = _make_provider(mock_client)
-            result = await p.send(
-                "hello", session=None, system_prompt="You are helpful.", timeout=60
-            )
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            assert messages[0]["role"] == "system"
-            assert messages[0]["content"] == "You are helpful."
-            assert messages[1]["role"] == "user"
-            assert messages[1]["content"] == "hello"
-            assert call_args.kwargs["model"] == "test-model"
-            assert result == "REPLY: hello from API"
+        p = _make_provider(mock_client)
+        result = await p.send("hello", session=None, system_prompt="You are helpful.", timeout=60)
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "You are helpful."
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "hello"
+        assert call_args.kwargs["model"] == "test-model"
+        assert result == "REPLY: hello from API"
 
-        asyncio.run(_test())
-
-    def test_session_continuity(self):
+    @pytest.mark.anyio
+    async def test_session_continuity(self):
         mock_client, mock_response = _make_mock_client()
 
-        async def _test():
-            p = _make_provider(mock_client)
-            await p.send("first message", session="sess1", system_prompt="system instructions")
-            mock_response.choices[0].message.content = "second response"
-            await p.send("second message", session="sess1", system_prompt="different system")
-            msgs, _ = p._sessions["sess1"]
-            assert len(msgs) == 5  # system, user1, assistant1, user2, assistant2
-            assert msgs[0]["role"] == "system"
-            assert msgs[0]["content"] == "system instructions"
-            assert msgs[1]["role"] == "user"
-            assert msgs[1]["content"] == "first message"
-            assert msgs[2]["role"] == "assistant"
-            assert msgs[3]["role"] == "user"
-            assert msgs[3]["content"] == "second message"
-            assert msgs[4]["role"] == "assistant"
+        p = _make_provider(mock_client)
+        await p.send("first message", session="sess1", system_prompt="system instructions")
+        mock_response.choices[0].message.content = "second response"
+        await p.send("second message", session="sess1", system_prompt="different system")
+        msgs, _ = p._sessions["sess1"]
+        assert len(msgs) == 5
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == "system instructions"
+        assert msgs[1]["role"] == "user"
+        assert msgs[1]["content"] == "first message"
+        assert msgs[2]["role"] == "assistant"
+        assert msgs[3]["role"] == "user"
+        assert msgs[3]["content"] == "second message"
+        assert msgs[4]["role"] == "assistant"
 
-        asyncio.run(_test())
-
-    def test_session_isolation(self):
+    @pytest.mark.anyio
+    async def test_session_isolation(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "resp"
 
-        async def _test():
-            p = _make_provider(mock_client)
-            await p.send("msg in A", session="sessA", system_prompt="sys")
-            await p.send("msg in B", session="sessB", system_prompt="sys")
-            assert "sessA" in p._sessions
-            assert "sessB" in p._sessions
-            sess_a_msgs, _ = p._sessions["sessA"]
-            sess_b_msgs, _ = p._sessions["sessB"]
-            assert len(sess_a_msgs) == 3
-            assert len(sess_b_msgs) == 3
+        p = _make_provider(mock_client)
+        await p.send("msg in A", session="sessA", system_prompt="sys")
+        await p.send("msg in B", session="sessB", system_prompt="sys")
+        assert "sessA" in p._sessions
+        assert "sessB" in p._sessions
+        sess_a_msgs, _ = p._sessions["sessA"]
+        sess_b_msgs, _ = p._sessions["sessB"]
+        assert len(sess_a_msgs) == 3
+        assert len(sess_b_msgs) == 3
 
-        asyncio.run(_test())
-
-    def test_clear_session(self):
+    @pytest.mark.anyio
+    async def test_clear_session(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "resp"
 
-        async def _test():
-            p = _make_provider(mock_client)
-            await p.send("msg", session="to_clear", system_prompt="sys")
-            assert "to_clear" in p._sessions
-            p.clear_session("to_clear")
-            assert "to_clear" not in p._sessions
-            p.clear_session("nonexistent")  # should not raise
-
-        asyncio.run(_test())
+        p = _make_provider(mock_client)
+        await p.send("msg", session="to_clear", system_prompt="sys")
+        assert "to_clear" in p._sessions
+        p.clear_session("to_clear")
+        assert "to_clear" not in p._sessions
+        p.clear_session("nonexistent")
 
     def test_get_messages_returns_copy_for_existing_session(self):
         mock_client, _ = _make_mock_client()
@@ -162,73 +151,73 @@ class TestOpenAICompatibleProvider:
         stored, _ = p._sessions["sess1"]
         assert stored == [{"role": "system", "content": "sys"}]
 
-    def test_no_session(self):
+    @pytest.mark.anyio
+    async def test_no_session(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "one-shot resp"
 
-        async def _test():
-            p = _make_provider(mock_client)
-            await p.send("dedup prompt", session=None, system_prompt=None, timeout=120)
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            assert messages[0]["role"] == "user"
-            assert messages[0]["content"] == "dedup prompt"
-            assert len(p._sessions) == 0
+        p = _make_provider(mock_client)
+        await p.send("dedup prompt", session=None, system_prompt=None, timeout=120)
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs["messages"]
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "dedup prompt"
+        assert len(p._sessions) == 0
 
-        asyncio.run(_test())
-
-    def test_token_truncation(self):
+    @pytest.mark.anyio
+    async def test_token_truncation(self):
         mock_client, mock_response = _make_mock_client()
-        mock_response.choices[0].message.content = "r"
+        mock_response.choices[0].message.content = "assistant-1"
 
-        async def _test():
-            p = _make_provider(mock_client, max_history_tokens=50)
-            system = "A" * 40
-            for _ in range(5):
-                await p.send("B" * 80, session="trunc_test", system_prompt=system)
-            msgs, _ = p._sessions["trunc_test"]
-            assert msgs[0]["role"] == "system"
-            assert msgs[0]["content"] == system
-            total_est = sum(len(m["content"]) // 4 for m in msgs)
-            assert total_est <= 50, f"Token estimate {total_est} exceeds budget 50"
+        p = _make_provider(mock_client, max_history_tokens=50)
+        system = "A" * 40
+        await p.send("B" * 80, session="trunc_test", system_prompt=system)
+        mock_response.choices[0].message.content = "assistant-2"
+        await p.send("C" * 80, session="trunc_test", system_prompt=system)
+        mock_response.choices[0].message.content = "assistant-3"
+        await p.send("D" * 80, session="trunc_test", system_prompt=system)
 
-        asyncio.run(_test())
+        msgs, _ = p._sessions["trunc_test"]
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == system
+        total_est = sum(len(m["content"]) // 4 for m in msgs)
+        assert total_est <= 50, f"Token estimate {total_est} exceeds budget 50"
+        contents = [msg["content"] for msg in msgs]
+        assert "B" * 80 not in contents
+        assert "C" * 80 not in contents
+        assert "D" * 80 in contents
+        assert "assistant-2" in contents
+        assert "assistant-3" in contents
 
-    def test_temperature_passed(self):
-        mock_client, mock_response = _make_mock_client()
-        mock_response.choices[0].message.content = "resp"
-
-        async def _test():
-            p = _make_provider(mock_client, temperature=0.7)
-            await p.send("test", session=None)
-            call_args = mock_client.chat.completions.create.call_args
-            assert call_args.kwargs.get("temperature") == 0.7
-
-        asyncio.run(_test())
-
-    def test_temperature_omitted_when_none(self):
+    @pytest.mark.anyio
+    async def test_temperature_passed(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "resp"
 
-        async def _test():
-            p = _make_provider(mock_client, temperature=None)
-            await p.send("test", session=None)
-            call_args = mock_client.chat.completions.create.call_args
-            assert "temperature" not in call_args.kwargs
+        p = _make_provider(mock_client, temperature=0.7)
+        await p.send("test", session=None)
+        call_args = mock_client.chat.completions.create.call_args
+        assert call_args.kwargs.get("temperature") == 0.7
 
-        asyncio.run(_test())
-
-    def test_response_format_passed(self):
+    @pytest.mark.anyio
+    async def test_temperature_omitted_when_none(self):
         mock_client, mock_response = _make_mock_client()
         mock_response.choices[0].message.content = "resp"
 
-        async def _test():
-            p = _make_provider(mock_client)
-            await p.send("test", session=None, response_format={"type": "json_object"})
-            call_args = mock_client.chat.completions.create.call_args
-            assert call_args.kwargs["response_format"] == {"type": "json_object"}
+        p = _make_provider(mock_client, temperature=None)
+        await p.send("test", session=None)
+        call_args = mock_client.chat.completions.create.call_args
+        assert "temperature" not in call_args.kwargs
 
-        asyncio.run(_test())
+    @pytest.mark.anyio
+    async def test_response_format_passed(self):
+        mock_client, mock_response = _make_mock_client()
+        mock_response.choices[0].message.content = "resp"
+
+        p = _make_provider(mock_client)
+        await p.send("test", session=None, response_format={"type": "json_object"})
+        call_args = mock_client.chat.completions.create.call_args
+        assert call_args.kwargs["response_format"] == {"type": "json_object"}
 
 
 # ============================================================================
@@ -311,7 +300,8 @@ class TestOpenAIClientConstructionPath:
     module level so construction goes through the real attribute-access path.
     """
 
-    def test_send_without_client_bypass(self):
+    @pytest.mark.anyio
+    async def test_send_without_client_bypass(self):
         response = MagicMock()
         response.choices = [MagicMock()]
         response.choices[0].message.content = "real-path reply"
@@ -320,19 +310,15 @@ class TestOpenAIClientConstructionPath:
         mock_instance = MagicMock()
         mock_instance.chat.completions.create = AsyncMock(return_value=response)
 
-        async def _test():
-            with patch("services.llm._AsyncOpenAI", return_value=mock_instance):
-                p = OpenAICompatibleProvider(
-                    base_url="https://api.test.com/v1",
-                    api_key="test-key",
-                    model="test-model",
-                )
-                # Deliberately do NOT set p._client — that was the coverage gap
-                result = await p.send("hello", session=None)
-            mock_instance.chat.completions.create.assert_awaited_once()
-            assert result == "real-path reply"
-
-        asyncio.run(_test())
+        with patch("services.llm._AsyncOpenAI", return_value=mock_instance):
+            p = OpenAICompatibleProvider(
+                base_url="https://api.test.com/v1",
+                api_key="test-key",
+                model="test-model",
+            )
+            result = await p.send("hello", session=None)
+        mock_instance.chat.completions.create.assert_awaited_once()
+        assert result == "real-path reply"
 
     def test_openai_unavailable_raises_llm_error(self):
         with patch("services.llm._OPENAI_AVAILABLE", False):
@@ -359,36 +345,32 @@ class TestLiveSmoke:
         yield
         llm_module._provider_instance = None
 
-    def test_one_shot(self):
+    @pytest.mark.anyio
+    async def test_one_shot(self):
         provider = get_provider()
 
-        async def _test():
-            resp = await provider.send(
-                "Reply with exactly: TEST_OK",
-                session=None,
-                system_prompt="You are a test bot. Follow instructions exactly.",
-                timeout=30,
-            )
-            assert "TEST_OK" in resp
+        resp = await provider.send(
+            "Reply with exactly: TEST_OK",
+            session=None,
+            system_prompt="You are a test bot. Follow instructions exactly.",
+            timeout=30,
+        )
+        assert "TEST_OK" in resp
 
-        asyncio.run(_test())
-
-    def test_session_continuity(self):
+    @pytest.mark.anyio
+    async def test_session_continuity(self):
         provider = get_provider()
 
-        async def _test():
-            await provider.send(
-                "Remember the secret word: BANANA",
-                session="live_test_sess",
-                system_prompt="You are a test bot. Remember what the user tells you.",
-                timeout=30,
-            )
-            resp = await provider.send(
-                "What was the secret word I told you?",
-                session="live_test_sess",
-                timeout=30,
-            )
-            assert "BANANA" in resp.upper()
-            provider.clear_session("live_test_sess")
-
-        asyncio.run(_test())
+        await provider.send(
+            "Remember the secret word: BANANA",
+            session="live_test_sess",
+            system_prompt="You are a test bot. Remember what the user tells you.",
+            timeout=30,
+        )
+        resp = await provider.send(
+            "What was the secret word I told you?",
+            session="live_test_sess",
+            timeout=30,
+        )
+        assert "BANANA" in resp.upper()
+        provider.clear_session("live_test_sess")

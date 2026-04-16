@@ -265,6 +265,16 @@ class TestAddRelationsFromAssess:
         c2 = _make_concept("Other", tid)
         assert add_relations_from_assess(c1, [c2], relation_type="fake") == 0
 
+    def test_duplicate_ids_count_once(self, test_db):
+        tid = _make_topic()
+        c1 = _make_concept("Main", tid)
+        c2 = _make_concept("Other", tid)
+
+        count = add_relations_from_assess(c1, [c2, c2])
+
+        assert count == 1
+        assert len(get_relations(c1)) == 1
+
 
 # ============================================================================
 # BFS search
@@ -272,7 +282,15 @@ class TestAddRelationsFromAssess:
 
 
 class TestSearchRelated:
-    def test_depth_1(self, test_db):
+    @pytest.mark.parametrize(
+        ("depth", "expected_titles"),
+        [
+            (1, {"Neighbor"}),
+            (2, {"Neighbor", "Far"}),
+        ],
+        ids=["depth-1", "depth-2"],
+    )
+    def test_depth_cases(self, test_db, depth, expected_titles):
         tid = _make_topic()
         c1 = _make_concept("Start", tid)
         c2 = _make_concept("Neighbor", tid)
@@ -280,23 +298,9 @@ class TestSearchRelated:
         add_relation(c1, c2, "builds_on")
         add_relation(c2, c3, "builds_on")
 
-        results = search_related(c1, depth=1)
-        ids = [r["id"] for r in results]
-        assert c2 in ids
-        assert c3 not in ids
-
-    def test_depth_2(self, test_db):
-        tid = _make_topic()
-        c1 = _make_concept("Start", tid)
-        c2 = _make_concept("Mid", tid)
-        c3 = _make_concept("Far", tid)
-        add_relation(c1, c2, "builds_on")
-        add_relation(c2, c3, "builds_on")
-
-        results = search_related(c1, depth=2)
-        ids = [r["id"] for r in results]
-        assert c2 in ids
-        assert c3 in ids
+        results = search_related(c1, depth=depth)
+        titles = {result["title"] for result in results}
+        assert titles == expected_titles
 
     def test_excludes_start(self, test_db):
         tid = _make_topic()
@@ -315,6 +319,20 @@ class TestSearchRelated:
 
     def test_depth_zero(self, test_db):
         assert search_related(1, depth=0) == []
+
+    def test_cycle_returns_each_concept_once(self, test_db):
+        tid = _make_topic()
+        c1 = _make_concept("Start", tid)
+        c2 = _make_concept("Neighbor", tid)
+        c3 = _make_concept("Far", tid)
+        add_relation(c1, c2, "builds_on")
+        add_relation(c2, c3, "builds_on")
+        add_relation(c3, c1, "builds_on")
+
+        results = search_related(c1, depth=3)
+
+        assert [result["title"] for result in results] == ["Far", "Neighbor"]
+        assert [result["hop_count"] for result in results] == [1, 1]
 
 
 # ============================================================================

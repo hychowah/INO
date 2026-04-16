@@ -243,6 +243,38 @@ class TestCleanup:
 
 
 # ============================================================================
+# rejected rename queries
+# ============================================================================
+
+
+class TestRejectedRenames:
+    def test_returns_rejected_maintenance_renames(self):
+        action_log.log_action(
+            "update_topic",
+            {"topic_id": 7, "title": "Rejected Topic Rename"},
+            "rejected",
+            "user rejected rename",
+            source="maintenance",
+        )
+        action_log.log_action(
+            "update_concept",
+            {"concept_id": 9, "new_title": "Rejected Concept Rename"},
+            "rejected",
+            "user rejected rename",
+            source="maintenance",
+        )
+
+        results = action_log.get_rejected_renames()
+
+        by_action = {entry["action"]: entry for entry in results}
+
+        assert by_action["update_concept"]["target_id"] == 9
+        assert by_action["update_concept"]["proposed_title"] == "Rejected Concept Rename"
+        assert by_action["update_topic"]["target_id"] == 7
+        assert by_action["update_topic"]["proposed_title"] == "Rejected Topic Rename"
+
+
+# ============================================================================
 # tools.py skip set behavior
 # ============================================================================
 
@@ -263,3 +295,16 @@ class TestToolsSkipSet:
         assert "assess" not in _SKIP_LOG_ACTIONS
         assert "quiz" not in _SKIP_LOG_ACTIONS
         assert "suggest_topic" not in _SKIP_LOG_ACTIONS
+
+
+class TestToolsLoggingHook:
+    def test_fetch_action_not_logged(self):
+        from services.tools import execute_action
+
+        before = action_log.get_action_log_count()
+
+        msg_type, result = execute_action("fetch", {"stats": True})
+
+        assert msg_type == "fetch"
+        assert "stats" in result
+        assert action_log.get_action_log_count() == before

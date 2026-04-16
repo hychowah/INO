@@ -119,10 +119,13 @@ class TestDueConceptRelations:
 
         with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_lightweight_context("command")
-            # Should show the relation line with ↳
-            assert "↳" in ctx
-            assert "contrasts_with" in ctx
-            assert "Concept B" in ctx
+            expected_line = (
+                f"  ↳ contrasts_with #{cid2} Concept B "
+                f'(score 0/100, "A and B are often confused")'
+            )
+            assert "## Due for Review" in ctx
+            assert f"- [concept:{cid1}] Concept A" in ctx
+            assert expected_line in ctx
 
     def test_review_check_due_no_relations(self, two_concepts):
         """REVIEW-CHECK mode shows due concepts but without relations (minimal context)."""
@@ -235,8 +238,11 @@ class TestActiveConceptDetail:
         cid1, _, _ = two_concepts
         db.set_session("active_concept_id", str(cid1))
 
-        with patch("services.context._is_quiz_stale", return_value=True):
-            with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
+        with (
+            patch("services.context._is_quiz_stale", return_value=True),
+            patch("services.context._append_active_quiz_context"),
+            patch("services.llm.get_provider", return_value=MagicMock(spec=[])),
+        ):
                 ctx = build_lightweight_context("command")
                 assert "Active Concept Detail" not in ctx
 
@@ -279,7 +285,13 @@ class TestPreloadMentionedConcept:
         """build_prompt_context should include pre-loaded concept for exact match."""
         with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_prompt_context("Concept A", mode="command")
-            assert "Pre-loaded Concept" in ctx
+            preload_header = "## Pre-loaded Concept (matched from message): Concept A"
+            mode_header = "## Mode"
+            assert preload_header in ctx
+            assert "Score: 0/100, Interval: 1d, Reviews: 0" in ctx
+            assert "Topics: ['TestTopic']" in ctx
+            assert ctx.index(preload_header) < ctx.index(mode_header)
+            assert "You are in COMMAND mode." in ctx
 
     def test_no_preload_in_maintenance(self, two_concepts):
         """Maintenance mode should not pre-load concepts."""
@@ -338,13 +350,16 @@ class TestQuizGeneratorEnrichment:
         cid1, cid2, _ = two_concepts
         ctx = build_quiz_generator_context(cid1)
         assert ctx is not None
-        assert "Related Concepts" in ctx
-        assert "Desc B" in ctx  # description of related concept
+        assert f"## Primary Concept: Concept A (#{cid1})" in ctx
+        assert "Topics: ['TestTopic']" in ctx
+        assert "## Related Concepts" in ctx
+        assert f"- [contrasts_with] #{cid2} Concept B (score 0/100)" in ctx
+        assert "    Description: Desc B" in ctx
 
     def test_relation_note_included(self, two_concepts):
         cid1, _, _ = two_concepts
         ctx = build_quiz_generator_context(cid1)
-        assert "A and B are often confused" in ctx
+        assert "    Note: A and B are often confused" in ctx
 
     def test_nonexistent_concept_returns_none(self):
         assert build_quiz_generator_context(99999) is None

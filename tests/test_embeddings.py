@@ -3,7 +3,7 @@ Tests for the embedding service (services/embeddings.py).
 Uses mocked sentence-transformers to avoid loading a real model.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -41,9 +41,8 @@ def _make_mock_model(dim=768):
 class TestEmbedText:
     def test_returns_list_of_floats(self):
         mock_model = _make_mock_model()
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-        result = embeddings.embed_text("hello world")
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            result = embeddings.embed_text("hello world")
 
         assert isinstance(result, list)
         assert len(result) == 768
@@ -51,20 +50,16 @@ class TestEmbedText:
 
     def test_deterministic_same_input(self):
         mock_model = _make_mock_model()
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-
-        r1 = embeddings.embed_text("test phrase")
-        r2 = embeddings.embed_text("test phrase")
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            r1 = embeddings.embed_text("test phrase")
+            r2 = embeddings.embed_text("test phrase")
         assert r1 == r2
 
     def test_different_input_different_output(self):
         mock_model = _make_mock_model()
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-
-        r1 = embeddings.embed_text("concept one")
-        r2 = embeddings.embed_text("concept two")
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            r1 = embeddings.embed_text("concept one")
+            r2 = embeddings.embed_text("concept two")
         assert r1 != r2
 
 
@@ -75,22 +70,18 @@ class TestEmbedBatch:
 
     def test_batch_returns_correct_count(self):
         mock_model = _make_mock_model()
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-
         texts = ["a", "b", "c"]
-        result = embeddings.embed_batch(texts)
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            result = embeddings.embed_batch(texts)
         assert len(result) == 3
         assert all(len(v) == 768 for v in result)
 
     def test_batch_preserves_order(self):
         mock_model = _make_mock_model()
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-
         texts = ["first", "second"]
-        batch_result = embeddings.embed_batch(texts)
-        single_results = [embeddings.embed_text(t) for t in texts]
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            batch_result = embeddings.embed_batch(texts)
+            single_results = [embeddings.embed_text(t) for t in texts]
 
         assert batch_result[0] == single_results[0]
         assert batch_result[1] == single_results[1]
@@ -99,10 +90,8 @@ class TestEmbedBatch:
 class TestGetEmbeddingDim:
     def test_returns_model_dim(self):
         mock_model = _make_mock_model(dim=384)
-        embeddings._model = mock_model
-        embeddings._model_name = "test"
-
-        assert embeddings.get_embedding_dim() == 384
+        with patch.object(embeddings, "_get_model", return_value=mock_model):
+            assert embeddings.get_embedding_dim() == 384
 
 
 class TestReset:

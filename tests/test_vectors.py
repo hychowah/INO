@@ -162,20 +162,19 @@ class TestVectorCRUD:
         assert len(matching) == 0
 
     def test_find_nearest_concepts(self, vector_db):
-        """Find semantically similar concepts."""
+        """Find semantically similar concepts in descending similarity order."""
         import db.vectors as vectors
 
         with patch("services.embeddings.embed_text", side_effect=_fake_embed):
-            vectors.upsert_concept(1, "Machine Learning", "Algorithms that learn from data")
-            vectors.upsert_concept(2, "Deep Learning", "Neural networks with many layers")
-            vectors.upsert_concept(3, "Cooking Pasta", "How to cook Italian food")
+            vectors.upsert_concept(1, "Machine Learning", "algorithms data models")
+            vectors.upsert_concept(2, "Machine Learning Systems", "algorithms data pipelines")
+            vectors.upsert_concept(3, "Cooking Pasta", "kitchen recipe boiling sauce")
 
             neighbors = vectors.find_nearest_concepts(1, limit=5, score_threshold=0.0)
 
-        # Should return concept 2 and 3 (not concept 1 itself)
-        neighbor_ids = {n["id"] for n in neighbors}
-        assert 1 not in neighbor_ids  # self excluded
-        assert len(neighbors) >= 1
+        assert [neighbor["id"] for neighbor in neighbors[:2]] == [2, 3]
+        assert neighbors[0]["score"] > neighbors[1]["score"]
+        assert all(neighbor["id"] != 1 for neighbor in neighbors)
 
     def test_find_nearest_excludes_self(self, vector_db):
         """find_nearest_concepts never returns the queried concept."""
@@ -188,6 +187,24 @@ class TestVectorCRUD:
             neighbors = vectors.find_nearest_concepts(10, limit=10, score_threshold=0.0)
 
         assert all(n["id"] != 10 for n in neighbors)
+
+    def test_find_nearest_respects_exclude_ids(self, vector_db):
+        """Explicit exclude_ids should remove otherwise-nearest concepts from results."""
+        import db.vectors as vectors
+
+        with patch("services.embeddings.embed_text", side_effect=_fake_embed):
+            vectors.upsert_concept(1, "Graph Algorithms", "graphs shortest path")
+            vectors.upsert_concept(2, "Graph Search", "graphs traversal shortest")
+            vectors.upsert_concept(3, "Bread Baking", "flour yeast oven")
+
+            neighbors = vectors.find_nearest_concepts(
+                1,
+                limit=5,
+                score_threshold=0.0,
+                exclude_ids=[2],
+            )
+
+        assert [neighbor["id"] for neighbor in neighbors] == [3]
 
     def test_concept_similarity(self, vector_db):
         """Cosine similarity between two concepts."""
@@ -228,13 +245,13 @@ class TestReindex:
     """Test bulk reindex from SQLite."""
 
     def test_reindex_all(self, vector_db):
-        """reindex_all rebuilds both collections from SQLite data."""
+        """reindex_all rebuilds both collections and makes rows searchable again."""
         import db.vectors as vectors
 
         # Add some data to SQLite
-        db.add_concept("Concept A", "Desc A")
-        db.add_concept("Concept B", "Desc B")
-        db.add_topic("Topic A", "Desc TA")
+        concept_a = db.add_concept("Concept A", "shared alpha topic")
+        concept_b = db.add_concept("Concept B", None)
+        topic_a = db.add_topic("Topic A", "shared alpha topic")
 
         with (
             patch("services.embeddings.embed_text", side_effect=_fake_embed),
@@ -244,4 +261,15 @@ class TestReindex:
             result = vectors.reindex_all()
 
         assert result["concepts"] == 2
-        assert result["topics"] >= 1
+        assert result["topics"] == 1
+        assert vectors.get_collection_count(vectors.CONCEPTS_COLLECTION) == 2
+        assert vectors.get_collection_count(vectors.TOPICS_COLLECTION) == 1
+
+        concept_hits = vectors.search_similar_concepts("Concept A", limit=5, score_threshold=0.0)
+        topic_hits = vectors.search_similar_topics("Topic A", limit=5, score_threshold=0.0)
+
+        assert concept_hits[0]["id"] == concept_a
+        assert concept_hits[0]["title"] == "Concept A"
+        assert any(hit["id"] == concept_b for hit in concept_hits)
+        assert topic_hits[0]["id"] == topic_a
+        assert topic_hits[0]["title"] == "Topic A"

@@ -2,6 +2,8 @@
 Tests for topic hierarchy: cycle detection in link_topics, unlink_topics.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 import db
@@ -155,3 +157,37 @@ class TestAddTopicParentIds:
         topic_id = _make_topic("Standalone")
         parents = db.get_topic_parents(topic_id)
         assert len(parents) == 0
+
+
+# ============================================================================
+# Direct CRUD and search coverage
+# ============================================================================
+
+
+class TestTopicCrudAndSearch:
+    def test_topic_lifecycle_and_search(self, test_db):
+        with (
+            patch("db.topics._vector_upsert"),
+            patch("db.topics._vector_delete"),
+            patch("db.vectors.search_similar_topics", side_effect=RuntimeError("disabled")),
+        ):
+            topic_id = db.add_topic("Database Systems", "Storage engines and indexing")
+
+            created = db.get_topic(topic_id)
+            found = db.find_topic_by_title("database systems")
+            hits = db.search_topics("Storage")
+
+            assert created is not None
+            assert created["title"] == "Database Systems"
+            assert found is not None
+            assert found["id"] == topic_id
+            assert [hit["id"] for hit in hits] == [topic_id]
+
+            assert db.update_topic(topic_id, title="Data Systems", description="Indexes and storage")
+
+            updated = db.get_topic(topic_id)
+            assert updated["title"] == "Data Systems"
+            assert updated["description"] == "Indexes and storage"
+
+            assert db.delete_topic(topic_id) is True
+            assert db.get_topic(topic_id) is None

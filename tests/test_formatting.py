@@ -16,30 +16,20 @@ pytestmark = pytest.mark.unit
 
 
 class TestTruncateForDiscord:
-    def test_short_text_unchanged(self):
-        assert truncate_for_discord("hello") == "hello"
-
-    def test_exact_limit_unchanged(self):
-        text = "x" * DISCORD_CHAR_LIMIT
-        assert truncate_for_discord(text) == text
-
-    def test_over_limit_truncated(self):
-        text = "x" * (DISCORD_CHAR_LIMIT + 100)
-        result = truncate_for_discord(text)
-        assert len(result) == DISCORD_CHAR_LIMIT
-        assert result.endswith("…")
-
-    def test_none_returns_empty(self):
-        assert truncate_for_discord(None) == ""
-
-    def test_empty_string_returns_empty(self):
-        assert truncate_for_discord("") == ""
-
-    def test_custom_max_len(self):
-        result = truncate_for_discord("a" * 50, max_len=20)
-        assert len(result) == 20
-        assert result.endswith("…")
-        assert result == "a" * 19 + "…"
+    @pytest.mark.parametrize(
+        ("text", "max_len", "expected"),
+        [
+            ("hello", DISCORD_CHAR_LIMIT, "hello"),
+            ("x" * DISCORD_CHAR_LIMIT, DISCORD_CHAR_LIMIT, "x" * DISCORD_CHAR_LIMIT),
+            ("x" * (DISCORD_CHAR_LIMIT + 100), DISCORD_CHAR_LIMIT, "x" * (DISCORD_CHAR_LIMIT - 1) + "…"),
+            (None, DISCORD_CHAR_LIMIT, ""),
+            ("", DISCORD_CHAR_LIMIT, ""),
+            ("a" * 50, 20, "a" * 19 + "…"),
+        ],
+        ids=["short", "exact-limit", "over-limit", "none", "empty", "custom-limit"],
+    )
+    def test_cases(self, text, max_len, expected):
+        assert truncate_for_discord(text, max_len=max_len) == expected
 
 
 # ============================================================================
@@ -48,65 +38,63 @@ class TestTruncateForDiscord:
 
 
 class TestTruncateWithSuffix:
-    def test_within_limit_unchanged(self):
-        result = truncate_with_suffix("short original", "\n\n✅ ok")
-        assert result == "short original\n\n✅ ok"
+    @pytest.mark.parametrize(
+        ("original", "suffix", "max_len", "expected", "contains_ellipsis"),
+        [
+            ("short original", "\n\n✅ ok", DISCORD_CHAR_LIMIT, "short original\n\n✅ ok", False),
+            ("hi", "y" * 2500, DISCORD_CHAR_LIMIT, None, True),
+            ("hello", "s" * DISCORD_CHAR_LIMIT, DISCORD_CHAR_LIMIT, None, False),
+            (None, "\n\n✅ ok", DISCORD_CHAR_LIMIT, "\n\n✅ ok", False),
+            ("", "\n\n✅ ok", DISCORD_CHAR_LIMIT, "\n\n✅ ok", False),
+            ("abc", "def", 100, "abcdef", False),
+            ("a" * 50, "XYZ", 30, None, True),
+        ],
+        ids=[
+            "within-limit",
+            "huge-suffix",
+            "suffix-at-limit",
+            "none-original",
+            "empty-original",
+            "no-truncation",
+            "custom-limit",
+        ],
+    )
+    def test_table_driven_cases(self, original, suffix, max_len, expected, contains_ellipsis):
+        result = truncate_with_suffix(original, suffix, max_len=max_len)
 
-    def test_over_limit_truncates_original(self):
-        original = "x" * 1970
-        suffix = "\n\n✅ Concept 'Something Long' added under Topic."
+        if expected is not None:
+            assert result == expected
+        assert len(result) <= max_len
+        if contains_ellipsis:
+            assert "…" in result
+
+        if original == "":
+            assert not result.startswith("…")
+
+        if suffix:
+            if len(suffix) < max_len:
+                assert result.endswith(suffix)
+            else:
+                assert result.endswith("…")
+
+    @pytest.mark.parametrize(
+        ("original", "suffix", "contains_ellipsis"),
+        [
+            ("x" * 1970, "\n\n✅ Concept 'Something Long' added under Topic.", True),
+            ("x" * 1980, "\n\n✅ Done", False),
+            (
+                "x" * 1900,
+                "\n\n✅ Concept 'Chromium oxide passivation' added under Stainless Steel and Corrosion Engineering. First review tomorrow.",
+                True,
+            ),
+        ],
+        ids=["over-limit", "suffix-preserved", "realistic-add-concept"],
+    )
+    def test_suffix_preservation_cases(self, original, suffix, contains_ellipsis):
         result = truncate_with_suffix(original, suffix)
         assert len(result) <= DISCORD_CHAR_LIMIT
         assert result.endswith(suffix)
-        assert "…" in result
-
-    def test_suffix_preserved_exactly(self):
-        original = "x" * 1980
-        suffix = "\n\n✅ Done"
-        result = truncate_with_suffix(original, suffix)
-        assert result.endswith(suffix)
-        assert len(result) <= DISCORD_CHAR_LIMIT
-
-    def test_huge_suffix_alone(self):
-        """If suffix alone exceeds limit, truncate the suffix."""
-        result = truncate_with_suffix("hi", "y" * 2500)
-        assert len(result) <= DISCORD_CHAR_LIMIT
-        assert result.endswith("…")
-
-    def test_suffix_exactly_at_limit(self):
-        """Suffix exactly at limit — original must be dropped entirely."""
-        suffix = "s" * DISCORD_CHAR_LIMIT
-        result = truncate_with_suffix("hello", suffix)
-        assert len(result) <= DISCORD_CHAR_LIMIT
-
-    def test_none_original(self):
-        result = truncate_with_suffix(None, "\n\n✅ ok")
-        assert result == "\n\n✅ ok"
-
-    def test_empty_original(self):
-        """Empty original should not produce a leading ellipsis."""
-        result = truncate_with_suffix("", "\n\n✅ ok")
-        assert result == "\n\n✅ ok"
-        assert not result.startswith("…")
-
-    def test_no_truncation_needed(self):
-        result = truncate_with_suffix("abc", "def", max_len=100)
-        assert result == "abcdef"
-
-    def test_custom_max_len(self):
-        result = truncate_with_suffix("a" * 50, "XYZ", max_len=30)
-        assert len(result) <= 30
-        assert result.endswith("XYZ")
-        assert "…" in result
-
-    def test_realistic_add_concept_scenario(self):
-        """Simulate the actual crash scenario: 1900-char LLM answer + 120-char note."""
-        original = "x" * 1900
-        note = (
-            "\n\n\u2705 Concept 'Chromium oxide passivation' added under "
-            "Stainless Steel and Corrosion Engineering. First review tomorrow."
-        )
-        result = truncate_with_suffix(original, note)
-        assert len(result) <= DISCORD_CHAR_LIMIT
-        assert result.endswith(note)
-        assert "…" in result
+        if contains_ellipsis:
+            assert "…" in result
+        else:
+            assert "…" not in result

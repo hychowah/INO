@@ -69,72 +69,81 @@ class TestExtractJsonObjectBracesInStrings:
     """The core bug: braces inside JSON string values (C++, LaTeX, etc.)
     caused the old brace-counting approach to fail."""
 
-    def test_cpp_code_in_message(self):
-        """The exact trigger: C++ code with curly braces in the message field."""
-        obj = {
-            "action": "add_concept",
-            "params": {"title": "C++ Templates"},
-            "message": "Here is code: int f() { return 1; } done",
-        }
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-        assert result["action"] == "add_concept"
-        assert "{ return 1; }" in result["message"]
-
-    def test_multiple_cpp_blocks(self):
-        obj = {"action": "quiz", "message": "Compare: void a() { x++; } vs void b() { y--; }"}
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-        assert result["action"] == "quiz"
-
-    def test_latex_braces(self):
-        obj = {
-            "action": "add_concept",
-            "message": "The formula is \\frac{a}{b} + \\sum_{i=0}^{n} x_i",
-        }
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-        assert result["action"] == "add_concept"
-
-    def test_regex_braces(self):
-        obj = {"action": "quiz", "message": "What does [a-z]{3,5} match?"}
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-
-    def test_json_example_in_description(self):
-        """JSON with escaped quotes and braces nested inside a string value."""
-        obj = {
-            "action": "add_concept",
-            "params": {"description": 'Use format {"key": "value"} for config'},
-            "message": "Added concept.",
-        }
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-        assert result["message"] == "Added concept."
-
-    def test_python_dict_in_message(self):
-        obj = {"action": "quiz", "message": "What does {'a': 1, 'b': 2} represent?"}
-        text = json.dumps(obj)
-        result = _extract_json_object(text)
-        assert result is not None
-
-    def test_deeply_nested_code_blocks(self):
-        obj = {
-            "action": "add_concept",
-            "message": (
-                "```cpp\ntemplate<typename T>\nstruct Foo {\n    T bar() { return T{}; }\n};\n```"
+    @pytest.mark.parametrize(
+        ("obj", "fragment", "accessor"),
+        [
+            (
+                {
+                    "action": "add_concept",
+                    "params": {"title": "C++ Templates"},
+                    "message": "Here is code: int f() { return 1; } done",
+                },
+                "{ return 1; }",
+                lambda result: result["message"],
             ),
-        }
+            (
+                {
+                    "action": "quiz",
+                    "message": "Compare: void a() { x++; } vs void b() { y--; }",
+                },
+                "void b() { y--; }",
+                lambda result: result["message"],
+            ),
+            (
+                {
+                    "action": "add_concept",
+                    "message": "The formula is \\frac{a}{b} + \\sum_{i=0}^{n} x_i",
+                },
+                "\\frac{a}{b}",
+                lambda result: result["message"],
+            ),
+            (
+                {"action": "quiz", "message": "What does [a-z]{3,5} match?"},
+                "[a-z]{3,5}",
+                lambda result: result["message"],
+            ),
+            (
+                {
+                    "action": "add_concept",
+                    "params": {"description": 'Use format {"key": "value"} for config'},
+                    "message": "Added concept.",
+                },
+                '{"key": "value"}',
+                lambda result: result["params"]["description"],
+            ),
+            (
+                {"action": "quiz", "message": "What does {'a': 1, 'b': 2} represent?"},
+                "{'a': 1, 'b': 2}",
+                lambda result: result["message"],
+            ),
+            (
+                {
+                    "action": "add_concept",
+                    "message": (
+                        "```cpp\ntemplate<typename T>\nstruct Foo {\n    T bar() { return T{}; }\n};\n```"
+                    ),
+                },
+                "template<typename T>",
+                lambda result: result["message"],
+            ),
+        ],
+        ids=[
+            "cpp-code",
+            "multiple-cpp-blocks",
+            "latex",
+            "regex",
+            "json-example-in-description",
+            "python-dict",
+            "deeply-nested-code-blocks",
+        ],
+    )
+    def test_braces_in_string_values(self, obj, fragment, accessor):
         text = json.dumps(obj)
         result = _extract_json_object(text)
+
         assert result is not None
-        assert result["action"] == "add_concept"
-        assert "template<typename T>" in result["message"]
+        assert result["action"] == obj["action"]
+        assert fragment in accessor(result)
 
 
 # ============================================================================

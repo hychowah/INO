@@ -189,14 +189,14 @@ def add_relations_from_assess(
             else:
                 # Both under cap — insert
                 try:
-                    conn.execute(
+                    cursor = conn.execute(
                         "INSERT OR IGNORE INTO concept_relations "
                         "(concept_id_low, concept_id_high, relation_type, created_at) "
                         "VALUES (?, ?, ?, ?)",
                         (low, high, relation_type, _now_iso()),
                     )
                     # Check if it was actually a new insert (not a duplicate)
-                    if conn.total_changes:
+                    if cursor.rowcount > 0:
                         created += 1
                 except sqlite3.IntegrityError:
                     pass
