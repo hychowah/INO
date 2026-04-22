@@ -26,9 +26,17 @@ def test_main_without_args_uses_top_due_concept(monkeypatch):
     resolve_concept_id = Mock(return_value=42)
     show_context = Mock()
 
+    class _PersonaOverride:
+        def __enter__(self):
+            return "mentor"
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
     monkeypatch.setattr(quiz_script.db, "init_databases", init_databases)
     monkeypatch.setattr(quiz_script, "resolve_concept_id", resolve_concept_id)
     monkeypatch.setattr(quiz_script, "show_context", show_context)
+    monkeypatch.setattr(quiz_script, "with_persona_override", lambda _persona: _PersonaOverride())
     monkeypatch.setattr(sys, "argv", ["test_quiz_generator.py"])
 
     quiz_script.main()

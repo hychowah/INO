@@ -7,9 +7,9 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+import db.core as db_core
 from db.core import (
     CHAT_CLEANUP_DAYS,
-    CHAT_DB,
     CLEANUP_THROTTLE_SECONDS,
     MAX_CHAT_HISTORY,
     _now_iso,
@@ -18,6 +18,12 @@ from db.core import (
 
 # In-memory cleanup throttle
 _last_cleanup_time: float = 0.0
+# Optional per-module override retained for tests that patch db.chat.CHAT_DB.
+CHAT_DB = None
+
+
+def _chat_db_path():
+    return CHAT_DB or db_core.CHAT_DB
 
 
 # ============================================================================
@@ -30,7 +36,7 @@ def add_chat_message(
 ):
     """Add a message to chat history and trigger cleanup."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     conn.execute(
         (
             "INSERT INTO conversations "
@@ -49,7 +55,7 @@ def get_chat_history(
 ) -> List[Dict]:
     """Get recent chat history, oldest first."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
@@ -67,7 +73,7 @@ def get_chat_history(
 def clear_chat_history(session_id: str = "learn", *, user_id: Optional[str] = None):
     """Clear all chat history for a session."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     conn.execute(
         "DELETE FROM conversations WHERE session_id = ? AND user_id = ?", (session_id, uid)
     )
@@ -83,7 +89,7 @@ def clear_chat_history(session_id: str = "learn", *, user_id: Optional[str] = No
 def set_session(key: str, value: Optional[str], *, user_id: Optional[str] = None):
     """Set a session state key. Pass None to delete."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     if value is None:
         conn.execute("DELETE FROM session_state WHERE key = ? AND user_id = ?", (key, uid))
     else:
@@ -104,7 +110,7 @@ def set_session(key: str, value: Optional[str], *, user_id: Optional[str] = None
 def get_session(key: str, *, user_id: Optional[str] = None) -> Optional[str]:
     """Get a session state value, or None if not set."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     row = conn.execute(
         "SELECT value FROM session_state WHERE key = ? AND user_id = ?", (key, uid)
     ).fetchone()
@@ -115,7 +121,7 @@ def get_session(key: str, *, user_id: Optional[str] = None) -> Optional[str]:
 def get_session_updated_at(key: str, *, user_id: Optional[str] = None) -> Optional[str]:
     """Get the updated_at timestamp for a session state key, or None."""
     uid = user_id or _uid()
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     row = conn.execute(
         "SELECT updated_at FROM session_state WHERE key = ? AND user_id = ?", (key, uid)
     ).fetchone()
@@ -125,7 +131,7 @@ def get_session_updated_at(key: str, *, user_id: Optional[str] = None) -> Option
 
 def clear_session(*, user_id: Optional[str] = None):
     """Clear session state. If user_id is given, clear only that user's keys."""
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
     if user_id is None:
         conn.execute("DELETE FROM session_state")
     else:
@@ -143,7 +149,7 @@ def _cleanup_chat_history(session_id: str = "learn"):
         return
     _last_cleanup_time = now
 
-    conn = sqlite3.connect(CHAT_DB)
+    conn = sqlite3.connect(_chat_db_path())
 
     cutoff = (datetime.now() - timedelta(days=CHAT_CLEANUP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
