@@ -183,7 +183,11 @@ class TestTopicCrudAndSearch:
             assert found["id"] == topic_id
             assert [hit["id"] for hit in hits] == [topic_id]
 
-            assert db.update_topic(topic_id, title="Data Systems", description="Indexes and storage")
+            assert db.update_topic(
+                topic_id,
+                title="Data Systems",
+                description="Indexes and storage",
+            )
 
             updated = db.get_topic(topic_id)
             assert updated["title"] == "Data Systems"

@@ -4,7 +4,7 @@
 
 `scripts/taxonomy_shadow_rebuild.py` is the operator workflow for manually rebuilding the topic tree. It runs taxonomy mode against temporary shadow copies of the live databases and embedded vector store, records the replayable safe actions, and can then replay only those safe actions against live data after taking a fresh backup.
 
-This is intentionally different from the weekly scheduler run:
+This is intentionally different from the normal shared scheduler taxonomy run:
 
 - it is operator-triggered, not automatic
 - it uses an aggressive reconstruction directive by default

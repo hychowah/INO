@@ -11,9 +11,13 @@ Pending review tracking (DB-backed, survives restarts):
 """
 
 import asyncio
+import inspect
 import json
 import logging
+import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Awaitable, Callable
 
 import discord
 
@@ -31,6 +35,20 @@ logger = logging.getLogger("scheduler")
 # Module-level state set by start()
 _bot = None
 _authorized_user_id = None
+_review_task: asyncio.Task | None = None
+_shared_task: asyncio.Task | None = None
+_owner_pid = os.getpid()
+
+_TICK_SECONDS = 60
+_REVIEW_STARTUP_DELAY_SECONDS = 30
+_OWNER_STALE_SECONDS = _TICK_SECONDS * 3
+
+
+@dataclass(frozen=True)
+class _ScheduledJob:
+    name: str
+    interval_seconds: Callable[[], int]
+    runner: Callable[[], Awaitable[None] | None]
 
 
 # ============================================================================
@@ -485,69 +503,242 @@ async def _send_dedup_suggestions(proposal_id: int, groups: list[dict]):
         logger.error(f"Error sending dedup suggestions: {e}", exc_info=True)
 
 
-async def _loop():
-    """Main loop: check for reviews every N minutes, maintenance daily."""
+def _review_interval_seconds() -> int:
+    return max(60, int(config.REVIEW_CHECK_INTERVAL_MINUTES) * 60)
+
+
+def _backup_interval_seconds() -> int:
+    return max(3600, int(config.BACKUP_INTERVAL_HOURS) * 3600)
+
+
+def _maintenance_interval_seconds() -> int:
+    return max(3600, int(config.MAINTENANCE_INTERVAL_HOURS) * 3600)
+
+
+def _taxonomy_interval_seconds() -> int:
+    return max(3600, int(config.TAXONOMY_INTERVAL_HOURS) * 3600)
+
+
+def _dedup_interval_seconds() -> int:
+    return max(3600, int(config.DEDUP_INTERVAL_HOURS) * 3600)
+
+
+def _proposal_cleanup_interval_seconds() -> int:
+    return max(3600, int(config.PROPOSAL_CLEANUP_INTERVAL_HOURS) * 3600)
+
+
+async def _check_proposal_cleanup():
+    db.cleanup_expired_proposals()
+
+
+_REVIEW_JOB = _ScheduledJob("review_check", _review_interval_seconds, _check_reviews)
+_shared_jobs = []
+if config.MAINTENANCE_MODE_ENABLED:
+    _shared_jobs.append(
+        _ScheduledJob("maintenance", _maintenance_interval_seconds, _check_maintenance)
+    )
+_shared_jobs.append(_ScheduledJob("taxonomy", _taxonomy_interval_seconds, _check_taxonomy))
+if config.DEDUP_MODE_ENABLED:
+    _shared_jobs.append(_ScheduledJob("dedup", _dedup_interval_seconds, _check_dedup))
+_shared_jobs.extend(
+    [
+        _ScheduledJob("backup", _backup_interval_seconds, _check_backup),
+        _ScheduledJob(
+            "proposal_cleanup",
+            _proposal_cleanup_interval_seconds,
+            _check_proposal_cleanup,
+        ),
+    ]
+)
+_SHARED_JOBS = tuple(_shared_jobs)
+
+
+def _job_due(job: _ScheduledJob, now: datetime) -> bool:
+    if job.name == "backup":
+        latest_backup = backup_service.get_latest_backup_datetime()
+        if latest_backup is None:
+            return True
+        return now >= latest_backup + timedelta(seconds=job.interval_seconds())
+
+    state_row = db.get_scheduler_state(job.name)
+    if not state_row or not state_row.get("last_run_at"):
+        return True
+
+    last_run = db._parse_datetime(state_row["last_run_at"])
+    if last_run is None:
+        return True
+
+    return now >= last_run + timedelta(seconds=job.interval_seconds())
+
+
+async def _run_job(job: _ScheduledJob, now: datetime, *, owner_label: str | None = None) -> None:
+    now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
+    previous = db.get_scheduler_state(job.name) or {}
+    log_parts = [f"name={job.name}"]
+    if owner_label:
+        log_parts.append(f"owner={owner_label}")
+    logger.info("scheduler.job.start %s", " ".join(log_parts))
+
+    try:
+        result = job.runner()
+        if inspect.isawaitable(result):
+            await result
+        db.upsert_scheduler_state(
+            job.name,
+            last_run_at=now_iso,
+            last_success_at=now_iso,
+            last_error=None,
+        )
+        logger.info("scheduler.job.complete %s", " ".join(log_parts))
+    except Exception as exc:
+        db.upsert_scheduler_state(
+            job.name,
+            last_run_at=now_iso,
+            last_success_at=previous.get("last_success_at"),
+            last_error=str(exc),
+        )
+        logger.error(
+            "scheduler.job.error %s error=%s",
+            " ".join(log_parts),
+            exc,
+            exc_info=True,
+        )
+
+
+async def _run_due_jobs(
+    jobs: tuple[_ScheduledJob, ...],
+    now: datetime,
+    *,
+    owner_label: str,
+) -> None:
+    for job in jobs:
+        if not _job_due(job, now):
+            continue
+        await _run_job(job, now, owner_label=owner_label)
+
+
+async def _review_loop() -> None:
+    if _bot is None:
+        return
+
     await _bot.wait_until_ready()
-    interval = config.REVIEW_CHECK_INTERVAL_MINUTES
-    maint_interval = getattr(config, "MAINTENANCE_INTERVAL_HOURS", 24)
     logger.info(
-        f"Scheduler ready. Reviews every {interval}min, maintenance every {maint_interval}h."
+        "Scheduler review loop ready. Reviews every %smin.",
+        config.REVIEW_CHECK_INTERVAL_MINUTES,
     )
 
-    review_cycle = 0
-    maint_counter = 0  # counts review cycles; trigger maintenance when enough accumulate
-    maint_every_n_cycles = max(1, int((maint_interval * 60) / interval))
+    if _REVIEW_STARTUP_DELAY_SECONDS > 0:
+        await asyncio.sleep(_REVIEW_STARTUP_DELAY_SECONDS)
 
-    while not _bot.is_closed():
-        # Delay first cycle to avoid racing with commands typed at startup
-        if review_cycle == 0:
-            await asyncio.sleep(30)
-        review_cycle += 1
-        maint_counter += 1
-        logger.debug(f"Review cycle #{review_cycle}")
-        try:
-            await _check_reviews()
-        except Exception as e:
-            logger.error(f"Review loop error: {e}", exc_info=True)
-
-        if maint_counter >= maint_every_n_cycles:
-            maint_counter = 0
-            logger.info("[MAINTENANCE] Running scheduled maintenance check")
-            try:
-                await _check_maintenance()
-            except Exception as e:
-                logger.error(f"Maintenance loop error: {e}", exc_info=True)
-
-            # Taxonomy reorganization runs after maintenance on the same weekly schedule
-            try:
-                await _check_taxonomy()
-            except Exception as e:
-                logger.error(f"Taxonomy loop error: {e}", exc_info=True)
-
-            # Dedup runs after maintenance on the same schedule
-            try:
-                await _check_dedup()
-            except Exception as e:
-                logger.error(f"Dedup loop error: {e}", exc_info=True)
-
-            # Backup runs after dedup — captures post-maintenance DB state
-            try:
-                await _check_backup()
-            except Exception as e:
-                logger.error(f"Backup loop error: {e}", exc_info=True)
-
-            # Clean up expired proposals
-            try:
-                db.cleanup_expired_proposals()
-            except Exception as e:
-                logger.error(f"Proposal cleanup error: {e}", exc_info=True)
-
-        await asyncio.sleep(interval * 60)
+    try:
+        while not _bot.is_closed():
+            now = datetime.now()
+            if _job_due(_REVIEW_JOB, now):
+                await _run_job(_REVIEW_JOB, now, owner_label="bot")
+            await asyncio.sleep(_TICK_SECONDS)
+    except asyncio.CancelledError:
+        raise
 
 
-def start(bot, auth_user_id):
-    """Start the review-check background task."""
-    global _bot, _authorized_user_id
-    _bot = bot
-    _authorized_user_id = auth_user_id
-    return bot.loop.create_task(_loop())
+async def _shared_loop(owner_label: str) -> None:
+    owns_lock = False
+    logger.info(
+        (
+            "Scheduler shared loop online. owner=%s maintenance=%s "
+            "taxonomy=%sh dedup=%sh backup=%sh cleanup=%sh."
+        ),
+        owner_label,
+        (
+            f"{config.MAINTENANCE_INTERVAL_HOURS}h"
+            if config.MAINTENANCE_MODE_ENABLED
+            else "disabled"
+        ),
+        config.TAXONOMY_INTERVAL_HOURS,
+        f"{config.DEDUP_INTERVAL_HOURS}h" if config.DEDUP_MODE_ENABLED else "disabled",
+        config.BACKUP_INTERVAL_HOURS,
+        config.PROPOSAL_CLEANUP_INTERVAL_HOURS,
+    )
+
+    try:
+        while True:
+            now = datetime.now()
+            now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            if not owns_lock:
+                owns_lock = db.acquire_scheduler_owner(
+                    _owner_pid,
+                    owner_label,
+                    stale_seconds=_OWNER_STALE_SECONDS,
+                    now=now_iso,
+                )
+                if owns_lock:
+                    logger.info(
+                        "scheduler.owner.acquired pid=%s owner=%s",
+                        _owner_pid,
+                        owner_label,
+                    )
+                else:
+                    await asyncio.sleep(_TICK_SECONDS)
+                    continue
+            elif not db.heartbeat_scheduler_owner(_owner_pid, now=now_iso):
+                owns_lock = False
+                logger.warning(
+                    "scheduler.owner.lost pid=%s owner=%s",
+                    _owner_pid,
+                    owner_label,
+                )
+                await asyncio.sleep(_TICK_SECONDS)
+                continue
+
+            await _run_due_jobs(_SHARED_JOBS, now, owner_label=owner_label)
+            await asyncio.sleep(_TICK_SECONDS)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        if owns_lock:
+            db.release_scheduler_owner(_owner_pid)
+            logger.info(
+                "scheduler.owner.released pid=%s owner=%s",
+                _owner_pid,
+                owner_label,
+            )
+
+
+def start(bot=None, auth_user_id: int | None = None, *, owner_label: str = "bot"):
+    """Start bot review scheduling and the shared background scheduler.
+
+    Review checks stay bot-owned because they require Discord delivery.
+    Maintenance-style jobs use a DB-backed owner lock so either the bot or
+    API process can host them without double-running.
+    """
+    global _bot, _authorized_user_id, _review_task, _shared_task
+
+    loop = asyncio.get_running_loop()
+
+    if bot is not None and auth_user_id:
+        _bot = bot
+        _authorized_user_id = auth_user_id
+        if _review_task is None or _review_task.done():
+            _review_task = loop.create_task(_review_loop(), name="learn-review-scheduler")
+
+    if _shared_task is None or _shared_task.done():
+        _shared_task = loop.create_task(
+            _shared_loop(owner_label),
+            name=f"learn-shared-scheduler-{owner_label}",
+        )
+
+    return _shared_task
+
+
+def stop() -> None:
+    """Stop all scheduler tasks owned by this process."""
+    global _review_task, _shared_task
+
+    db.release_scheduler_owner(_owner_pid)
+
+    for task in (_review_task, _shared_task):
+        if task is not None and not task.done():
+            task.cancel()
+
+    _review_task = None
+    _shared_task = None

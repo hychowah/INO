@@ -72,7 +72,7 @@ ROOT
 │   │   ├── quiz.md        # Quiz/assess actions, scoring rubric, adaptive quiz evolution
 │   │   ├── knowledge.md   # Topic/concept CRUD, casual Q&A, overlap detection
 │   │   ├── maintenance.md # Maintenance mode behavioral rules
-│   │   ├── taxonomy.md    # Taxonomy reorganization instructions (`/reorganize`, weekly scheduler)
+│   │   ├── taxonomy.md    # Taxonomy reorganization instructions (`/reorganize`, shared scheduler)
 │   │   ├── preferences.md # Preference-edit instructions for `/preference` text mode
 │   │   └── quiz_generator.md # P1 scheduled-quiz question generator instructions
 │   ├── personas/          # Persona preset .md files (mentor, coach, buddy)
@@ -87,7 +87,7 @@ ROOT
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── llm.py             # LLM provider abstraction (OpenAI-compatible chat completions + reasoning provider)
-│   ├── scheduler.py       # Background review/maintenance scheduler (Discord only)
+│   ├── scheduler.py       # Background review scheduler + shared background jobs (bot or API host)
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
 │   ├── state.py           # Shared mutable state (avoids circular imports)
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata

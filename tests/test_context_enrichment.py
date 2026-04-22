@@ -120,8 +120,7 @@ class TestDueConceptRelations:
         with patch("services.llm.get_provider", return_value=MagicMock(spec=[])):
             ctx = build_lightweight_context("command")
             expected_line = (
-                f"  ↳ contrasts_with #{cid2} Concept B "
-                f'(score 0/100, "A and B are often confused")'
+                f'  ↳ contrasts_with #{cid2} Concept B (score 0/100, "A and B are often confused")'
             )
             assert "## Due for Review" in ctx
             assert f"- [concept:{cid1}] Concept A" in ctx
@@ -243,8 +242,8 @@ class TestActiveConceptDetail:
             patch("services.context._append_active_quiz_context"),
             patch("services.llm.get_provider", return_value=MagicMock(spec=[])),
         ):
-                ctx = build_lightweight_context("command")
-                assert "Active Concept Detail" not in ctx
+            ctx = build_lightweight_context("command")
+            assert "Active Concept Detail" not in ctx
 
 
 # ============================================================================

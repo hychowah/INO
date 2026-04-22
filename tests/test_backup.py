@@ -192,6 +192,45 @@ def test_prune_removes_old_keeps_new(env):
     assert recent2.exists(), "recent2 should NOT have been deleted"
 
 
+def test_prune_respects_fourteen_day_window(env):
+    """A 14-day retention window keeps 13-day backups and prunes 15-day ones."""
+    from services.backup import prune_old_backups
+
+    now = datetime.now()
+    backup_dir = env["backup_dir"]
+
+    old_dir = _timestamp_dir(backup_dir, now - timedelta(days=15))
+    kept_dir = _timestamp_dir(backup_dir, now - timedelta(days=13))
+    old_dir.mkdir()
+    kept_dir.mkdir()
+
+    with patch("services.backup.config.BACKUP_RETENTION_DAYS", 14):
+        pruned = prune_old_backups()
+
+    assert pruned == 1
+    assert not old_dir.exists()
+    assert kept_dir.exists()
+
+
+def test_get_latest_backup_datetime_returns_newest_valid_snapshot(env):
+    """Newest valid timestamped backup dir should drive scheduler timing."""
+    from services.backup import get_latest_backup_datetime
+
+    now = datetime.now()
+    backup_dir = env["backup_dir"]
+
+    older = _timestamp_dir(backup_dir, now - timedelta(days=2))
+    newer = backup_dir / (now - timedelta(hours=6)).strftime("%Y-%m-%d_%H-%M-%S_%f")
+    older.mkdir()
+    newer.mkdir()
+    (backup_dir / ".tmp_2026-04-22_10-00-00_000000").mkdir()
+    (backup_dir / "manual_backup").mkdir()
+
+    latest = get_latest_backup_datetime()
+
+    assert latest == datetime.strptime(newer.name, "%Y-%m-%d_%H-%M-%S_%f")
+
+
 # ---------------------------------------------------------------------------
 # test_prune_ignores_non_timestamp_dirs
 # ---------------------------------------------------------------------------

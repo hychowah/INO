@@ -73,6 +73,17 @@ class TestChat:
         }
 
     @pytest.mark.anyio
+    async def test_chat_maintain_reports_disabled_by_default(self, client):
+        resp = await client.post("/api/chat", json={"message": "/maintain"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Maintenance mode is currently disabled. Use /reorganize for taxonomy work.",
+            "pending_action": None,
+        }
+
+    @pytest.mark.anyio
     async def test_chat_clear_exposes_clear_history_flag(self, client):
         db.add_chat_message("user", "hello")
         db.add_chat_message("assistant", "hi")
@@ -371,7 +382,6 @@ class TestChat:
             {"label": "Review", "command": "/review"},
             {"label": "Due", "command": "/due"},
             {"label": "Topics", "command": "/topics"},
-            {"label": "Maintain", "command": "/maintain"},
             {"label": "Reorganize", "command": "/reorganize"},
             {"label": "Preference", "command": "/preference "},
         ]

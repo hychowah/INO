@@ -36,6 +36,7 @@
 23. [Process-Local Lock Hardening](#23-process-local-lock-hardening)
 24. [OpenAI Blocking-Import Fix](#24-openai-blocking-import-fix)
 25. [React Frontend & Dev Server URL Routing](#25-react-frontend--dev-server-url-routing)
+26. [Persisted Scheduler & Shared Owner Lock](#26-persisted-scheduler--shared-owner-lock)
 
 ---
 
@@ -458,6 +459,20 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 **Fix:** Changed to `datetime.now(timezone.utc).replace(tzinfo=None)` — a UTC-naive datetime matching SQLite's UTC output.
 
 **Rule:** SQLite `CURRENT_TIMESTAMP` and `datetime('now')` always return **UTC**. Any Python comparison against these columns must use `datetime.now(timezone.utc).replace(tzinfo=None)`, never bare `datetime.now()`. Other DB timestamps in this codebase are written by Python's `datetime.now()` (local) and compared locally — that is consistent. Only `session_state.updated_at` is written by SQLite directly.
+
+---
+
+## 26. Persisted Scheduler & Shared Owner Lock
+
+**Problem:** The original scheduler was an in-memory counter loop tied to `bot.py`. Weekly maintenance and backup only happened if the bot stayed up long enough without restarting, and `api.py` could not host automation at all.
+
+**Fix:** Replace the counter loop with persisted per-job wall-clock scheduling. `scheduler_state` stores `last_run_at`, `last_success_at`, and `last_error` for each scheduled job; `scheduler_owner` is a singleton heartbeat row that prevents shared jobs from double-running across `bot.py` and `api.py`.
+
+**Design decisions:**
+- Scheduled review DMs stay bot-owned because they require Discord delivery.
+- Maintenance, taxonomy, dedup, backup, and proposal cleanup run through the shared owner lock and can be hosted by either `bot.py` or `api.py`.
+- `scheduler.stop()` releases the owner row before cancelling tasks so FastAPI lifespan shutdown and Discord reconnects do not strand ownership.
+- Backup is no longer piggybacked on maintenance cadence; it runs independently on its own interval.
 
 **Affected file:** `services/context.py` (`_is_quiz_stale`).
 

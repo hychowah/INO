@@ -227,6 +227,13 @@ async def clear_command(ctx):
 @authorized_only()
 async def maintain_command(ctx):
     """Manually trigger maintenance diagnostics and dedup agent."""
+    if not config.MAINTENANCE_MODE_ENABLED:
+        await send_long(
+            ctx,
+            "🔧 Maintenance mode is currently disabled. Use `/reorganize` for taxonomy work.",
+        )
+        return
+
     from services.dedup import format_dedup_suggestions
     from services.views import DedupConfirmView, ProposedActionsView
 

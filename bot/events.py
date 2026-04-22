@@ -17,7 +17,7 @@ from bot.handler import (
     _pending_confirmations,
 )
 from bot.messages import send_long_with_view
-from services import scheduler, state
+from services import pipeline, scheduler, state
 from services.formatting import format_quiz_metadata, truncate_with_suffix
 from services.views import (
     AddConceptConfirmView,
@@ -31,6 +31,8 @@ logger = logging.getLogger("bot")
 
 @bot.event
 async def on_ready():
+    pipeline.init_databases()
+
     if not config.PREFERENCES_MD.exists() and config.PREFERENCES_TEMPLATE_MD.exists():
         shutil.copy(config.PREFERENCES_TEMPLATE_MD, config.PREFERENCES_MD)
         logger.info("Copied preferences.template.md → preferences.md")
@@ -49,8 +51,8 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync: {e}")
 
-    scheduler.start(bot, config.AUTHORIZED_USER_ID)
-    logger.info("[SCHEDULER] Review check started")
+    scheduler.start(bot, config.AUTHORIZED_USER_ID, owner_label="bot")
+    logger.info("[SCHEDULER] Review and shared background loops started")
 
     bot.loop.create_task(_heartbeat())
 
@@ -61,6 +63,12 @@ async def _heartbeat():
         await asyncio.sleep(300)
         latency_ms = round(bot.latency * 1000)
         logger.info(f"[HEARTBEAT] alive | latency={latency_ms}ms")
+
+
+@bot.event
+async def on_disconnect():
+    scheduler.stop()
+    logger.info("[SCHEDULER] Background loops stopped")
 
 
 @bot.event

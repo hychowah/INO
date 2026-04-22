@@ -87,8 +87,6 @@ from db.preferences import (
 from db.proposals import (
     cleanup_expired as cleanup_expired_proposals,
 )
-
-# Proposals (confirmation flows)
 from db.proposals import (
     delete_proposal,
     get_pending_proposal,
@@ -118,6 +116,17 @@ from db.reviews import (
     get_recent_reviews_all,
     get_remarks,
     get_review_stats,
+)
+
+# Proposals (confirmation flows)
+from db.scheduler_state import (
+    acquire_scheduler_owner,
+    get_scheduler_owner,
+    get_scheduler_state,
+    get_scheduler_states,
+    heartbeat_scheduler_owner,
+    release_scheduler_owner,
+    upsert_scheduler_state,
 )
 
 # Topics

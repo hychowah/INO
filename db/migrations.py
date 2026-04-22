@@ -341,5 +341,29 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 14: review_log quiz metadata columns")
 
+    # --- Migration 15: persisted scheduler state and owner lock tables ---
+    if current < 15:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS scheduler_state (
+                job_name TEXT PRIMARY KEY,
+                last_run_at DATETIME,
+                last_success_at DATETIME,
+                last_error TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduler_owner (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                owner_pid INTEGER NOT NULL,
+                owner_label TEXT NOT NULL,
+                heartbeat_at DATETIME NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 15: scheduler state and owner lock tables")
+
     _core._set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

@@ -1,12 +1,12 @@
 # Skill: Maintenance
 
-This skill is loaded only during daily maintenance runs.
+This skill is loaded only when maintenance is enabled and a scheduled maintenance run or manual `/maintain` request enters MAINTENANCE mode.
 
 ---
 
 ## MODE: MAINTENANCE
 
-Called by the scheduler (daily). You receive a diagnostic report listing DB health issues. Your job:
+Called only when maintenance is enabled, either by the shared scheduler (weekly by default, configurable) or by manual `/maintain`. You receive a diagnostic report listing DB health issues. Your job:
 1. **Triage** — which issues are real problems vs. acceptable?
 2. **Act** — fix what you can (up to 5 actions per maintenance run). Output one JSON action at a time — after each, you'll see the result and can output another action or a final REPLY: summary.
 3. **Report** — when done fixing, output `REPLY:` with a concise summary DM to the user about what was found/fixed, and what needs their input

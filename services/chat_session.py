@@ -513,6 +513,11 @@ async def _handle_preference_command(raw_text: str, args: str) -> dict:
 
 
 async def _handle_maintenance_command(raw_text: str) -> dict:
+    if not config.MAINTENANCE_MODE_ENABLED:
+        message = "Maintenance mode is currently disabled. Use /reorganize for taxonomy work."
+        _record_exchange(raw_text, message)
+        return _response(message)
+
     parts = []
     proposed_actions = []
     dedup_groups = None

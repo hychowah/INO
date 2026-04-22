@@ -57,8 +57,26 @@ COMMAND_TIMEOUT = 120
 # Review scheduler interval (minutes)
 REVIEW_CHECK_INTERVAL_MINUTES = 15
 
-# Maintenance scheduler interval (hours)
-MAINTENANCE_INTERVAL_HOURS = 168
+# Maintenance and background scheduler intervals (hours)
+MAINTENANCE_MODE_ENABLED = os.environ.get("LEARN_ENABLE_MAINTENANCE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+DEDUP_MODE_ENABLED = os.environ.get("LEARN_ENABLE_DEDUP", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+MAINTENANCE_INTERVAL_HOURS = max(1, int(os.environ.get("LEARN_MAINTENANCE_INTERVAL_HOURS", "168")))
+TAXONOMY_INTERVAL_HOURS = max(1, int(os.environ.get("LEARN_TAXONOMY_INTERVAL_HOURS", "168")))
+DEDUP_INTERVAL_HOURS = max(1, int(os.environ.get("LEARN_DEDUP_INTERVAL_HOURS", "168")))
+BACKUP_INTERVAL_HOURS = max(1, int(os.environ.get("LEARN_BACKUP_INTERVAL_HOURS", "24")))
+PROPOSAL_CLEANUP_INTERVAL_HOURS = max(
+    1, int(os.environ.get("LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS", "24"))
+)
 
 # Session timeout (minutes of inactivity before session auto-ends)
 SESSION_TIMEOUT_MINUTES = 15
@@ -90,7 +108,7 @@ SR_INTERVAL_EXPONENT = float(os.environ.get("LEARN_SR_INTERVAL_EXPONENT", "0.075
 BACKUP_DIR = Path(os.environ.get("LEARN_BACKUP_DIR", str(BASE_DIR / "backups")))
 
 # Number of daily backups to retain before pruning (minimum 1 enforced)
-BACKUP_RETENTION_DAYS = max(1, int(os.environ.get("LEARN_BACKUP_RETENTION_DAYS", "7")))
+BACKUP_RETENTION_DAYS = max(1, int(os.environ.get("LEARN_BACKUP_RETENTION_DAYS", "14")))
 
 # ============================================================================
 # VECTOR STORE SETTINGS (hybrid search)
@@ -186,5 +204,15 @@ def print_config():
         print(f"  Reasoning Model: {REASONING_LLM_MODEL}")
         print(f"  Reasoning URL  : {REASONING_LLM_BASE_URL}")
     print(f"  Review Interval: {REVIEW_CHECK_INTERVAL_MINUTES} min")
+    if MAINTENANCE_MODE_ENABLED:
+        print(f"  Maintenance    : {MAINTENANCE_INTERVAL_HOURS} h")
+    else:
+        print("  Maintenance    : disabled")
+    print(f"  Taxonomy       : {TAXONOMY_INTERVAL_HOURS} h")
+    if DEDUP_MODE_ENABLED:
+        print(f"  Dedup          : {DEDUP_INTERVAL_HOURS} h")
+    else:
+        print("  Dedup          : disabled")
+    print(f"  Backup         : {BACKUP_INTERVAL_HOURS} h")
     print(f"  Session Timeout: {SESSION_TIMEOUT_MINUTES} min")
     print(f"  API           : http://{API_HOST}:{API_PORT}")

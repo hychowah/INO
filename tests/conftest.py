@@ -14,7 +14,6 @@ import pytest
 
 from db import core
 
-
 _UNIT_TEST_MODULES = {
     "test_formatting.py",
     "test_forecast.py",

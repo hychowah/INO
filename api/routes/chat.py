@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+import config
 import db
 from api.auth import verify_token
 from api.schemas import ChatActionRequest, ChatRequest, ChatResponse, ConfirmRequest
@@ -35,7 +36,11 @@ async def chat_bootstrap():
             {"label": "Review", "command": "/review"},
             {"label": "Due", "command": "/due"},
             {"label": "Topics", "command": "/topics"},
-            {"label": "Maintain", "command": "/maintain"},
+            *(
+                [{"label": "Maintain", "command": "/maintain"}]
+                if config.MAINTENANCE_MODE_ENABLED
+                else []
+            ),
             {"label": "Reorganize", "command": "/reorganize"},
             {"label": "Preference", "command": "/preference "},
         ],

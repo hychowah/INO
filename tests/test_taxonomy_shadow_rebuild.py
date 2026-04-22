@@ -256,3 +256,52 @@ def test_replay_action_journal_aborts_on_created_topic_id_mismatch():
                 get_created_topic_id=lambda: 8,
             )
         )
+
+
+def test_run_child_returns_130_and_terminates_on_keyboard_interrupt(monkeypatch):
+    events = []
+
+    class _FakeProcess:
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
+            if timeout is None:
+                raise KeyboardInterrupt()
+            return 130
+
+        def terminate(self):
+            events.append(("terminate", None))
+
+        def kill(self):
+            events.append(("kill", None))
+
+    monkeypatch.setattr(rebuild.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())
+
+    rc = rebuild._run_child(["--phase", "preview-internal"], env={})
+
+    assert rc == 130
+    assert events == [("wait", None), ("terminate", None), ("wait", 5)]
+
+
+def test_main_preview_internal_returns_130_on_keyboard_interrupt(monkeypatch, capsys):
+    monkeypatch.setattr(rebuild, "_configure_stdio", lambda: None)
+    monkeypatch.setattr(
+        rebuild.argparse.ArgumentParser,
+        "parse_args",
+        lambda self: type(
+            "Args",
+            (),
+            {"phase": "preview-internal", "result_file": "preview.json", "preview_file": None},
+        )(),
+    )
+
+    def _fake_asyncio_run(coro):
+        coro.close()
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(rebuild.asyncio, "run", _fake_asyncio_run)
+
+    rc = rebuild.main()
+    out = capsys.readouterr().out
+
+    assert rc == 130
+    assert "[preview] cancelled by user." in out

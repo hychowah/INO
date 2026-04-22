@@ -19,13 +19,15 @@ Current shipped behavior is still single-user at the interface layer. Internally
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
-| `/maintain` | Run the automated knowledge-base maintenance agent. |
-| `/reorganize` | Manually trigger the weekly taxonomy reorganization agent. |
+| `/maintain` | Run the maintenance agent when `LEARN_ENABLE_MAINTENANCE=1`; otherwise returns a disabled message. |
+| `/reorganize` | Manually trigger the taxonomy reorganization agent. |
 | `/preference [text]` | Show the current runtime `preferences.md` when omitted, or propose an LLM-generated edit with Apply/Reject buttons when `text` describes a change. |
 | `/backup` | Create an on-demand backup of all databases and the vector store. |
 | `/clear` | Clear the current channel's chat history. |
 | `/ping` | Check that the bot is alive. |
 | `/sync` | (Admin) Sync slash commands with Discord. |
+
+The command remains registered so operators can re-enable maintenance without redeploying, but the shipped default is `LEARN_ENABLE_MAINTENANCE=0`.
 
 ### Message Handler
 
@@ -251,6 +253,13 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
 | `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.075`); `interval_days = e^(score × exponent)` |
+| `LEARN_ENABLE_MAINTENANCE` | Enable scheduled maintenance runs and allow `/maintain` (default: `0`) |
+| `LEARN_ENABLE_DEDUP` | Enable scheduled dedup proposal scans (default: `0`) |
+| `LEARN_MAINTENANCE_INTERVAL_HOURS` | Maintenance cadence when enabled (default: `168`) |
+| `LEARN_TAXONOMY_INTERVAL_HOURS` | Taxonomy cadence for the shared scheduler (default: `168`) |
+| `LEARN_DEDUP_INTERVAL_HOURS` | Dedup cadence when enabled (default: `168`) |
+| `LEARN_BACKUP_INTERVAL_HOURS` | Automatic backup cadence (default: `24`) |
+| `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` | Expired proposal cleanup cadence (default: `24`) |
 | `LEARN_BACKUP_DIR` | Directory for backup snapshots (default: `backups/` inside project root) |
-| `LEARN_BACKUP_RETENTION_DAYS` | Number of days of backup snapshots to retain before pruning (default: `7`, minimum: `1`) |
+| `LEARN_BACKUP_RETENTION_DAYS` | Number of days of backup snapshots to retain before pruning (default: `14`, minimum: `1`) |
 | `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |

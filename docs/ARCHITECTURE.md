@@ -134,8 +134,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral isolated LLM session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
-| `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `run_backup_cycle` |
-| `services/scheduler.py` | ~520 | Background task — review checks every 15 min, maintenance/taxonomy/dedup/backup every 168 h (weekly) |
+| `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
+| `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned reviews every 15 min plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
 | `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, `last_activity_at`, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
@@ -271,10 +271,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          → Discord reply to user
 ```
 
-### Flow 2: Scheduled review check (every 15 minutes)
+### Flow 2: Scheduled review check (every 15 minutes, bot-owned)
 
 ```
-  scheduler._loop()
+  scheduler._review_loop()
          │
          ▼ (every REVIEW_CHECK_INTERVAL_MINUTES)
   pipeline.handle_review_check()               ← sync, direct DB
@@ -313,12 +313,12 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   DM user: "📚 Learning Review\n<quiz question>"
 ```
 
-### Flow 3: Scheduled maintenance & taxonomy (every 168 hours / weekly)
+### Flow 3: Shared maintenance jobs (persisted wall-clock cadence)
 
 ```
-  scheduler._loop()
-         │
-         ▼ (every MAINTENANCE_INTERVAL_HOURS)
+    scheduler._shared_loop()
+      │
+      ▼ (owner lock acquired in either bot.py or api.py)
   pipeline.handle_maintenance()                ← sync, direct DB
          │
          ├── context.build_maintenance_context()
@@ -341,8 +341,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          └── DM user: "🔧 Knowledge Base Maintenance\n<report>"
 ```
 
+Maintenance runs only when `LEARN_ENABLE_MAINTENANCE=1`.
+
 ```
-  (same weekly cycle, after maintenance)
+  (same scheduler, independent taxonomy cadence)
          │
          ▼
   scheduler._check_taxonomy()         ← taxonomy reorganization agent
@@ -357,13 +359,15 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
                     │
                     └── DM user: "🌿 Taxonomy Reorganization\n<proposals>"
 
-  (same weekly cycle, after taxonomy)
+  (same scheduler, independent dedup cadence)
          │
          ▼
   scheduler._check_dedup()           ← dedup sub-agent; proposes merges via DM
 
+Dedup runs only when `LEARN_ENABLE_DEDUP=1`.
+
          │
-         ▼ (after dedup — captures post-maintenance DB state)
+         ▼ (independent backup cadence)
   scheduler._check_backup()
          │
          └── backup_service.run_backup_cycle()   ← in thread executor
@@ -375,7 +379,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
 
          │
          ▼
-  db.cleanup_expired_proposals()
+  db.cleanup_expired_proposals()               ← default every 24h
 ```
 
 ### Flow 4: Browser UI (FastAPI + React)
@@ -528,7 +532,7 @@ Current runtime behavior is still single-user because the Discord bot, REST API,
 
 ### bot.py + bot/ — Discord Interface
 - `bot.py` is a thin startup wrapper that loads env/config and launches the shared bot instance from `bot.app`
-- `bot/commands.py` registers the active hybrid commands: `/learn`, `/review`, `/due`, `/topics`, `/persona`, `/maintain`, `/reorganize`, `/preference`, `/backup`, `/clear`, `/ping`, and `/sync`
+- `bot/commands.py` registers the active hybrid commands: `/learn`, `/review`, `/due`, `/topics`, `/persona`, `/maintain`, `/reorganize`, `/preference`, `/backup`, `/clear`, `/ping`, and `/sync` (`/maintain` returns a disabled message unless `LEARN_ENABLE_MAINTENANCE=1`)
 - `bot/auth.py` provides the `@authorized_only()` decorator used to gate commands to the configured Discord user
 - Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
 - `bot/events.py` routes authorized plain messages through the learning pipeline, tracks `last_activity_at`, copies the runtime preferences file on startup if needed, and starts the scheduler on `on_ready`
@@ -598,17 +602,19 @@ The core brain of the system. Coordinates everything:
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
 - `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, `last_activity_at`, and the ContextVar-backed current-user identity
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
-- `services/scheduler.py` uses the non-blocking helper so review, maintenance, taxonomy, and dedup checks skip a cycle when the pipeline is busy rather than interleave with active chat work
+- `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the pipeline is busy rather than interleave with active chat work
 - `services/chat_actions.py` centralizes confirmation whitelists and history-entry formatting for the FastAPI browser/API chat surfaces
 
 ### services/scheduler.py — Background Tasks
-- Starts as a `bot.loop.create_task` on bot ready
+- Starts from both `bot.py` and `api.py`; review delivery remains bot-owned while shared jobs coordinate through a DB-backed owner heartbeat row
 - Review check: every 15 minutes (configurable), calls `pipeline.handle_review_check()` → sends quiz DMs
 - **Suppresses reviews** when user has been active within `SESSION_TIMEOUT_MINUTES` to avoid interrupting conversations
-- Review, maintenance, taxonomy, and dedup checks now skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
-- Maintenance: every 168 hours (weekly), calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
-- Taxonomy: every 168 hours (same weekly cycle, after maintenance), calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM
-- Backup: every 168 hours (same weekly cycle, after dedup), calls `backup_service.run_backup_cycle()` via thread executor — runs after dedup, before proposal cleanup
+- Review and any enabled shared jobs skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
+- Maintenance: optional, every `LEARN_MAINTENANCE_INTERVAL_HOURS` when `LEARN_ENABLE_MAINTENANCE=1`; calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
+- Taxonomy: every `LEARN_TAXONOMY_INTERVAL_HOURS`, calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM
+- Dedup: optional, every `LEARN_DEDUP_INTERVAL_HOURS` when `LEARN_ENABLE_DEDUP=1`; proposes merges via DM
+- Backup: every `LEARN_BACKUP_INTERVAL_HOURS` (24h default), calls `backup_service.run_backup_cycle()` via thread executor; due-checks use the newest timestamped backup directory on disk rather than scheduler DB state
+- Proposal cleanup: every `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` (24h default)
 
 ### agent.py — CLI (not used by bot)
 - Standalone entry point for testing: `python agent.py --mode=command --input="quiz me"`
@@ -814,7 +820,7 @@ backups/
     └── vectors/            # shutil.copytree of data/vectors/ (Qdrant client closed first)
 ```
 
-Directories older than `BACKUP_RETENTION_DAYS` (default: 7) are pruned automatically
+Directories older than `BACKUP_RETENTION_DAYS` (default: 14) are pruned automatically
 after each run. The `backups/` directory is `.gitignore`d and never committed.
 
 On Windows, the final temp-dir → timestamped-dir promotion now retries when sync/indexing tools
@@ -832,7 +838,13 @@ backup model without requiring administrator privileges.
 | LLM provider | `"openai_compat"` | config.py |
 | LLM timeout | 120 seconds | config.py |
 | Review check interval | 15 minutes | config.py |
-| Maintenance interval | 168 hours (weekly) | config.py |
+| Maintenance enabled | `0` (disabled) | `LEARN_ENABLE_MAINTENANCE` / config.py |
+| Dedup enabled | `0` (disabled) | `LEARN_ENABLE_DEDUP` / config.py |
+| Maintenance interval | 168 hours (when enabled) | `LEARN_MAINTENANCE_INTERVAL_HOURS` / config.py |
+| Taxonomy interval | 168 hours | `LEARN_TAXONOMY_INTERVAL_HOURS` / config.py |
+| Dedup interval | 168 hours (when enabled) | `LEARN_DEDUP_INTERVAL_HOURS` / config.py |
+| Backup interval | 24 hours | `LEARN_BACKUP_INTERVAL_HOURS` / config.py |
+| Proposal cleanup interval | 24 hours | `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` / config.py |
 | Max fetch iterations | 3 | pipeline.py |
 | Chat history in context | 12 messages | context.py |
 | Max Discord message | 1900 chars | config.py |
@@ -846,4 +858,4 @@ backup model without requiring administrator privileges.
 | Dedup similarity threshold | 0.92 | `LEARN_SIM_DEDUP` / config.py |
 | Relation similarity threshold | 0.50 | `LEARN_SIM_RELATION` / config.py |
 | Backup directory | `backups/` (repo root) | `LEARN_BACKUP_DIR` / config.py |
-| Backup retention | 7 days | `LEARN_BACKUP_RETENTION_DAYS` / config.py |
+| Backup retention | 14 days | `LEARN_BACKUP_RETENTION_DAYS` / config.py |

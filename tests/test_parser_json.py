@@ -120,7 +120,12 @@ class TestExtractJsonObjectBracesInStrings:
                 {
                     "action": "add_concept",
                     "message": (
-                        "```cpp\ntemplate<typename T>\nstruct Foo {\n    T bar() { return T{}; }\n};\n```"
+                        "```cpp\n"
+                        "template<typename T>\n"
+                        "struct Foo {\n"
+                        "    T bar() { return T{}; }\n"
+                        "};\n"
+                        "```"
                     ),
                 },
                 "template<typename T>",

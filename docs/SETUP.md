@@ -291,7 +291,7 @@ INO/
 | `/due` | List concepts currently due for review. |
 | `/topics` | Show the current topic hierarchy and knowledge map. |
 | `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |
-| `/maintain` | Run manual maintenance diagnostics and cleanup suggestions. |
+| `/maintain` | Run manual maintenance diagnostics when `LEARN_ENABLE_MAINTENANCE=1`; otherwise it reports that maintenance is disabled. |
 | `/reorganize` | Run the taxonomy reorganization pass and review any proposed structural changes. |
 | `/preference [text]` | Show the current runtime `preferences.md`, or propose an LLM-generated edit with Apply/Reject buttons. |
 | `/backup` | Run an on-demand backup of all databases and the vector store. |

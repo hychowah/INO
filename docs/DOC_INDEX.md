@@ -31,7 +31,7 @@ Do not edit these casually — every word affects bot behaviour.
 | `data/skills/quiz.md` | Quiz/assess actions, scoring rubric, adaptive quiz evolution | Interactive + review modes |
 | `data/skills/knowledge.md` | Topic/concept CRUD, casual Q&A, overlap detection | Interactive + maintenance modes |
 | `data/skills/maintenance.md` | Maintenance mode behavioural rules, triage priorities | Maintenance mode only |
-| `data/skills/taxonomy.md` | Taxonomy reorganisation rules — topic tree restructuring, grouping, suppressed renames | Taxonomy mode only (`/reorganize`, weekly scheduler) |
+| `data/skills/taxonomy.md` | Taxonomy reorganisation rules — topic tree restructuring, grouping, suppressed renames | Taxonomy mode only (`/reorganize`, shared scheduler) |
 | `data/skills/preferences.md` | Preference editor — fenced-output format, apply-only instruction set | `preference-edit` mode only (`/preference <text>`) |
 | `data/skills/quiz_generator.md` | P1 question generation — question types, difficulty, JSON output format | Scheduled quiz P1 only (reasoning model) |
 | `data/preferences.md` | Runtime user preferences (git-ignored, auto-copied from template on first startup) | Every LLM call |

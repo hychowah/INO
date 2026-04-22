@@ -31,8 +31,8 @@ async def test_add_concept_via_execute_llm_response_creates_concept_and_logs(tes
     llm_response = (
         '{"action": "add_concept", "params": '
         '{"title": "B-Tree", "description": "Balanced index", "topic_ids": ['
-        f"{topic_id}" 
-        ']}}'
+        f"{topic_id}"
+        "]}}"
     )
 
     with (

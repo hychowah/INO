@@ -21,7 +21,11 @@ class TestTruncateForDiscord:
         [
             ("hello", DISCORD_CHAR_LIMIT, "hello"),
             ("x" * DISCORD_CHAR_LIMIT, DISCORD_CHAR_LIMIT, "x" * DISCORD_CHAR_LIMIT),
-            ("x" * (DISCORD_CHAR_LIMIT + 100), DISCORD_CHAR_LIMIT, "x" * (DISCORD_CHAR_LIMIT - 1) + "…"),
+            (
+                "x" * (DISCORD_CHAR_LIMIT + 100),
+                DISCORD_CHAR_LIMIT,
+                "x" * (DISCORD_CHAR_LIMIT - 1) + "…",
+            ),
             (None, DISCORD_CHAR_LIMIT, ""),
             ("", DISCORD_CHAR_LIMIT, ""),
             ("a" * 50, 20, "a" * 19 + "…"),
@@ -84,7 +88,10 @@ class TestTruncateWithSuffix:
             ("x" * 1980, "\n\n✅ Done", False),
             (
                 "x" * 1900,
-                "\n\n✅ Concept 'Chromium oxide passivation' added under Stainless Steel and Corrosion Engineering. First review tomorrow.",
+                (
+                    "\n\n✅ Concept 'Chromium oxide passivation' added under "
+                    "Stainless Steel and Corrosion Engineering. First review tomorrow."
+                ),
                 True,
             ),
         ],

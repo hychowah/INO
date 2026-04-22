@@ -27,7 +27,10 @@ def test_format_fetch_result_topic_payload_includes_hierarchy_and_concepts(test_
     assert "Parents: ['Computer Science']" in rendered
     assert "Children: ['Indexing']" in rendered
     assert "Concepts (1):" in rendered
-    assert "  - [concept:8] B-Tree (score 55/100, next: 2026-04-16 09:00:00 | Solid on branching factor)" in rendered
+    assert (
+        "  - [concept:8] B-Tree (score 55/100, next: 2026-04-16 09:00:00 | "
+        "Solid on branching factor)"
+    ) in rendered
 
 
 def test_build_maintenance_context_renders_detected_issue_sections(test_db):

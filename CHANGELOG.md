@@ -15,6 +15,9 @@ Key changes, newest first.
 
 ### Changed
 
+- **Persisted shared scheduler** — review delivery stays bot-owned, while taxonomy, backup, proposal cleanup, and optional maintenance/dedup jobs now run on independent wall-clock cadences coordinated through a DB-backed owner lock shared by `bot.py` and `api.py`
+- **Background feature defaults** — maintenance and dedup are now disabled by default behind `LEARN_ENABLE_MAINTENANCE=0` and `LEARN_ENABLE_DEDUP=0`; `/maintain` remains available as a gated operator command when re-enabled
+- **Automatic backup cadence** — backups now run independently every 24 hours by default, use the newest valid backup directory on disk as the due-check source of truth, and retain 14 days of snapshots by default
 - **CI and test-suite maintenance** — `.github/workflows/tests.yml` now performs a `pytest --collect-only tests/` guard before the Python matrix run; docs and test inventory were refreshed to match the current split API/page/tool/quiz test layout and the manual `scripts/maintenance_smoke.py` path
 - **FastAPI SPA serving** — the backend no longer serves only an explicit allowlist of page routes; it now serves the built SPA for HTML requests outside the reserved prefixes `/api`, `/assets`, and `/static`
 - **Vite dev behavior** — the frontend dev server now proxies only `/api`, `/assets`, and `/static`; client-side browser routes stay inside the SPA
@@ -27,7 +30,7 @@ Key changes, newest first.
 ### Added
 
 - **Taxonomy shadow rebuild** (`scripts/taxonomy_shadow_rebuild.py`, `docs/TAXONOMY_REBUILD.md`) — operator workflow that previews taxonomy changes against shadow copies of the live DBs/vector store, records replayable safe actions, writes before/after structure snapshots, and replays safe actions against live data after a backup; driven by `call_taxonomy_loop()` with `max_actions`, `action_journal`, and `operator_directive` hooks
-- **Backup service** (`services/backup.py`, `/backup` slash command) — snapshots `knowledge.db`, `chat_history.db`, and `data/vectors/` into a timestamped directory; prunes snapshots older than `LEARN_BACKUP_RETENTION_DAYS` (default: 7); runs on every weekly maintenance cycle; on-demand via `/backup`
+- **Backup service** (`services/backup.py`, `/backup` slash command) — snapshots `knowledge.db`, `chat_history.db`, and `data/vectors/` into a timestamped directory; prunes snapshots older than `LEARN_BACKUP_RETENTION_DAYS` (default: 14); runs on its own scheduler cadence; on-demand via `/backup`
 - **`/preference` command** with LLM-driven editing (`data/skills/preferences.md`, `SKILL_SETS["preference-edit"]`) — no-arg mode displays runtime `data/preferences.md`; text mode routes through an isolated LLM edit flow and shows Apply/Reject buttons (`PreferenceUpdateView`) before writing
 - **`/reorganize` command** — manually triggers the taxonomy reorganization agent for the authorized user; also runs weekly via scheduler
 - **`data/skills/taxonomy.md`** and `SKILL_SETS["taxonomy"]` — LLM skill file for the taxonomy reorganization agent; covers topic tree restructuring, grouping rules, and suppressed-rename handling

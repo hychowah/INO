@@ -47,7 +47,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 # ============================================================================
@@ -172,6 +172,22 @@ def _init_knowledge_db():
             display_name TEXT,
             discord_id TEXT UNIQUE,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS scheduler_state (
+            job_name TEXT PRIMARY KEY,
+            last_run_at DATETIME,
+            last_success_at DATETIME,
+            last_error TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS scheduler_owner (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            owner_pid INTEGER NOT NULL,
+            owner_label TEXT NOT NULL,
+            heartbeat_at DATETIME NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     """)
     # Ensure the default user exists for single-user / backward-compat operation

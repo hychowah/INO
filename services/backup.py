@@ -37,6 +37,21 @@ SQLITE_TARGETS: list[tuple[Path, str]] = [
 # ---------------------------------------------------------------------------
 
 
+def _parse_backup_dir_datetime(entry_name: str) -> datetime | None:
+    """Parse a backup directory name into a datetime.
+
+    Supports both legacy ``YYYY-MM-DD_HH-MM-SS`` and current
+    ``YYYY-MM-DD_HH-MM-SS_ffffff`` names. Returns ``None`` for anything that
+    is not a valid backup snapshot directory.
+    """
+    try:
+        if entry_name.count("_") == 2:
+            return datetime.strptime(entry_name, "%Y-%m-%d_%H-%M-%S_%f")
+        return datetime.strptime(entry_name, "%Y-%m-%d_%H-%M-%S")
+    except ValueError:
+        return None
+
+
 def _backup_sqlite(src_path: Path, dest_path: Path) -> None:
     """Copy a SQLite database using the safe online-backup API.
 
@@ -165,11 +180,8 @@ def prune_old_backups() -> int:
     for entry in config.BACKUP_DIR.iterdir():
         if not entry.is_dir():
             continue
-        try:
-            # Support both YYYY-MM-DD_HH-MM-SS (old) and YYYY-MM-DD_HH-MM-SS_ffffff (new)
-            name = entry.name.rsplit("_", 1)[0] if entry.name.count("_") == 2 else entry.name
-            entry_dt = datetime.strptime(name, "%Y-%m-%d_%H-%M-%S")
-        except ValueError:
+        entry_dt = _parse_backup_dir_datetime(entry.name)
+        if entry_dt is None:
             logger.warning(f"[BACKUP] Skipping non-timestamp entry during prune: {entry.name}")
             continue
 
@@ -182,6 +194,26 @@ def prune_old_backups() -> int:
                 logger.error(f"[BACKUP] Failed to delete {entry}: {e}")
 
     return pruned
+
+
+def get_latest_backup_datetime() -> datetime | None:
+    """Return the newest valid backup snapshot timestamp on disk."""
+    if not config.BACKUP_DIR.exists():
+        return None
+
+    latest: datetime | None = None
+    for entry in config.BACKUP_DIR.iterdir():
+        if not entry.is_dir() or entry.name.startswith(".tmp_"):
+            continue
+
+        entry_dt = _parse_backup_dir_datetime(entry.name)
+        if entry_dt is None:
+            continue
+
+        if latest is None or entry_dt > latest:
+            latest = entry_dt
+
+    return latest
 
 
 def run_backup_cycle() -> str:

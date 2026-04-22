@@ -439,8 +439,27 @@ async def _apply_internal(args: argparse.Namespace) -> int:
 
 def _run_child(args: list[str], env: dict[str, str]) -> int:
     cmd = [sys.executable, str(SCRIPT_PATH), *args]
-    completed = subprocess.run(cmd, cwd=str(ROOT), env=env, check=False)
-    return completed.returncode
+    process = subprocess.Popen(cmd, cwd=str(ROOT), env=env)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        print("\n[cancelled] Interrupted while waiting for taxonomy child process.")
+        try:
+            process.terminate()
+        except Exception:
+            pass
+        try:
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                pass
+        return 130
 
 
 def _print_preview(payload: dict[str, Any]) -> None:
@@ -638,14 +657,26 @@ def main() -> int:
     if args.phase == "preview-internal":
         if not args.result_file:
             parser.error("--result-file is required for preview-internal")
-        return asyncio.run(_preview_internal(args))
+        try:
+            return asyncio.run(_preview_internal(args))
+        except KeyboardInterrupt:
+            print("\n[preview] cancelled by user.")
+            return 130
 
     if args.phase == "apply-internal":
         if not args.preview_file:
             parser.error("--preview-file is required for apply-internal")
-        return asyncio.run(_apply_internal(args))
+        try:
+            return asyncio.run(_apply_internal(args))
+        except KeyboardInterrupt:
+            print("\n[apply] cancelled by user.")
+            return 130
 
-    return _orchestrate(args)
+    try:
+        return _orchestrate(args)
+    except KeyboardInterrupt:
+        print("\n[cancelled] Taxonomy shadow rebuild aborted by user.")
+        return 130
 
 
 if __name__ == "__main__":

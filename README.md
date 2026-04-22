@@ -16,8 +16,8 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Multiple interfaces** — Discord bot, FastAPI REST API, and the FastAPI-served React browser UI share the same learning pipeline and data stores
 - **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
 - **Desktop-first browser shell** — FastAPI serves a React SPA organized around Dashboard, Chat, Knowledge, and Progress, with an Activity drawer, compatibility routes, a shell command palette, and resizable Knowledge detail panels
-- **Automated maintenance** — Background agent for DB health triage, duplicate detection, and knowledge base cleanup
-- **Automated data backup** — Scheduled weekly snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
+- **Background automation** — Persisted scheduler for review delivery, taxonomy cleanup, backups, proposal cleanup, and optional maintenance/dedup jobs
+- **Automated data backup** — Independent daily snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
 - **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
 - **Configurable personas** — Buddy / Coach / Mentor presets loaded from Markdown files
 - **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
@@ -128,6 +128,7 @@ make dev-all           # API + Vite dev server + Discord bot together
 Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
+- The Discord bot always owns scheduled review DMs. Maintenance, taxonomy, dedup, backup, and proposal cleanup run through a DB-backed owner lock, so either `bot.py` or `api.py` can host the shared background jobs without double-running them.
 - If `frontend/dist/` exists, FastAPI serves the built React SPA for any HTML request outside `/api`, `/assets`, and `/static`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
 - Canonical browser routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, and `/concept/{concept_id}`. Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain as SPA compatibility redirects, and `/actions` remains available as a standalone compatibility route even though Activity normally opens in a drawer.
 - `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while only `/api`, `/assets`, and `/static` are proxied to the FastAPI app on port 8080.
@@ -185,8 +186,15 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_VECTOR_SEARCH_LIMIT` | `10` | Default vector-search result count |
 | `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
 | `LEARN_SIM_RELATION` | `0.5` | Cosine threshold for relation suggestions/search enrichment |
+| `LEARN_ENABLE_MAINTENANCE` | `0` | Enable scheduled maintenance runs and the `/maintain` command |
+| `LEARN_ENABLE_DEDUP` | `0` | Enable scheduled dedup proposal scans |
+| `LEARN_MAINTENANCE_INTERVAL_HOURS` | `168` | Cadence for maintenance diagnostics and repair loop |
+| `LEARN_TAXONOMY_INTERVAL_HOURS` | `168` | Cadence for taxonomy reorganization runs |
+| `LEARN_DEDUP_INTERVAL_HOURS` | `168` | Cadence for duplicate-detection proposal scans |
+| `LEARN_BACKUP_INTERVAL_HOURS` | `24` | Cadence for automatic backup snapshots |
+| `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` | `24` | Cadence for expired proposal cleanup |
 | `LEARN_BACKUP_DIR` | `backups/` _(project root)_ | Directory for backup snapshots |
-| `LEARN_BACKUP_RETENTION_DAYS` | `7` | Days to retain backups (min: 1) |
+| `LEARN_BACKUP_RETENTION_DAYS` | `14` | Days to retain backups (min: 1) |
 | `LEARN_VECTOR_STORE_PATH` | `data/vectors/` | Embedded Qdrant storage path |
 | `LOG_LEVEL` | `INFO` | Application log verbosity (set `DEBUG` for quiz/pipeline trace logs) |
 
