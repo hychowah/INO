@@ -178,6 +178,9 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_LLM_MAX_TOKENS` | `4096` | Max output tokens requested from the main LLM |
 | `LEARN_LLM_MAX_HISTORY_TOKENS` | `40000` | Max chat history tokens sent to LLM |
 | `LEARN_LLM_THINKING` | _(model default)_ | Optional thinking-mode override for models that support it |
+| `LEARN_LLM_OUTPUT_MODE` | `auto` | Main interactive output mode: `auto`, `json_object`, `json_schema`, or `legacy` |
+| `LEARN_LLM_FAILURE_LOG_DIR` | `data/llm_failures` | Private malformed-output log directory |
+| `LEARN_LLM_LOG_FAILURE_RAW` | `1` | Store full malformed provider output in private logs (`0` stores snippets only) |
 | `LEARN_QUIZ_STALENESS_TIMEOUT` | `15` | Minutes before stale active quiz context is auto-cleared |
 | `LEARN_REVIEW_REMINDER_MAX` | `3` | Max unanswered review reminders before moving to the next concept |
 | `LEARN_MAX_GRAPH_NODES` | `500` | Max concept nodes returned by graph views/endpoints before filtering |
@@ -238,6 +241,15 @@ make test-e2e
 # or:
 cd frontend && npm run test:e2e
 ```
+
+For live provider validation after switching models/providers, use the manual smoke script:
+
+```bash
+python scripts/live_output_contract_smoke.py
+python scripts/live_output_contract_smoke.py --show-raw
+```
+
+It uses your local `.env`, exercises the structured-output path plus malformed-output retry handling, and verifies the full pipeline does not leak raw action JSON or internal reasoning to the user surface.
 
 `npm run test:e2e` builds the SPA and runs the Playwright Chromium smoke suite against the preview server. On a fresh machine, install the browser once with `cd frontend && npx playwright install chromium`.
 

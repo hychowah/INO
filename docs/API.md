@@ -247,6 +247,9 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_LLM_MODEL` | Model name for the OpenAI-compatible backend |
 | `LEARN_LLM_API_KEY` | API key for the OpenAI-compatible backend |
 | `LEARN_LLM_BASE_URL` | Base URL for the OpenAI-compatible backend |
+| `LEARN_LLM_OUTPUT_MODE` | Main interactive output contract mode: `auto`, `json_object`, `json_schema`, or `legacy` |
+| `LEARN_LLM_FAILURE_LOG_DIR` | Directory for private malformed-output logs (default: `data/llm_failures`) |
+| `LEARN_LLM_LOG_FAILURE_RAW` | Whether malformed-output logs store full raw provider text (`1`) or snippets only (`0`) |
 | `LEARN_BOT_TOKEN` | Discord bot token |
 | `LEARN_AUTHORIZED_USER_ID` | Discord user ID allowed to use the bot |
 | `LEARN_API_SECRET_KEY` | Bearer token for the REST API |

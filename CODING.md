@@ -86,6 +86,7 @@ ROOT
 │   ├── context.py         # Prompt builder: dynamic context for LLM calls
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
+│   ├── action_contracts.py # Lightweight action validation metadata for LLM output contract checks
 │   ├── llm.py             # LLM provider abstraction (OpenAI-compatible chat completions + reasoning provider)
 │   ├── scheduler.py       # Background review scheduler + shared background jobs (bot or API host)
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
@@ -133,6 +134,7 @@ ROOT
 │   └── plans/             # Feature design plans
 ├── scripts/               # agent.py (maintenance CLI), utility scripts
 │   ├── dev_all.py         # Cross-platform dev launcher (API + Vite frontend + Discord bot)
+│   ├── live_output_contract_smoke.py # Manual real-provider output-contract smoke test using local .env
 │   ├── taxonomy_shadow_rebuild.py # Operator taxonomy preview/apply workflow
 │   ├── migrate_vectors.py # One-time bulk reindex of existing SQLite data into Qdrant
 │   ├── test_prompts.py    # Prompt-debugging harness for maintenance/reorganize/quiz modes
@@ -220,7 +222,9 @@ Key thresholds (all in `config.py`, all overridable via env vars):
 
 3. **`data/skills/*.md`** — Add documentation with a **concrete JSON example** (critical — the LLM will hallucinate the structure without one). Mark examples with `<!-- DO NOT REMOVE -->`. Put it in the appropriate skill file: quiz/assess actions go in `quiz.md`, CRUD actions in `knowledge.md`, etc.
 
-4. **No changes needed** in `pipeline.py` — it dispatches via `tools.execute_action()` which reads `ACTION_HANDLERS`.
+4. **`services/action_contracts.py`** — Add or update the action contract entry so `validate_llm_output()` can enforce the action's lightweight required params and accepted shapes. The provider `json_schema` mode still uses an envelope-level schema; valid action names come from `ACTION_HANDLERS` registration.
+
+5. **Usually no changes needed** in `pipeline.py` — it dispatches via `tools.execute_action()` which reads `ACTION_HANDLERS`. Only touch pipeline code if the new action changes loop semantics or requires special guard logic.
 
 ---
 

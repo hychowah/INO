@@ -15,6 +15,7 @@ Key changes, newest first.
 
 ### Changed
 
+- **LLM output-contract hardening** — main interactive LLM calls now validate raw provider output before execution/history/display, can request structured output via `LEARN_LLM_OUTPUT_MODE=auto|json_object|json_schema|legacy`, retry once without `response_format` on incompatible endpoints, log malformed completions privately under `data/llm_failures/`, and expose a manual real-provider validator via `scripts/live_output_contract_smoke.py`
 - **Persisted shared scheduler** — review delivery stays bot-owned, while taxonomy, backup, proposal cleanup, and optional maintenance/dedup jobs now run on independent wall-clock cadences coordinated through a DB-backed owner lock shared by `bot.py` and `api.py`
 - **Background feature defaults** — maintenance and dedup are now disabled by default behind `LEARN_ENABLE_MAINTENANCE=0` and `LEARN_ENABLE_DEDUP=0`; `/maintain` remains available as a gated operator command when re-enabled
 - **Automatic backup cadence** — backups now run independently every 24 hours by default, use the newest valid backup directory on disk as the due-check source of truth, and retain 14 days of snapshots by default

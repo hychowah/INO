@@ -97,6 +97,9 @@ LEARN_API_SECRET_KEY=choose-a-secret-token
 # LEARN_LLM_THINKING=disabled
 # LEARN_LLM_TEMPERATURE=0.7
 # LEARN_LLM_MAX_HISTORY_TOKENS=40000
+# LEARN_LLM_OUTPUT_MODE=auto         # auto | json_object | json_schema | legacy
+# LEARN_LLM_FAILURE_LOG_DIR=data/llm_failures
+# LEARN_LLM_LOG_FAILURE_RAW=1        # set 0 to store snippets instead of full raw malformed output
 
 # Quiz/review safety knobs (optional)
 # LEARN_QUIZ_STALENESS_TIMEOUT=15
@@ -330,8 +333,21 @@ Run `/sync` in your Discord server after starting the bot for the first time, or
 | `scripts/dev_all.py` | Run the full local dev stack: API + React frontend dev server + Discord bot |
 | `scripts/agent.py` | Run the standalone maintenance agent |
 | `scripts/maintenance_smoke.py` | Manual maintenance + dedup smoke script against live local data; intentionally not part of pytest/CI |
+| `scripts/live_output_contract_smoke.py` | Manual real-provider smoke test using local `.env`; validates structured output, malformed-output retry, and full pipeline safety |
 | `scripts/migrate_vectors.py` | Migrate vector embeddings between Qdrant collections |
 | `scripts/test_quiz_generator.py` | Manual integration test for quiz generation (paired with `tests/test_quiz_generator_script.py` for CI-safe coverage) |
 | `scripts/test_similarity.py` | Manual integration test for similarity search (not in pytest suite) |
 
-> **Note:** `scripts/test_similarity.py` and `scripts/maintenance_smoke.py` remain intentionally manual because they operate against live local state. `scripts/test_quiz_generator.py` still exists as a manual harness, but CI-safe companion coverage now lives in `tests/test_quiz_generator_script.py`.
+> **Note:** `scripts/test_similarity.py`, `scripts/maintenance_smoke.py`, and `scripts/live_output_contract_smoke.py` remain intentionally manual because they operate against live local state or real provider credentials. `scripts/test_quiz_generator.py` still exists as a manual harness, but CI-safe companion coverage now lives in `tests/test_quiz_generator_script.py`.
+
+### Live LLM Output-Contract Smoke Test
+
+When switching providers/models, validate the live `.env` configuration before trusting interactive chat output:
+
+```bash
+python scripts/live_output_contract_smoke.py
+python scripts/live_output_contract_smoke.py --show-raw
+python scripts/live_output_contract_smoke.py --skip-pipeline
+```
+
+This script calls the configured real provider, checks the structured-output path, forces a malformed-output retry, and runs a full `call_with_fetch_loop()` smoke test. A controlled formatting failure is considered safe; raw action/reasoning leakage is not.

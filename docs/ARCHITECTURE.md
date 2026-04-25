@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-14
+> Last updated: 2026-04-25
 
 ## Overview
 
@@ -129,9 +129,10 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
-| `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter and reasoning-provider selection |
-| `services/parser.py` | ~180 | LLM response parsing — `parse_llm_response`, `process_output`, `extract_llm_action` |
+| `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → validate/retry → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
+| `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter, structured-output fallback when `response_format` is rejected, and reasoning-provider selection |
+| `services/parser.py` | ~180 | LLM output boundary and presentation guard — `validate_llm_output`, `parse_llm_response`, `process_output`, `extract_llm_action`, `guard_user_message` |
+| `services/action_contracts.py` | ~290 | Lightweight LLM action schema/validation — required params, param-type checks, action JSON schema for structured output mode |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral isolated LLM session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
@@ -142,6 +143,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
 | `scripts/maintenance_smoke.py` | ~160 | Manual maintenance and dedup smoke script; intentionally kept outside automated pytest/CI runs |
+| `scripts/live_output_contract_smoke.py` | ~280 | Manual real-provider smoke script for `.env`-backed output-contract validation and retry-path checks |
 | `scripts/test_prompts.py` | ~180 | Prompt-debugging harness for maintenance, reorganize, and quiz prompt assembly |
 | `scripts/test_quiz_generator.py` | ~120 | Manual test harness for the two-prompt quiz generation pipeline |
 | `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
@@ -225,11 +227,16 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │      + dynamic context (topics, due, chat history)
          │      + "User said: <text>"
          │
-         ├─── llm_provider.send(prompt, system_prompt)       ← provider abstraction
+         ├─── llm_provider.send(prompt, system_prompt, response_format)  ← provider abstraction
          │         │
-         │         └── openai_compat: sends assembled prompt directly in API messages
+         │         ├── openai_compat: sends assembled prompt directly in API messages
+         │         └── if endpoint rejects response_format, retries once without it
          │
-         ├─── pipeline.extract_llm_action(raw_output)
+         ├─── parser.validate_llm_output(raw_output)
+         │         ├── validates prefix/action envelope before execution/history/display
+         │         └── invalid output → private log + clear contaminated session + one hidden retry
+         │
+         ├─── pipeline.extract_llm_action(validated_output)
          │         └── strips echoed prompt, finds last JSON or prefix
          │
          ├─── Is it a FETCH action? ─── YES ──┐
@@ -584,20 +591,23 @@ The core brain of the system. Coordinates everything:
 
 1. **`call_with_fetch_loop(mode, text, author)`** — Main entry point. Builds context, calls the active LLM provider, handles fetch loop (up to 3 iterations), returns final LLM response string.
 2. **`execute_llm_response(user_input, llm_response, mode)`** — Parses the LLM response, executes any action, saves chat history. Returns prefixed result string.
-3. **`_call_llm(mode, text, author, extra_context)`** — Assembles the prompt (file refs + dynamic context), calls `provider.send()`, extracts the action from raw output.
-4. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
-5. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
-6. **Parsing utilities** — `parse_llm_response()`, `extract_llm_action()`, `process_output()`.
-7. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
-8. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
-9. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
-10. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
-11. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
-12. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
+3. **`_call_llm(mode, text, author, extra_context)`** — Assembles the prompt (file refs + dynamic context), requests structured output when configured, calls `provider.send()`, and validates the raw completion before execution/history/display.
+4. **`_validate_or_retry_llm_output(...)`** — Contract boundary for raw provider completions. Invalid outputs are written to `data/llm_failures/`, provider session history is cleared, one hidden retry is attempted, and repeated failures become a controlled user-visible formatting error.
+5. **`_main_response_format()` / `_append_structured_output_hint(...)`** — Runtime structured-output controls for the main interactive path. Support `LEARN_LLM_OUTPUT_MODE=auto|json_object|json_schema|legacy`; `json_schema` is built from `services/action_contracts.py`.
+6. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
+7. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
+8. **Parsing utilities** — `validate_llm_output()`, `parse_llm_response()`, `extract_llm_action()`, `process_output()`, `guard_user_message()`.
+9. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
+10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
+11. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
+12. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
+13. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
+14. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
 ### services/llm.py — Provider Integration
 - Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by scheduled quiz P1
 - For `openai_compat`, session history is provider-managed and existing session reads return a copy to avoid accidental live-list mutation
+- When structured output mode is enabled, the provider sends `response_format` and retries once without it if an endpoint rejects that option, preserving portability across OpenAI-compatible backends
 
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
 - `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, `last_activity_at`, and the ContextVar-backed current-user identity
