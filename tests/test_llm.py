@@ -219,6 +219,23 @@ class TestOpenAICompatibleProvider:
         call_args = mock_client.chat.completions.create.call_args
         assert call_args.kwargs["response_format"] == {"type": "json_object"}
 
+    @pytest.mark.anyio
+    async def test_response_format_rejection_falls_back_to_legacy_call(self):
+        mock_client, mock_response = _make_mock_client()
+        mock_response.choices[0].message.content = "resp"
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[RuntimeError("response_format unsupported"), mock_response]
+        )
+
+        p = _make_provider(mock_client)
+        result = await p.send("test", session=None, response_format={"type": "json_object"})
+
+        assert result == "resp"
+        assert mock_client.chat.completions.create.await_count == 2
+        first_call, second_call = mock_client.chat.completions.create.await_args_list
+        assert first_call.kwargs["response_format"] == {"type": "json_object"}
+        assert "response_format" not in second_call.kwargs
+
 
 # ============================================================================
 # 3. Provider Factory

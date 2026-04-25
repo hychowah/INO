@@ -17,7 +17,7 @@ from services.chat_actions import (
 )
 from services.dedup import execute_dedup_merges, format_dedup_suggestions
 from services.llm import LLMError
-from services.parser import parse_llm_response, process_output
+from services.parser import guard_user_message, parse_llm_response, process_output
 from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
 from services.tools_assess import skip_quiz
 
@@ -31,6 +31,7 @@ def _response(
     actions: list[dict] | None = None,
     clear_history: bool = False,
 ) -> dict:
+    message = guard_user_message(message)
     payload = {
         "type": msg_type,
         "message": message,

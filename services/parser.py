@@ -7,6 +7,35 @@ for response format handling.
 
 import json
 import re
+from dataclasses import dataclass, field
+from typing import Iterable
+
+from services.action_contracts import validate_action_contract
+
+
+CONTROLLED_FORMAT_FAILURE_MESSAGE = (
+    "⚠️ I had trouble formatting the model response. Please try again."
+)
+
+_JSON_FENCE_RE = re.compile(r"`{2,}\s*json\s*\n?([\s\S]*?)\n?\s*`{2,}", re.IGNORECASE)
+
+
+@dataclass
+class ParsedTurn:
+    """Validated view of one LLM completion.
+
+    The rest of the app still consumes the legacy string contract for now
+    (REPLY:/ASK:/REVIEW: or JSON action).  This object is the validation
+    boundary that decides whether a raw provider completion is safe to pass
+    into that legacy path.
+    """
+
+    valid: bool
+    output: str = ""
+    kind: str = "invalid"
+    message: str = ""
+    action_data: dict | None = None
+    errors: list[str] = field(default_factory=list)
 
 # ============================================================================
 # LLM Response Parsing
@@ -27,7 +56,7 @@ def parse_llm_response(response: str) -> tuple:
             return (prefix[:-1], response[len(prefix) :].strip(), None)
 
     # Try ```json code block
-    code_block_match = re.search(r"```json\s*\n?([\s\S]*?)\n?\s*```", response)
+    code_block_match = _JSON_FENCE_RE.search(response)
     if code_block_match:
         block_content = code_block_match.group(1).strip()
         json_obj = _extract_json_object(block_content)
@@ -79,7 +108,7 @@ def extract_fetch_params(response: str) -> dict | None:
     See DEVNOTES.md §9.2.
     """
     # Try ```json code block first
-    code_block = re.search(r"```json\s*\n?([\s\S]*?)\n?\s*```", response)
+    code_block = _JSON_FENCE_RE.search(response)
     if code_block:
         data = _extract_json_object(code_block.group(1).strip())
         if data and data.get("action", "").lower() == "fetch":
@@ -107,7 +136,7 @@ def extract_llm_action(output: str) -> str:
         return ""
 
     # Pattern 1: JSON in ```json code block (last one)
-    json_blocks = list(re.finditer(r"```json\s*\n?([\s\S]*?)\n?\s*```", output))
+    json_blocks = list(_JSON_FENCE_RE.finditer(output))
     for block in reversed(json_blocks):
         content = block.group(1).strip()
         j = content.find("{")
@@ -142,6 +171,103 @@ def extract_llm_action(output: str) -> str:
     if lines:
         return "\n".join(lines[-20:])
     return output
+
+
+def looks_like_machine_artifact(text: str) -> bool:
+    """Return True when text appears to contain leaked LLM control-plane output.
+
+    This is intentionally conservative: educational replies may legitimately
+    contain code fences or JSON examples.  We block only obvious internal
+    artifacts such as thinking tags, raw action envelopes, or self-narration
+    combined with action/JSON content.
+    """
+    if not text:
+        return False
+
+    if re.search(r"</?think\b", text, re.IGNORECASE):
+        return True
+
+    has_action = bool(re.search(r'"\s*action\s*"\s*:', text, re.IGNORECASE))
+    has_params = bool(re.search(r'"\s*params\s*"\s*:', text, re.IGNORECASE))
+    has_fence = bool(re.search(r"`{2,}\s*(json)?", text, re.IGNORECASE))
+    self_narration = bool(
+        re.search(
+            r"(^|\n)\s*(the user is|the user wants|let me|i need to|we need to)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+    if has_action and has_params:
+        return True
+    if has_action and has_fence:
+        return True
+    if self_narration and (has_action or has_fence or "```" in text):
+        return True
+
+    return False
+
+
+def guard_user_message(message: str) -> str:
+    """Final user-visible safety guard.
+
+    It never rewrites malformed output; it replaces obvious leaked artifacts
+    with a controlled failure string.
+    """
+    if looks_like_machine_artifact(message):
+        return CONTROLLED_FORMAT_FAILURE_MESSAGE
+    return message
+
+
+def validate_llm_output(output: str, valid_actions: Iterable[str] | None = None) -> ParsedTurn:
+    """Validate raw provider output before execution, persistence, or display.
+
+    The return value's ``output`` is the legacy-safe string that existing
+    callers can still feed into ``parse_llm_response``.  Invalid outputs must
+    not be treated as ordinary replies.
+    """
+    if not output or not output.strip():
+        return ParsedTurn(valid=False, errors=["empty output"])
+
+    extracted = extract_llm_action(output).strip()
+    prefix, message, action_data = parse_llm_response(extracted)
+
+    if action_data:
+        contract_errors = validate_action_contract(action_data, valid_actions=valid_actions)
+        if contract_errors:
+            return ParsedTurn(
+                valid=False,
+                output=extracted,
+                action_data=action_data,
+                errors=contract_errors,
+            )
+        action = str(action_data.get("action", "")).lower().strip()
+        kind = "fetch" if action == "fetch" else "action"
+        return ParsedTurn(
+            valid=True,
+            output=extracted,
+            kind=kind,
+            message=message,
+            action_data=action_data,
+        )
+
+    if prefix in {"REPLY", "ASK", "REMINDER", "REVIEW"}:
+        if looks_like_machine_artifact(message):
+            return ParsedTurn(
+                valid=False,
+                output=extracted,
+                kind="invalid",
+                message=message,
+                errors=["machine artifact in user-visible message"],
+            )
+        return ParsedTurn(
+            valid=True,
+            output=extracted,
+            kind=prefix.lower(),
+            message=message,
+        )
+
+    return ParsedTurn(valid=False, output=extracted, errors=[f"unrecognized prefix: {prefix}"])
 
 
 def _extract_json_str(text: str) -> str | None:
@@ -185,7 +311,7 @@ def process_output(output: str) -> tuple[str, str]:
         ("FETCH:", "fetch"),
     ]:
         if output.startswith(prefix):
-            return (mtype, output[len(prefix) :].strip())
+            return (mtype, guard_user_message(output[len(prefix) :].strip()))
 
     # Safety net: never send raw JSON to the user �?extract the message field.
     # This catches cases where the JSON extractor failed upstream but the
@@ -193,6 +319,6 @@ def process_output(output: str) -> tuple[str, str]:
     if "{" in output and '"action"' in output:
         obj = _extract_json_object(output)
         if obj and isinstance(obj, dict) and "message" in obj:
-            return ("reply", obj["message"])
+            return ("reply", guard_user_message(obj["message"]))
 
-    return ("reply", output)
+    return ("reply", guard_user_message(output))

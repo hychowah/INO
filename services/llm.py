@@ -138,7 +138,19 @@ class OpenAICompatibleProvider:
             if response_format is not None:
                 kwargs["response_format"] = response_format
 
-            response = await self._client.chat.completions.create(**kwargs)
+            try:
+                response = await self._client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if response_format is not None and self._looks_like_response_format_error(exc):
+                    logger.warning(
+                        "Provider rejected response_format=%s; retrying without structured mode: %s",
+                        response_format,
+                        exc,
+                    )
+                    kwargs.pop("response_format", None)
+                    response = await self._client.chat.completions.create(**kwargs)
+                else:
+                    raise
         except Exception as exc:
             self._handle_api_error(exc)
 
@@ -194,6 +206,13 @@ class OpenAICompatibleProvider:
     @staticmethod
     def _estimate_tokens(messages: list[dict]) -> int:
         return sum(len(m.get("content", "")) // 4 for m in messages)
+
+    @staticmethod
+    def _looks_like_response_format_error(exc: Exception) -> bool:
+        text = f"{type(exc).__name__}: {exc}".lower()
+        return "response_format" in text or (
+            "json" in text and any(word in text for word in ("unsupported", "invalid", "schema"))
+        )
 
     def _handle_api_error(self, exc: Exception) -> None:
         """Classify the exception and raise LLMError."""

@@ -37,6 +37,7 @@
 24. [OpenAI Blocking-Import Fix](#24-openai-blocking-import-fix)
 25. [React Frontend & Dev Server URL Routing](#25-react-frontend--dev-server-url-routing)
 26. [Persisted Scheduler & Shared Owner Lock](#26-persisted-scheduler--shared-owner-lock)
+27. [LLM Output Contract Boundary](#27-llm-output-contract-boundary)
 
 ---
 
@@ -475,6 +476,26 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 - Backup is no longer piggybacked on maintenance cadence; it runs independently on its own interval.
 
 **Affected file:** `services/context.py` (`_is_quiz_stale`).
+
+---
+
+## 27. LLM Output Contract Boundary
+
+**Problem:** Some OpenAI-compatible models can return mixed content such as reasoning prose plus fenced JSON/action payloads. The old extractor could fall back to the last non-empty chunk, `parse_llm_response()` would classify it as a plain `REPLY`, and Discord/API could show raw action JSON or internal reasoning.
+
+**Fix:** `services.parser.validate_llm_output()` is now the contract boundary for raw provider completions. `pipeline._call_llm()` and `_call_llm_followup()` validate the raw completion before the fetch loop, action execution, chat-history persistence, or user delivery sees it. Invalid completions clear the contaminated provider session, get one hidden contract-retry prompt, then become a controlled failure message.
+
+**Structured provider mode:** `LEARN_LLM_OUTPUT_MODE` controls the main interactive contract (`auto`, `json_object`, `json_schema`, `legacy`; default `auto`). In `auto`/`json_object`, `pipeline` requests `response_format={"type":"json_object"}`. In `json_schema`, it requests a portable action-envelope schema from `services.action_contracts.build_action_json_schema()`. Both structured modes append a runtime hint mapping normal replies/final summaries to `{"action":"reply","params":{},"message":"..."}`. `services.llm.OpenAICompatibleProvider` retries once without `response_format` when an endpoint rejects that option, preserving model-switch portability.
+
+**Action contracts:** `services.action_contracts.validate_action_contract()` catches missing required params, wrong primitive/list types, invalid action names, and fetch cluster mistakes before side effects. It is intentionally lightweight; DB-specific existence checks stay in tool handlers.
+
+**Private malformed-output logs:** Invalid completions are written to `data/llm_failures/` (git-ignored) with a correlation id. Normal logs include only the id and validation errors, not raw model output. Set `LEARN_LLM_LOG_FAILURE_RAW=0` to store snippets instead of full raw completions.
+
+**Defense in depth:** `guard_user_message()` is applied by `process_output()`, `bot.messages.send_long*()`, and `services.chat_session._response()` so obvious leaked artifacts are replaced with a controlled failure at the presentation boundary too.
+
+**Rule:** Never add a new LLM surface that sends raw provider text directly to users or normal chat history. Pass provider completions through `validate_llm_output()` first, and pass user-visible text through `guard_user_message()` at the delivery boundary.
+
+**Key files:** `config.py`, `services/action_contracts.py`, `services/llm.py`, `services/parser.py`, `services/pipeline.py`, `bot/messages.py`, `services/chat_session.py`, `tests/test_action_contracts.py`, `tests/test_output_contract.py`, `tests/test_parser_json.py`, `tests/test_llm.py`.
 
 ---
 

@@ -6,6 +6,7 @@ import pytest
 
 import db
 from bot.messages import send_long_with_view, send_review_question
+from services.parser import CONTROLLED_FORMAT_FAILURE_MESSAGE
 from services.views import QuizQuestionView
 
 
@@ -28,6 +29,16 @@ async def test_send_long_with_view_passes_view_kwarg_when_provided():
     fake_view = MagicMock()
     await send_long_with_view(send_fn, "hello", view=fake_view)
     send_fn.assert_awaited_once_with("hello", view=fake_view)
+
+
+@pytest.mark.anyio
+async def test_send_long_with_view_blocks_machine_artifacts():
+    send_fn = AsyncMock(return_value=MagicMock())
+    raw = 'The user is answering.\n```json\n{"action":"assess","params":{}}\n```'
+
+    await send_long_with_view(send_fn, raw, view=None)
+
+    send_fn.assert_awaited_once_with(CONTROLLED_FORMAT_FAILURE_MESSAGE)
 
 
 @pytest.mark.anyio

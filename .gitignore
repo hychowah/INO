@@ -10,6 +10,7 @@ venv/
 
 # Data (ignore local vector store and SQLite databases; track persona presets, skill files, and preferences)
 data/vectors/
+data/llm_failures/
 data/*.db
 data/preferences.md
 

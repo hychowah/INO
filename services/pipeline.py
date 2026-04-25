@@ -8,6 +8,7 @@ This file is now ~300 lines of pure orchestration.
 import json
 import logging
 import re
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -16,11 +17,14 @@ import db
 from db.preferences import get_persona, get_persona_content
 from services import context as ctx
 from services import state, tools
+from services.action_contracts import build_action_json_schema
 from services.llm import LLMError, get_provider, get_reasoning_provider
 from services.parser import (
+    CONTROLLED_FORMAT_FAILURE_MESSAGE,
     extract_fetch_params,
-    extract_llm_action,
+    _extract_json_object,
     parse_llm_response,
+    validate_llm_output,
 )
 from services.repair import repair_action
 
@@ -417,6 +421,172 @@ async def execute_llm_response(user_input: str, llm_response: str, mode: str = "
 # ============================================================================
 
 
+def _format_contract_retry_prompt(original_text: str, malformed_output: str) -> str:
+    """Build the single hidden retry prompt for malformed provider output."""
+    valid_actions = ", ".join(sorted(tools.ACTION_HANDLERS.keys()))
+    return (
+        "Your previous response violated the required output contract.\n"
+        "Convert it into exactly ONE valid response. Return ONLY one of these forms:\n"
+        "1. A JSON object with keys: action, params, message.\n"
+        "2. ASK: <clarifying question>\n"
+        "3. REPLY: <user-facing answer>\n"
+        "4. REVIEW: <quiz question>\n\n"
+        f"Valid action names: {valid_actions}\n\n"
+        f"Original user message:\n{original_text}\n\n"
+        "Malformed previous response:\n"
+        f"{malformed_output[:4000]}"
+    )
+
+
+def _controlled_contract_failure() -> str:
+    return f"REPLY: {CONTROLLED_FORMAT_FAILURE_MESSAGE}"
+
+
+def _main_response_format() -> dict[str, Any] | None:
+    """Return provider response_format for the main conversation path.
+
+    Even in structured provider mode, deterministic validation remains the
+    authority. The OpenAI-compatible adapter also falls back when a provider
+    rejects response_format, which keeps model switching portable.
+    """
+    mode = getattr(config, "LLM_OUTPUT_MODE", "auto")
+    if mode == "legacy":
+        return None
+    if mode == "json_schema":
+        return {"type": "json_schema", "json_schema": build_action_json_schema(tools.ACTION_HANDLERS)}
+    if mode in {"auto", "json_object"}:
+        return {"type": "json_object"}
+    logger.warning("Unknown LLM_OUTPUT_MODE=%r; using legacy output mode", mode)
+    return None
+
+
+def _append_structured_output_hint(prompt: str, response_format: dict[str, Any] | None) -> str:
+    """Add runtime instructions required when provider JSON mode is active."""
+    if not response_format:
+        return prompt
+    return (
+        f"{prompt}\n\n"
+        "## Provider JSON Output Mode\n"
+        "Return exactly one JSON object and no markdown fences. For database/tool actions, "
+        "use the normal action JSON shape. For a normal answer, clarification question, "
+        "or final summary, use this pass-through shape instead:\n"
+        '{"action":"reply","params":{},"message":"Your user-facing text here"}\n'
+        "Do not emit REPLY:, ASK:, REVIEW:, explanations about your instructions, or "
+        "multiple JSON objects."
+    )
+
+
+def _write_llm_failure_log(
+    *,
+    stage: str,
+    raw: str,
+    errors: list[str],
+    original_text: str,
+    session: str | None,
+) -> str:
+    """Write malformed completion details to a private ignored log file."""
+    failure_id = uuid.uuid4().hex[:12]
+    payload: dict[str, Any] = {
+        "id": failure_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "stage": stage,
+        "session": session,
+        "errors": errors,
+        "original_text_snippet": original_text[:1000],
+        "raw_length": len(raw),
+    }
+    if getattr(config, "LLM_LOG_FAILURE_RAW", True):
+        payload["raw"] = raw
+    else:
+        payload["raw_snippet"] = raw[:1000]
+
+    try:
+        log_dir = getattr(config, "LLM_FAILURE_LOG_DIR", config.DATA_DIR / "llm_failures")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        path = log_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{failure_id}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.warning("Failed to write private LLM failure log", exc_info=True)
+    return failure_id
+
+
+async def _validate_or_retry_llm_output(
+    *,
+    provider,
+    raw: str,
+    original_text: str,
+    system_prompt: str,
+    session: str | None,
+    timeout: int,
+) -> str:
+    """Validate a provider completion, retrying once on contract failure.
+
+    Invalid raw completions are not allowed to flow into parsing, execution,
+    chat history, or Discord/API output. If the first invalid completion was
+    written to a provider session, clear that session before retrying so future
+    turns are not contaminated.
+    """
+    valid_actions = tools.ACTION_HANDLERS.keys()
+    parsed = validate_llm_output(raw, valid_actions=valid_actions)
+    if parsed.valid:
+        extracted = parsed.output
+        logger.debug(f"Extracted: {extracted[:300]!r}")
+        return extracted
+
+    failure_id = _write_llm_failure_log(
+        stage="initial",
+        raw=raw,
+        errors=parsed.errors,
+        original_text=original_text,
+        session=session,
+    )
+    logger.warning(
+        "Invalid LLM output contract id=%s: %s",
+        failure_id,
+        "; ".join(parsed.errors),
+    )
+    if session:
+        try:
+            provider.clear_session(session)
+            logger.info(f"Cleared contaminated LLM session after invalid output: {session}")
+        except Exception:
+            logger.warning("Failed to clear LLM session after invalid output", exc_info=True)
+
+    retry_prompt = _format_contract_retry_prompt(original_text, raw)
+    try:
+        retry_raw = await provider.send(
+            retry_prompt,
+            session=None,
+            system_prompt=system_prompt,
+            timeout=min(timeout, 30),
+        )
+    except LLMError:
+        raise
+    except Exception as exc:
+        raise LLMError(f"LLM contract retry failed: {exc}", retryable=True) from exc
+
+    retry_parsed = validate_llm_output(retry_raw, valid_actions=valid_actions)
+    if retry_parsed.valid:
+        extracted = retry_parsed.output
+        logger.info("LLM output contract retry succeeded")
+        logger.debug(f"Extracted after retry: {extracted[:300]!r}")
+        return extracted
+
+    retry_failure_id = _write_llm_failure_log(
+        stage="retry",
+        raw=retry_raw,
+        errors=retry_parsed.errors,
+        original_text=original_text,
+        session=None,
+    )
+    logger.error(
+        "LLM output contract retry failed id=%s: %s",
+        retry_failure_id,
+        "; ".join(retry_parsed.errors),
+    )
+    return _controlled_contract_failure()
+
+
 async def _call_llm(
     mode: str,
     text: str,
@@ -448,19 +618,26 @@ async def _call_llm(
 
     system_prompt = build_system_prompt(mode=mode)
 
+    response_format = _main_response_format()
+    prompt = _append_structured_output_hint(prompt, response_format)
+
     raw = await provider.send(
         prompt,
         session=session,
         system_prompt=system_prompt,
+        response_format=response_format,
         timeout=config.COMMAND_TIMEOUT,
     )
 
     logger.debug(f"Raw LLM output length: {len(raw)}")
-
-    extracted = extract_llm_action(raw)
-    logger.debug(f"Extracted: {extracted[:300]!r}")
-
-    return extracted
+    return await _validate_or_retry_llm_output(
+        provider=provider,
+        raw=raw,
+        original_text=text,
+        system_prompt=system_prompt,
+        session=session,
+        timeout=config.COMMAND_TIMEOUT,
+    )
 
 
 async def _call_llm_followup(
@@ -485,19 +662,26 @@ async def _call_llm_followup(
     # system_prompt passed for stateless providers; session-based ones ignore it
     system_prompt = build_system_prompt(mode=mode)
 
+    response_format = _main_response_format()
+    prompt = _append_structured_output_hint(prompt, response_format)
+
     raw = await provider.send(
         prompt,
         session=session,
         system_prompt=system_prompt,
+        response_format=response_format,
         timeout=config.COMMAND_TIMEOUT,
     )
 
     logger.debug(f"Raw LLM output length: {len(raw)}")
-
-    extracted = extract_llm_action(raw)
-    logger.debug(f"Extracted: {extracted[:300]!r}")
-
-    return extracted
+    return await _validate_or_retry_llm_output(
+        provider=provider,
+        raw=raw,
+        original_text=text,
+        system_prompt=system_prompt,
+        session=session,
+        timeout=config.COMMAND_TIMEOUT,
+    )
 
 
 # ============================================================================
@@ -730,21 +914,17 @@ async def generate_quiz_question(concept_id: int) -> dict:
     if not raw:
         raise LLMError("Empty response from reasoning provider", retryable=True)
 
-    # Parse JSON from response
+    # Parse JSON from response.  Some OpenAI-compatible providers still wrap
+    # json_object responses with prose/fences; extract the object deterministically
+    # but keep malformed output fail-closed.
     try:
-        # Strip markdown code fences if present
         text = raw.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            if text.startswith("json"):
-                text = text[4:].strip()
         result = json.loads(text)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"P1 returned unparseable JSON: {raw[:300]}")
-        raise LLMError(f"Reasoning model returned invalid JSON: {e}", retryable=True)
+        result = _extract_json_object(raw)
+        if result is None:
+            logger.error(f"P1 returned unparseable JSON: {raw[:300]}")
+            raise LLMError(f"Reasoning model returned invalid JSON: {e}", retryable=True)
 
     result = _validate_quiz_generator_result(result)
 
@@ -896,6 +1076,17 @@ async def call_action_loop(
 
         action_name = action_data.get("action", "unknown").lower().strip()
         action_msg = action_data.get("message", "")
+
+        if action_name in {"reply", "none"}:
+            final_msg = (
+                action_msg or action_data.get("params", {}).get("message", "") or message or ""
+            )
+            if actions_taken:
+                action_summary = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
+                final_msg = (
+                    f"**Actions taken ({len(actions_taken)}):**\n{action_summary}\n\n{final_msg}"
+                )
+            return f"REPLY: {final_msg}", proposed_actions
 
         if action_name in safe_actions:
             result = await execute_action(action_data)

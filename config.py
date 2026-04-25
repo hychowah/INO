@@ -154,6 +154,21 @@ LLM_MAX_HISTORY_TOKENS = int(os.environ.get("LEARN_LLM_MAX_HISTORY_TOKENS", "400
 # Thinking mode for models that support it: "enabled" | "disabled" | None
 # (use model default)
 LLM_THINKING = os.environ.get("LEARN_LLM_THINKING")  # e.g. "disabled"
+# Main interactive output contract mode:
+# - auto: prefer provider JSON mode on known-compatible endpoints, with fallback
+# - json_object: request OpenAI-compatible JSON object mode
+# - json_schema: request OpenAI-compatible JSON schema mode when supported
+# - legacy: prompt-only text/JSON contract with deterministic validation
+LLM_OUTPUT_MODE = os.environ.get("LEARN_LLM_OUTPUT_MODE", "auto").lower().strip()
+LLM_FAILURE_LOG_DIR = Path(
+    os.environ.get("LEARN_LLM_FAILURE_LOG_DIR", str(DATA_DIR / "llm_failures"))
+)
+LLM_LOG_FAILURE_RAW = os.environ.get("LEARN_LLM_LOG_FAILURE_RAW", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 # --- Reasoning provider (optional, for scheduled quiz question generation) ---
 # If set, the reasoning model is used for Prompt 1 (question analysis/generation)
@@ -184,6 +199,11 @@ def validate_config():
             errors.append("LLM_API_KEY required when LLM_PROVIDER=openai_compat")
         if not LLM_MODEL:
             errors.append("LLM_MODEL required when LLM_PROVIDER=openai_compat")
+        if LLM_OUTPUT_MODE not in {"auto", "json_object", "json_schema", "legacy"}:
+            errors.append(
+                "LEARN_LLM_OUTPUT_MODE must be one of: auto, json_object, json_schema, legacy "
+                f"(got {LLM_OUTPUT_MODE!r})"
+            )
     else:
         errors.append(f"Unknown LLM_PROVIDER: {LLM_PROVIDER!r}")
 
@@ -197,6 +217,7 @@ def print_config():
     print(f"  Data Dir       : {DATA_DIR}")
     print(f"  LLM Provider   : {LLM_PROVIDER}")
     print(f"  LLM Model      : {LLM_MODEL}")
+    print(f"  Output Mode    : {LLM_OUTPUT_MODE}")
     print(f"  LLM Base URL   : {LLM_API_BASE_URL}")
     _key = "***" + LLM_API_KEY[-4:] if LLM_API_KEY and len(LLM_API_KEY) > 4 else "(not set)"
     print(f"  LLM API Key    : {_key}")

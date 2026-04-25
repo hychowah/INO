@@ -13,11 +13,13 @@ import json
 import pytest
 
 from services.parser import (
+    CONTROLLED_FORMAT_FAILURE_MESSAGE,
     _extract_json_object,
     _extract_json_str,
     extract_fetch_params,
     parse_llm_response,
     process_output,
+    validate_llm_output,
 )
 
 pytestmark = pytest.mark.unit
@@ -337,3 +339,54 @@ class TestProcessOutput:
         msg_type, msg = process_output(text)
         assert msg_type == "reply"
         assert msg == '{"action": "quiz", "message": "hi"}'
+
+    def test_machine_artifact_guard_blocks_raw_action_leak(self):
+        raw = (
+            "The user is answering the quiz. Let me assess this.\n"
+            '``json\n{"action": "assess", "params": {"concept_id": 1}, '
+            '"message": "Good answer."}\n'
+        )
+        msg_type, msg = process_output(f"REPLY: {raw}")
+        assert msg_type == "reply"
+        assert msg == CONTROLLED_FORMAT_FAILURE_MESSAGE
+
+
+class TestValidateLlmOutput:
+    def test_validates_prefixed_reply(self):
+        result = validate_llm_output("REPLY: hello")
+        assert result.valid is True
+        assert result.kind == "reply"
+        assert result.output == "REPLY: hello"
+
+    def test_validates_action_from_noisy_fence(self):
+        raw = (
+            "Sure, here is the action.\n"
+            '``json\n{"action": "assess", "params": {"concept_id": 161, "quality": 3}, '
+            '"message": "You got it."}\n``'
+        )
+        result = validate_llm_output(raw, valid_actions={"assess"})
+        assert result.valid is True
+        assert result.kind == "action"
+        assert result.action_data["action"] == "assess"
+        assert result.message == "You got it."
+
+    def test_rejects_deepseek_style_malformed_action_leak(self):
+        raw = (
+            "The user is answering the quiz question. Let me assess this.\n"
+            "``json\n"
+            "{\n"
+            '  "action": "assess",\n'
+            '  "params": {"concept_id": 161, "quality": 3},\n'
+            '  "message": "You got it."\n'
+        )
+        result = validate_llm_output(raw, valid_actions={"assess"})
+        assert result.valid is False
+        assert "machine artifact" in "; ".join(result.errors)
+
+    def test_rejects_unknown_action_before_execution(self):
+        result = validate_llm_output(
+            '{"action": "generate_quiz", "params": {}, "message": "Question?"}',
+            valid_actions={"quiz"},
+        )
+        assert result.valid is False
+        assert result.errors == ["unknown action: generate_quiz"]

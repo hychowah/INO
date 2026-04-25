@@ -7,6 +7,7 @@ import discord
 import config
 import db
 from services.formatting import format_quiz_metadata
+from services.parser import guard_user_message
 from services.views import QuizQuestionView, should_show_quiz_skip_button
 
 
@@ -36,6 +37,7 @@ async def send_long(ctx, text: str, title: str = "Learn"):
 
     if not text or not text.strip():
         text = "(empty response)"
+    text = guard_user_message(text)
 
     chunks = _split_message(text)
 
@@ -50,6 +52,7 @@ async def send_long_with_view(send_fn, text: str, view=None) -> "discord.Message
     """Send a long message with a Discord view (buttons) on the last chunk."""
     if not text or not text.strip():
         text = "(empty response)"
+    text = guard_user_message(text)
 
     chunks = _split_message(text)
 
