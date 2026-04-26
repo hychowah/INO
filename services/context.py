@@ -281,15 +281,29 @@ def _append_active_quiz_context(parts: list) -> None:
     # which may have been overwritten by fetch.  See DEVNOTES §16.
     anchor_cid = db.get_session("quiz_anchor_concept_id")
     active_cid = anchor_cid or db.get_session("active_concept_id")
+    pending_review = None
+    if not active_cid:
+        from services.tools_assess import get_pending_review
+
+        pending_review = get_pending_review()
+        if pending_review and pending_review.get("concept_id") is not None:
+            active_cid = str(pending_review["concept_id"])
+
     if active_cid:
         concept = db.get_concept(int(active_cid))
         if concept:
             rel_lines = _format_relations_snippet(int(active_cid))
             rel_section = "\n" + "\n".join(rel_lines) + "\n" if rel_lines else ""
+            pending_section = ""
+            if pending_review and pending_review.get("question"):
+                pending_section = (
+                    f"Pending question: {pending_review['question']}\n"
+                )
             parts.append(
                 f"## Active Quiz Context\n"
                 f"Quizzed concept: **#{active_cid} — {concept['title']}** "
                 f"(score {concept['mastery_level']}/100).{rel_section}"
+                f"{pending_section}"
                 f"Use this concept_id for `assess` ONLY if the user's message actually "
                 f"answers the quiz question. If they ask an unrelated question or change "
                 f"topic, answer with REPLY: instead — do NOT assess. The quiz stays active "

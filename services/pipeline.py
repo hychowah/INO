@@ -327,13 +327,25 @@ async def execute_action(action_data: dict) -> str:
     # on follow-up questions, triggering spurious score changes and duplicate log
     # entries. See is_quiz_active() for what constitutes an "active quiz".
     if action in ("assess", "multi_assess") and not is_quiz_active():
-        logger.warning(
-            f"[pipeline] Blocked '{action}' -- no active quiz. "
-            f"concept_id={params.get('concept_id')} quality={params.get('quality')} "
-            f"| anchor={db.get_session('quiz_anchor_concept_id')!r} "
-            f"active_ids={db.get_session('active_concept_ids')!r}"
-        )
-        return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+        recovered_pending = None
+        if action == "assess":
+            from services.tools_assess import restore_pending_review_context
+
+            recovered_pending = restore_pending_review_context()
+
+        if recovered_pending:
+            logger.info(
+                "[pipeline] Restored pending review context for assess "
+                f"concept_id={recovered_pending.get('concept_id')}"
+            )
+        else:
+            logger.warning(
+                f"[pipeline] Blocked '{action}' -- no active quiz. "
+                f"concept_id={params.get('concept_id')} quality={params.get('quality')} "
+                f"| anchor={db.get_session('quiz_anchor_concept_id')!r} "
+                f"active_ids={db.get_session('active_concept_ids')!r}"
+            )
+            return f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
 
     msg_type, result = tools.execute_action(action, params)
 

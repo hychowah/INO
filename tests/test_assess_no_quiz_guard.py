@@ -13,6 +13,8 @@ Verifies that:
 """
 
 import asyncio
+import json
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import db
@@ -260,6 +262,55 @@ class TestAssessAllowedWithQuiz:
             "Second assess (no active quiz) must not modify the score"
         )
         assert db.get_concept(cid)["review_count"] == 1, "Only one review should be recorded"
+
+    def test_assess_recovers_from_pending_review_when_anchor_missing(self, test_db):
+        """A fresh pending review can restore the quiz anchor for one late assess."""
+        cid = db.add_concept("Fabric Rendering", "Concurrent rendering in RN")
+        db.update_concept(cid, mastery_level=38)
+
+        db.set_session("active_concept_id", None)
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session("active_concept_ids", None)
+        db.set_session(
+            "pending_review",
+            json.dumps(
+                {
+                    "concept_id": cid,
+                    "concept_title": "Fabric Rendering",
+                    "question": "How does Fabric keep a heavy list smooth?",
+                    "sent_at": datetime.now().isoformat(),
+                    "reminder_count": 0,
+                }
+            ),
+        )
+
+        result = _run(
+            _pipeline_execute(
+                {
+                    "action": "assess",
+                    "params": {
+                        "concept_id": cid,
+                        "quality": 4,
+                        "question_difficulty": 48,
+                        "assessment": "Good answer",
+                        "question_asked": "fallback",
+                        "user_response": "Fabric lets urgent UI updates happen without the old bridge queue",
+                        "remark": "Recovered pending review and assessed successfully",
+                    },
+                    "message": "Nice recovery.",
+                }
+            )
+        )
+
+        assert result.startswith("REPLY: ")
+        concept = db.get_concept(cid)
+        assert concept["mastery_level"] > 38
+        assert concept["review_count"] == 1
+        assert db.get_session("pending_review") is None
+
+        reviews = db.get_recent_reviews(cid)
+        assert len(reviews) == 1
+        assert reviews[0]["question_asked"] == "How does Fabric keep a heavy list smooth?"
 
 
 # ============================================================================

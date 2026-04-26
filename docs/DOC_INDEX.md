@@ -33,7 +33,7 @@ Do not edit these casually — every word affects bot behaviour.
 | `data/skills/maintenance.md` | Maintenance mode behavioural rules, triage priorities | Maintenance mode only |
 | `data/skills/taxonomy.md` | Taxonomy reorganisation rules — topic tree restructuring, grouping, suppressed renames | Taxonomy mode only (`/reorganize`, shared scheduler) |
 | `data/skills/preferences.md` | Preference editor — fenced-output format, apply-only instruction set | `preference-edit` mode only (`/preference <text>`) |
-| `data/skills/quiz_generator.md` | P1 question generation — question types, difficulty, JSON output format | Scheduled quiz P1 only (reasoning model) |
+| `data/skills/quiz_generator.md` | P1 question generation — question types, difficulty, JSON output format | Structured review-quiz P1 for scheduler, `/review`, and shared chat review |
 | `data/preferences.md` | Runtime user preferences (git-ignored, auto-copied from template on first startup) | Every LLM call |
 | `data/preferences.template.md` | Tracked default preferences file | Repository only |
 | `data/personas/*.md` | Persona presets (`mentor`, `coach`, `buddy`) — communication style only | Every LLM call (one active at a time) |

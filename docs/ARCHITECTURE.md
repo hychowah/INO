@@ -86,7 +86,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `data/skills/maintenance.md` | ~50 | Maintenance skill — triage rules, safe/unsafe actions, priority order (maintenance only) |
 | `data/skills/taxonomy.md` | ~80 | Taxonomy skill — topic tree restructuring, grouping rules, rename criteria, suppressed-rename tracking (taxonomy mode only) |
 | `data/skills/preferences.md` | ~30 | Preference-edit skill — isolated fenced-output editor used by `/preference` text edits |
-| `data/skills/quiz_generator.md` | ~80 | P1 quiz generation — question type/difficulty selection plus structured JSON output including `formatted_question` (scheduled quiz P1 only) |
+| `data/skills/quiz_generator.md` | ~80 | P1 review-quiz generation — question type/difficulty selection plus structured JSON output including `formatted_question` (scheduler, `/review`, and shared chat review) |
 | `data/preferences.template.md` | ~30 | Tracked default preferences file copied to the runtime file on first bot startup |
 | `data/preferences.md` | ~20 | Runtime user preferences copy (git-ignored, injected into every LLM call) |
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
@@ -258,7 +258,10 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │
          ├── If action_data:
          │       pipeline.execute_action(action_data)
-         │           → if action in ('assess','multi_assess') and not is_quiz_active():
+         │           → if action == 'assess' and not is_quiz_active():
+         │               try restore_pending_review_context()
+         │               → if recovery fails: return "REPLY: (assessment skipped -- no active quiz)"
+         │           → if action == 'multi_assess' and not is_quiz_active():
          │               short-circuit → return "REPLY: (assessment skipped -- no active quiz)"
          │           → tools.execute_action(action, params)
          │               → db.<crud_operation>(...)
@@ -597,15 +600,15 @@ The core brain of the system. Coordinates everything:
 6. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
 7. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
 8. **Parsing utilities** — `validate_llm_output()`, `parse_llm_response()`, `extract_llm_action()`, `process_output()`, `guard_user_message()`.
-9. **`is_quiz_active()`** — Authoritative quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as a guard in `execute_action` to block stale `assess`/`multi_assess` calls.
-10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active the action is short-circuited: scores and logs are **not** mutated and `REPLY: (assessment skipped -- no active quiz)` is returned. This guard is enforced identically in `scripts/agent.py`.
+9. **`is_quiz_active()`** — Authoritative volatile quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as the first guard in `execute_action`.
+10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, `assess` first attempts `restore_pending_review_context()` from the DB-backed `pending_review` blob written after review-question delivery. Only when no active quiz exists and no pending review can be restored does the action short-circuit, leaving scores/logs untouched and returning `REPLY: (assessment skipped -- no active quiz)`. `multi_assess` remains strict because multi-quiz recovery is not implemented. The CLI helper in `scripts/agent.py` mirrors the same single-quiz recovery logic.
 11. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
 12. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
 13. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
 14. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
 
 ### services/llm.py — Provider Integration
-- Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by scheduled quiz P1
+- Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by structured review-quiz P1 generation
 - For `openai_compat`, session history is provider-managed and existing session reads return a copy to avoid accidental live-list mutation
 - When structured output mode is enabled, the provider sends `response_format` and retries once without it if an endpoint rejects that option, preserving portability across OpenAI-compatible backends
 

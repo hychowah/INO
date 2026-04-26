@@ -10,6 +10,7 @@ Verifies that:
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -261,6 +262,34 @@ class TestContextInjection:
         assert len(parts) == 1
         assert f"#{cid}" in parts[0]
         assert "Active Concept" in parts[0]
+
+    def test_context_falls_back_to_pending_review(self, test_db):
+        """When volatile quiz state is gone, pending_review still restores quiz context."""
+        import services.context as ctx
+
+        cid = db.add_concept("Pending Quiz", "Desc")
+        db.set_session("active_concept_id", None)
+        db.set_session("quiz_anchor_concept_id", None)
+        db.set_session(
+            "pending_review",
+            json.dumps(
+                {
+                    "concept_id": cid,
+                    "concept_title": "Pending Quiz",
+                    "question": "What does Fabric remove from the old bridge model?",
+                    "sent_at": datetime.now().isoformat(),
+                    "reminder_count": 0,
+                }
+            ),
+        )
+
+        parts = []
+        with patch.object(db, "get_session_updated_at", return_value=None):
+            ctx._append_active_quiz_context(parts)
+
+        assert len(parts) == 1
+        assert f"#{cid}" in parts[0]
+        assert "Pending question:" in parts[0]
 
 
 # ============================================================================

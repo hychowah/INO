@@ -203,9 +203,9 @@ All settings are via environment variables (see [.env.example](.env.example) for
 
 See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
 
-**Optional (Reasoning model for scheduled quiz P1):**
+**Optional (Reasoning model for review-quiz P1):**
 
-If configured, scheduled quizzes use a structured generation flow: P1 (reasoning model) receives concept detail plus Active Persona and User Preferences, returns JSON including `question`, `formatted_question`, `question_type`, `target_facet`, and `concept_ids`, and a deterministic formatter delivers the final question text. If the reasoning model is unavailable or fails, the system falls back to the single-prompt `review-check` flow.
+If configured, scheduler-triggered reviews, manual `/review`, and shared chat review all use the same structured generation flow: P1 (reasoning model) receives concept detail plus Active Persona and User Preferences, returns JSON including `question`, `formatted_question`, `question_type`, `target_facet`, and `concept_ids`, and a deterministic formatter delivers the final question text. If the reasoning model is unavailable or fails, the system falls back to the single-prompt `review-check` flow.
 
 | Variable | Example | Purpose |
 |----------|---------|--------|

@@ -14,7 +14,7 @@
 | `data/skills/maintenance.md` | Maintenance mode behavioral rules, triage priorities | Maintenance mode only (feature-flagged) |
 | `data/skills/taxonomy.md` | Taxonomy reorganization rules — topic tree restructuring, grouping, rename criteria, suppression | Taxonomy mode only (`/reorganize`) |
 | `data/skills/preferences.md` | Preference editor instructions and fenced output format | `preference-edit` mode only (`/preference` with text) |
-| `data/skills/quiz_generator.md` | P1 question generation instructions for reasoning model; Prompt 1 also receives the active persona and runtime preferences and returns structured JSON including `formatted_question` | Scheduled quiz P1 only (not loaded via SKILL_SETS) |
+| `data/skills/quiz_generator.md` | P1 question generation instructions for reasoning model; Prompt 1 also receives the active persona and runtime preferences and returns structured JSON including `formatted_question` | Structured review-quiz P1 for scheduler, `/review`, and shared chat review (not loaded via SKILL_SETS) |
 | `data/preferences.template.md` | Tracked default preferences file copied on first startup | Repository only |
 | `data/preferences.md` | Runtime user preferences copy (git-ignored) | Every LLM call |
 | `data/personas/*.md` | Persona presets (mentor, coach, buddy) | Every LLM call (one active) |
@@ -47,7 +47,7 @@ TAXONOMY-MODE    → taxonomy       → taxonomy only   (/reorganize, shared sch
 preference-edit  → preference-edit → preferences only   (/preference text edit path)
 ```
 
-Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. Scheduled quiz delivery no longer uses an LLM packaging stage; `generate_quiz_question()` calls `quiz_generator.md` for P1, then `format_quiz_action()` deterministically formats the delivery text. The `/preference` edit path is the exception: it calls `_get_base_prompt("preference-edit")` directly and bypasses `_mode_to_skill_set()` and `_call_llm()`.
+Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. Structured review-quiz delivery no longer uses an LLM packaging stage; `generate_quiz_question()` calls `quiz_generator.md` for P1, then `format_quiz_action()` deterministically formats the delivery text. The `/preference` edit path is the exception: it calls `_get_base_prompt("preference-edit")` directly and bypasses `_mode_to_skill_set()` and `_call_llm()`.
 
 ## Editing Guidelines
 

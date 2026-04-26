@@ -19,7 +19,7 @@ from services.dedup import execute_dedup_merges, format_dedup_suggestions
 from services.llm import LLMError
 from services.parser import guard_user_message, parse_llm_response, process_output
 from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
-from services.tools_assess import skip_quiz
+from services.tools_assess import set_pending_review, skip_quiz
 
 _db_initialized = False
 
@@ -478,6 +478,8 @@ async def _handle_review_command(raw_text: str, author: str = "chat", source: st
         _msg_type, response = process_output(final_result)
         response = response.strip() if response else "Could not generate a review quiz. Try again?"
         db.set_session("last_quiz_question", response)
+        if cid:
+            set_pending_review(cid, response)
         return _response(
             response, actions=_quiz_question_actions(cid, (p1_result or {}).get("choices"))
         )

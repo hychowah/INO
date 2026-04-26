@@ -290,7 +290,7 @@ INO/
 | Command | Purpose |
 |---------|---------|
 | `/learn [text]` | Chat with the learning coach, ask questions, or start a quiz flow. |
-| `/review` | Pull the next due review quiz. Concepts with 2+ prior reviews can show an `I know this` skip button. |
+| `/review` | Pull the next due review quiz. Concepts with 2+ prior reviews can show an `I know this` skip button, and unanswered single-concept reviews remain recoverable from persisted pending-review state even if the volatile quiz anchor times out. |
 | `/due` | List concepts currently due for review. |
 | `/topics` | Show the current topic hierarchy and knowledge map. |
 | `/persona [name]` | Show or switch persona (`mentor`, `coach`, `buddy`). |

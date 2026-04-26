@@ -17,6 +17,7 @@ from services import backup as backup_service
 from services import pipeline, state
 from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
+from services.tools_assess import set_pending_review
 from services.views import (
     AddConceptConfirmView,
     PreferenceUpdateView,
@@ -370,7 +371,7 @@ async def review_command(ctx):
                                 e,
                             )
                             llm_response = await pipeline.call_with_fetch_loop(
-                                mode="reply",
+                                mode="review-check",
                                 text=review_text,
                                 author=str(ctx.author),
                             )
@@ -426,6 +427,7 @@ async def review_command(ctx):
             else:
                 send_fn = ctx.send
             await send_review_question(send_fn, response, cid, _handle_user_message)
+            set_pending_review(cid, response.strip())
         else:
             await send_long(ctx, response)
     except Exception as e:

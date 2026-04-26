@@ -15,7 +15,7 @@ Current shipped behavior is still single-user at the interface layer. Internally
 | Command | Description |
 |---------|-------------|
 | `/learn [text]` | Start or continue a learning session. Optionally pass a topic or question as `text`. |
-| `/review` | Trigger a spaced-repetition quiz session. Both manual `/review` calls and scheduler-triggered review DMs use the same skip-button eligibility rule (`review_count >= 2`). |
+| `/review` | Trigger a spaced-repetition quiz session. Both manual `/review` calls and scheduler-triggered review DMs use the same skip-button eligibility rule (`review_count >= 2`), persist an unresolved pending review after successful delivery, and can recover a later single-concept answer even if the transient quiz anchor has expired. |
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
@@ -265,4 +265,4 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` | Expired proposal cleanup cadence (default: `24`) |
 | `LEARN_BACKUP_DIR` | Directory for backup snapshots (default: `backups/` inside project root) |
 | `LEARN_BACKUP_RETENTION_DAYS` | Number of days of backup snapshots to retain before pruning (default: `14`, minimum: `1`) |
-| `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for scheduled quiz question generation |
+| `LEARN_REASONING_LLM_*` | Optional reasoning-model settings for review-quiz question generation (scheduler, `/review`, shared chat review) |

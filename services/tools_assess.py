@@ -28,6 +28,72 @@ _QUIZ_STATE_KEYS = (
 
 
 # ============================================================================
+# Pending review helpers
+# ============================================================================
+
+
+def get_pending_review() -> dict | None:
+    """Read pending review state from the session store."""
+    raw = db.get_session("pending_review")
+    if not raw:
+        return None
+    try:
+        pending = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Corrupt pending_review in session state — clearing")
+        db.set_session("pending_review", None)
+        return None
+
+    if not isinstance(pending, dict):
+        db.set_session("pending_review", None)
+        return None
+    return pending
+
+
+def set_pending_review(concept_id: int, question: str, *, concept_title: str | None = None) -> None:
+    """Persist a single outstanding review question for late-answer recovery."""
+    title = concept_title
+    if title is None:
+        concept = db.get_concept(concept_id)
+        title = concept["title"] if concept else "Unknown"
+
+    blob = {
+        "concept_id": int(concept_id),
+        "concept_title": title,
+        "question": (question or "")[:500],
+        "sent_at": datetime.now().isoformat(),
+        "reminder_count": 0,
+    }
+    db.set_session("pending_review", json.dumps(blob))
+
+
+def restore_pending_review_context() -> dict | None:
+    """Restore quiz anchor state from an unresolved pending review when possible."""
+    pending = get_pending_review()
+    if not pending:
+        return None
+
+    concept_id = pending.get("concept_id")
+    if concept_id is None:
+        db.set_session("pending_review", None)
+        return None
+
+    concept = db.get_concept(int(concept_id))
+    if not concept:
+        db.set_session("pending_review", None)
+        return None
+
+    db.set_session("active_concept_id", str(concept_id))
+    db.set_session("quiz_anchor_concept_id", str(concept_id))
+
+    question = (pending.get("question") or "").strip()
+    if question:
+        db.set_session("last_quiz_question", question)
+
+    return pending
+
+
+# ============================================================================
 # Quiz handlers
 # ============================================================================
 

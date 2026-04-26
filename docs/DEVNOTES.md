@@ -253,14 +253,14 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 ---
 
-## 14. Structured Scheduled Quiz Flow (Migrations 11 + 14)
+## 14. Structured Review Quiz Flow (Migrations 11 + 14)
 
 **Problem:** Single-prompt quiz generation gave the LLM too many competing responsibilities: analyze concept data, pick the right question type/difficulty, track rotation, and produce delivery-ready phrasing that respects persona and user preferences.
 
 **Current design:**
 - **P1 (Reasoning model):** `generate_quiz_question()` uses `data/skills/quiz_generator.md` plus injected Active Persona and runtime User Preferences. It receives concept detail + related concepts + recent structured review metadata and returns JSON: `question`, `formatted_question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`, and optional `choices`. Calls use `response_format={"type": "json_object"}`.
 - **Delivery stage:** `package_quiz_for_discord()` is now a deterministic compatibility wrapper over `format_quiz_action()`. It uses `formatted_question` (or `question` as fallback) and returns the final `REPLY:` string. No LLM packaging stage remains in the scheduled-quiz flow.
-- **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler and chat review commands fall back to single-prompt `call_with_fetch_loop(mode="review-check")`.
+- **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler, chat review, and slash `/review` commands fall back to single-prompt `call_with_fetch_loop(mode="review-check")`.
 
 **Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` to store raw P1 JSON for debugging/inspection.
 
@@ -278,7 +278,7 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 1. **LLM instructions** (`core.md` MODE: REPLY → "Intent Detection During Active Quiz"): signal lists for quiz-answer vs new-question, decision rule ("if not answering quiz → REPLY: instead of assess"), worked examples. `quiz.md` assess docs reinforced with same rule.
 2. **Backend clearing** (`pipeline.py` `_QUIZ_CLEARING_ACTIONS`): quiz context clears after `assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`. NOT after `fetch`, `quiz`, `multi_quiz`, or plain REPLY:. Also clears `active_concept_ids` for multi-quiz.
-3. **Staleness timeout** (`context.py` `_append_active_quiz_context()`): checks `session_state.updated_at` via `db.get_session_updated_at()`. If elapsed > `QUIZ_STALENESS_TIMEOUT_MINUTES` (config, default 15 min), auto-clears and skips injection. Excludes REVIEW-CHECK mode (returns early before reaching this code).
+3. **Staleness timeout** (`context.py` `_append_active_quiz_context()`): checks `session_state.updated_at` via `db.get_session_updated_at()`. If elapsed > `QUIZ_STALENESS_TIMEOUT_MINUTES` (config, default 15 min), auto-clears volatile quiz keys and skips their normal injection. If a DB-backed `pending_review` blob still exists, single-concept review answers can still recover through the assess guard described below. Excludes REVIEW-CHECK mode (returns early before reaching this code).
 4. **Chat history dedup** (`context.py` `_append_chat_history()`): for session-based providers (OpenAI-compat), skips the entire "Recent Conversation" section on continuation turns (`is_new_session=False`). The provider already accumulates full history in its `_sessions` dict — injecting truncated chat history caused the LLM to see the same messages twice with slightly different content (old ones from context, newer ones from provider memory). New sessions and stateless providers always get history. Parameter `is_new_session` is threaded from `_get_conv_session()` through `call_with_fetch_loop()` → `_call_llm()` → `build_prompt_context()`.
 
 **Context injection text** (`_append_active_quiz_context()`): reworded to "Use this concept_id for assess ONLY if the user's message actually answers the quiz question."
@@ -291,7 +291,7 @@ Returns `True` if either of the two quiz session keys is set:
 - `active_concept_ids` — set for multi-quiz flows (see §12)
 
 **Assess/multi_assess guard in `execute_action`** (`pipeline.py` and `scripts/agent.py`):
-Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, it short-circuits with `REPLY: <message>` instead of invoking the handler — preventing score mutations and log entries when the LLM fires an assess outside of a real quiz session. This is a hard code-level guard; it complements the LLM-side intent-detection instructions.
+Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, `assess` first tries `restore_pending_review_context()` from the DB-backed `pending_review` blob written after review-question delivery. Only if that recovery fails does it short-circuit with `REPLY: <message>` instead of invoking the handler, preventing score mutations and log entries when the LLM fires an assess outside of a real quiz session. `multi_assess` remains strict and does not recover from `pending_review`. This is a hard code-level guard; it complements the LLM-side intent-detection instructions.
 
 ---
 
@@ -307,9 +307,11 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Fix — `quiz_anchor_concept_id` lifecycle key:**
 
 - **Set** by `_handle_quiz()` in `tools_assess.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Also pre-set by `/review` command (`bot/commands.py`) before `execute_llm_response` to ensure the anchor is present from the first turn.
+- **Durably backed** by `pending_review`: scheduler sends already wrote `{concept_id, concept_title, question, sent_at, reminder_count}` after DM confirmation, and manual `/review` plus shared chat review now write the same blob after successful delivery/generation. This lets a later single-concept answer recover even if `quiz_anchor_concept_id` was cleared by staleness or process drift.
 - **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
 - **Fallback chain** in `_handle_assess()` in `tools_assess.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
 - **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees.
+- **Recovered** by `restore_pending_review_context()` in `tools_assess.py`: when an `assess` arrives with no active quiz keys but an unresolved `pending_review` exists, the guard restores `active_concept_id`, `quiz_anchor_concept_id`, and `last_quiz_question` before dispatching the real assess handler.
 - **Cleared** in `pipeline.py` alongside other quiz state by `_QUIZ_CLEARING_ACTIONS` (`assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`). Also cleared by staleness timeout in `context.py`.
 - **Not used** by multi-quiz flows (those use separate `active_concept_ids` key).
 
@@ -317,7 +319,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - `quiz.md`: assess docs changed to "Always use the concept_id from the 'Active Quiz Context' section" — removes ambiguous "unless conversation moved" language.
 - `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
 
-**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `bot/commands.py` (`/review` anchor pre-set), `scripts/agent.py` (assess guard), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`.
+**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`, `get_pending_review`, `set_pending_review`, `restore_pending_review_context`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_reminder`, `_send_review_quiz`), `bot/commands.py` (`/review` anchor pre-set, post-send pending_review write), `services/chat_session.py` (shared chat review pending_review write), `scripts/agent.py` (assess guard parity), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`, `tests/test_review_fallback.py`.
 
 ---
 

@@ -56,9 +56,21 @@ def execute_action(action_data: dict) -> str:
         if not db.get_session("quiz_anchor_concept_id") and not db.get_session(
             "active_concept_ids"
         ):
-            return (
-                f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
-            )
+            if action == "assess":
+                from services.tools_assess import restore_pending_review_context
+
+                if restore_pending_review_context():
+                    pass
+                else:
+                    return (
+                        f"REPLY: {message}"
+                        if message
+                        else "REPLY: (assessment skipped -- no active quiz)"
+                    )
+            else:
+                return (
+                    f"REPLY: {message}" if message else "REPLY: (assessment skipped -- no active quiz)"
+                )
 
     # All other actions
     msg_type, result = tools.execute_action(action, params)
