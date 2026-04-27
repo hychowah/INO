@@ -365,5 +365,30 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 15: scheduler state and owner lock tables")
 
+    # --- Migration 16: scheduled review reminder table ---
+    if current < 16:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS scheduled_review_reminders (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+                question_text TEXT NOT NULL,
+                first_sent_at DATETIME NOT NULL,
+                last_sent_at DATETIME NOT NULL,
+                reminder_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending', 'answered', 'skipped', 'expired', 'cancelled')),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_review_reminders_status
+                ON scheduled_review_reminders(status);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_review_reminders_concept
+                ON scheduled_review_reminders(concept_id);
+        """)
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 16: scheduled review reminder table")
+
     _core._set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")

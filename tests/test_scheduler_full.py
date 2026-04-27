@@ -29,6 +29,12 @@ def _set_pending_review(concept_id: int, reminder_count: int = 0, *, hours_ago: 
 async def test_check_reviews_sends_reminder_before_fetching_new_review(test_db):
     concept_id = db.add_concept("Pending Concept", "Desc")
     _set_pending_review(concept_id)
+    db.upsert_scheduled_review_reminder(
+        concept_id,
+        "What is it?",
+        first_sent_at=(datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),
+        last_sent_at=(datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),
+    )
     original_last_activity = state.last_activity_at
     state.last_activity_at = None
 
@@ -41,6 +47,31 @@ async def test_check_reviews_sends_reminder_before_fetching_new_review(test_db):
 
         reminder_mock.assert_awaited_once()
         handle_review_check_mock.assert_not_called()
+    finally:
+        state.last_activity_at = original_last_activity
+
+
+@pytest.mark.anyio
+async def test_check_reviews_resends_after_two_hours_when_unanswered(test_db):
+    concept_id = db.add_concept("Two Hour Reminder", "Desc")
+    db.upsert_scheduled_review_reminder(
+        concept_id,
+        "What is it?",
+        first_sent_at=(datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+        last_sent_at=(datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+
+    try:
+        with (
+            patch("services.scheduler._send_review_reminder", new=AsyncMock()) as reminder_mock,
+            patch("services.scheduler._get_scheduled_review_payload") as payload_mock,
+        ):
+            await scheduler._check_reviews()
+
+        reminder_mock.assert_awaited_once()
+        payload_mock.assert_not_called()
     finally:
         state.last_activity_at = original_last_activity
 

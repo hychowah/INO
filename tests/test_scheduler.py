@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -61,6 +62,12 @@ async def test_send_review_quiz_attaches_skip_button_for_eligible_concept(test_d
     assert pending["concept_id"] == cid
     assert pending["concept_title"] == "Eligible Review"
 
+    reminder = db.get_scheduled_review_reminder()
+    assert reminder is not None
+    assert reminder["concept_id"] == cid
+    assert reminder["question_text"] == "What is eligible?"
+    assert reminder["status"] == "pending"
+
 
 @pytest.mark.anyio
 async def test_send_review_quiz_omits_skip_button_for_ineligible_concept(test_db):
@@ -110,4 +117,63 @@ async def test_check_reviews_skips_when_pipeline_lock_is_busy(test_db):
     finally:
         if state.PIPELINE_LOCK.locked():
             state.PIPELINE_LOCK.release()
+        state.last_activity_at = original_last_activity
+
+
+@pytest.mark.anyio
+async def test_check_reviews_skips_when_recent_activity_heartbeat_present(test_db):
+    del test_db
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+    db.set_session(state.ACTIVITY_HEARTBEAT_KEY, "1")
+
+    try:
+        with patch("services.scheduler._get_scheduled_review_payload") as payload_mock:
+            await scheduler._check_reviews()
+        payload_mock.assert_not_called()
+    finally:
+        state.last_activity_at = original_last_activity
+
+
+def test_get_scheduled_review_payload_does_not_fallback_to_upcoming(test_db):
+    del test_db
+
+    with (
+        patch("services.scheduler.db.get_due_concepts", return_value=[]),
+        patch("services.scheduler.db.get_next_review_concept") as next_mock,
+    ):
+        payload = scheduler._get_scheduled_review_payload()
+
+    assert payload is None
+    next_mock.assert_not_called()
+
+
+def test_is_within_review_quiet_hours_uses_utc_plus_8_window():
+    assert scheduler._is_within_review_quiet_hours(datetime(2026, 4, 27, 15, 30, tzinfo=UTC))
+    assert not scheduler._is_within_review_quiet_hours(datetime(2026, 4, 27, 1, 30, tzinfo=UTC))
+
+
+@pytest.mark.anyio
+async def test_check_reviews_clears_stale_review_in_progress_and_continues(test_db):
+    del test_db
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+    db.set_session("review_in_progress", "42")
+
+    try:
+        with (
+            patch("services.scheduler.state.get_last_user_activity", return_value=None),
+            patch(
+                "services.scheduler.db.get_session_updated_at",
+                side_effect=lambda key, **_: "2026-04-27 08:00:00"
+                if key == "review_in_progress"
+                else None,
+            ),
+            patch("services.scheduler._get_scheduled_review_payload", return_value=None) as payload_mock,
+        ):
+            await scheduler._check_reviews()
+
+        assert db.get_session("review_in_progress") is None
+        payload_mock.assert_called_once_with()
+    finally:
         state.last_activity_at = original_last_activity

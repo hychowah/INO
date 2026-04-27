@@ -60,7 +60,7 @@ async def _handle_user_message(
     quiz_meta | None)."""
     async with state.pipeline_serialized():
         _ensure_db()
-        state.last_activity_at = datetime.now()
+        state.mark_user_activity()
 
         # Reset race guard — new message means new quiz cycle
         db.set_session("quiz_answered", None)

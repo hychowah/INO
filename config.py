@@ -82,7 +82,11 @@ PROPOSAL_CLEANUP_INTERVAL_HOURS = max(
 SESSION_TIMEOUT_MINUTES = 15
 
 # Review nag cooldown — don't re-send the same concept within this many hours
-REVIEW_NAG_COOLDOWN_HOURS = 4
+REVIEW_NAG_COOLDOWN_HOURS = int(os.environ.get("LEARN_REVIEW_NAG_COOLDOWN_HOURS", "2"))
+
+# Quiet hours for scheduled review reminders (local wall clock in UTC+8)
+REVIEW_QUIET_HOURS_START_HOUR = int(os.environ.get("LEARN_REVIEW_QUIET_HOURS_START_HOUR", "23"))
+REVIEW_QUIET_HOURS_END_HOUR = int(os.environ.get("LEARN_REVIEW_QUIET_HOURS_END_HOUR", "7"))
 
 # Quiz staleness timeout — auto-clear active quiz context after this many
 # minutes of inactivity.  Excludes REVIEW-CHECK mode (intentional quizzes).

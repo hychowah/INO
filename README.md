@@ -129,6 +129,7 @@ Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
 - The Discord bot always owns scheduled review DMs. Maintenance, taxonomy, dedup, backup, and proposal cleanup run through a DB-backed owner lock, so either `bot.py` or `api.py` can host the shared background jobs without double-running them.
+- Scheduled review DMs now select overdue concepts only, persist one active reminder row per user, mirror `pending_review` for late-answer recovery, resend unresolved reminders after the configured cooldown, and suppress sends during quiet hours, recent user activity, or active manual review generation.
 - If `frontend/dist/` exists, FastAPI serves the built React SPA for any HTML request outside `/api`, `/assets`, and `/static`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
 - Canonical browser routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, and `/concept/{concept_id}`. Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain as SPA compatibility redirects, and `/actions` remains available as a standalone compatibility route even though Activity normally opens in a drawer.
 - `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while only `/api`, `/assets`, and `/static` are proxied to the FastAPI app on port 8080.
@@ -183,6 +184,9 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_LLM_LOG_FAILURE_RAW` | `1` | Store full malformed provider output in private logs (`0` stores snippets only) |
 | `LEARN_QUIZ_STALENESS_TIMEOUT` | `15` | Minutes before stale active quiz context is auto-cleared |
 | `LEARN_REVIEW_REMINDER_MAX` | `3` | Max unanswered review reminders before moving to the next concept |
+| `LEARN_REVIEW_NAG_COOLDOWN_HOURS` | `2` | Hours before the scheduler re-sends an unanswered scheduled reminder |
+| `LEARN_REVIEW_QUIET_HOURS_START_HOUR` | `23` | Quiet-hours start for scheduled review DMs (UTC+8 wall clock) |
+| `LEARN_REVIEW_QUIET_HOURS_END_HOUR` | `7` | Quiet-hours end for scheduled review DMs (UTC+8 wall clock) |
 | `LEARN_MAX_GRAPH_NODES` | `500` | Max concept nodes returned by graph views/endpoints before filtering |
 | `LEARN_SR_INTERVAL_EXPONENT` | `0.075` | Exponent for spaced-repetition interval growth |
 | `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |

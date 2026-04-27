@@ -103,6 +103,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
+| `services/review_state.py` | ~140 | Shared bridge between typed scheduled reminders and the compatibility `pending_review` session mirror |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `services/chat_actions.py` | ~60 | Shared confirmation helpers and action whitelists used by the browser/API chat flows |
 | `services/chat_session.py` | ~430 | Shared chat-session controller used by FastAPI chat routes and the React browser flow |
@@ -121,6 +122,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `db/concepts.py` | ~555 | Concept CRUD, search, detail view, forecast bucket queries |
 | `db/reviews.py` | ~100 | Review log, remarks |
 | `db/chat.py` | ~105 | Chat history, session state |
+| `db/review_reminders.py` | ~110 | Typed persistence API for scheduled review reminder lifecycle |
 | `db/diagnostics.py` | ~140 | Maintenance diagnostics, title similarity; vector nearest-neighbor for relation candidates |
 | `db/relations.py` | ~110 | Concept relation CRUD and graph assembly helpers |
 | `db/proposals.py` | ~95 | Pending proposal persistence for Discord confirmation views |
@@ -136,8 +138,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral isolated LLM session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
-| `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned reviews every 15 min plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
-| `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, `last_activity_at`, and ContextVar-based current-user identity |
+| `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned overdue review reminders plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
+| `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
@@ -613,15 +615,21 @@ The core brain of the system. Coordinates everything:
 - When structured output mode is enabled, the provider sends `response_format` and retries once without it if an endpoint rejects that option, preserving portability across OpenAI-compatible backends
 
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
-- `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, `last_activity_at`, and the ContextVar-backed current-user identity
+- `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
 - `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the pipeline is busy rather than interleave with active chat work
 - `services/chat_actions.py` centralizes confirmation whitelists and history-entry formatting for the FastAPI browser/API chat surfaces
 
+### services/review_state.py — Reminder State Bridge
+- Centralizes the shared reminder lifecycle helpers that keep scheduler-owned reminder rows and the compatibility `pending_review` session blob in sync
+- Exposes `restore_pending_review_context()` for late-answer recovery and scheduler helpers such as `set_scheduler_reminder()`, `update_pending_review_delivery()`, and `resolve_scheduler_reminder()`
+- Lets assess/skip flows resolve scheduler reminders without duplicating reminder-state rules across `services/scheduler.py` and `services/tools_assess.py`
+
 ### services/scheduler.py — Background Tasks
 - Starts from both `bot.py` and `api.py`; review delivery remains bot-owned while shared jobs coordinate through a DB-backed owner heartbeat row
-- Review check: every 15 minutes (configurable), calls `pipeline.handle_review_check()` → sends quiz DMs
-- **Suppresses reviews** when user has been active within `SESSION_TIMEOUT_MINUTES` to avoid interrupting conversations
+- Review check: every 15 minutes (configurable), selects overdue concepts only, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
+- **Suppresses reviews** when the user has recent durable activity, when `review_in_progress` is active, during configured quiet hours, or when the shared pipeline lock is busy
+- Unanswered reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX`; answered/skipped reminders are resolved by the assess and skip flows
 - Review and any enabled shared jobs skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
 - Maintenance: optional, every `LEARN_MAINTENANCE_INTERVAL_HOURS` when `LEARN_ENABLE_MAINTENANCE=1`; calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
 - Taxonomy: every `LEARN_TAXONOMY_INTERVAL_HOURS`, calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM

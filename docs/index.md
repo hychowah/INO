@@ -27,8 +27,8 @@
 | `CODING.md` | Development instructions for AI coding assistants |
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `docs/API.md` | API reference: Discord commands, FastAPI routes, and FastAPI-served browser routes/endpoints |
-| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, frontend shell/routing, diagrams; **§ Semantic Search & Vector Store** |
-| `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **§12 Hybrid Vector Search** |
+| `docs/ARCHITECTURE.md` | System architecture, file map, data flow, frontend shell/routing, diagrams; **includes the live scheduled review reminder lifecycle and scheduler schema** |
+| `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **see §7 for pending review tracking and §26 for persisted scheduler/reminder state** |
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |
 | `docs/DOC_STANDARD.md` | Documentation writing and maintenance conventions |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds |
@@ -48,6 +48,8 @@ preference-edit  → preference-edit → preferences only   (/preference text ed
 ```
 
 Loading logic: `services/pipeline.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. Structured review-quiz delivery no longer uses an LLM packaging stage; `generate_quiz_question()` calls `quiz_generator.md` for P1, then `format_quiz_action()` deterministically formats the delivery text. The `/preference` edit path is the exception: it calls `_get_base_prompt("preference-edit")` directly and bypasses `_mode_to_skill_set()` and `_call_llm()`.
+
+Next-session reminder note: scheduled review state now spans `services/review_state.py`, the `scheduled_review_reminders` table, and the `pending_review` compatibility mirror. Read `docs/ARCHITECTURE.md` and `docs/DEVNOTES.md` before changing reminder behavior.
 
 ## Editing Guidelines
 

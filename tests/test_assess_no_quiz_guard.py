@@ -283,6 +283,12 @@ class TestAssessAllowedWithQuiz:
                 }
             ),
         )
+        db.upsert_scheduled_review_reminder(
+            cid,
+            "How does Fabric keep a heavy list smooth?",
+            first_sent_at="2026-04-27 09:00:00",
+            last_sent_at="2026-04-27 09:00:00",
+        )
 
         result = _run(
             _pipeline_execute(
@@ -307,6 +313,9 @@ class TestAssessAllowedWithQuiz:
         assert concept["mastery_level"] > 38
         assert concept["review_count"] == 1
         assert db.get_session("pending_review") is None
+        reminder = db.get_scheduled_review_reminder(include_resolved=True)
+        assert reminder is not None
+        assert reminder["status"] == "answered"
 
         reviews = db.get_recent_reviews(cid)
         assert len(reviews) == 1

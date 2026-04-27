@@ -284,6 +284,12 @@ class TestSkipQuizButtonRegression:
 
         cid = db.add_concept("Skip Cleanup", "Desc")
         db.update_concept(cid, review_count=3)
+        db.upsert_scheduled_review_reminder(
+            cid,
+            "What do you remember?",
+            first_sent_at="2026-04-27 09:00:00",
+            last_sent_at="2026-04-27 09:00:00",
+        )
         db.set_session("active_concept_id", str(cid))
         db.set_session("quiz_anchor_concept_id", str(cid))
         db.set_session("last_quiz_question", "What do you remember?")
@@ -293,6 +299,9 @@ class TestSkipQuizButtonRegression:
         assert "error" not in result
         assert db.get_session("active_concept_id") is None
         assert db.get_session("quiz_anchor_concept_id") is None
+        reminder = db.get_scheduled_review_reminder(include_resolved=True)
+        assert reminder is not None
+        assert reminder["status"] == "skipped"
 
     def test_skip_quiz_blocked_when_no_active_quiz(self, test_db):
         """Stale skip callbacks are blocked once quiz anchor state is gone."""

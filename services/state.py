@@ -10,11 +10,12 @@ import contextvars
 import functools
 import threading
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 
 # Tracks the authorized user's last message time.
 # Updated by bot.py, read by scheduler.py for activity suppression.
 last_activity_at: datetime | None = None
+ACTIVITY_HEARTBEAT_KEY = "user_activity_heartbeat"
 
 # Serializes access to the chat pipeline while process-global session state is
 # still shared between the bot, scheduler, and FastAPI chat entry points.
@@ -37,6 +38,42 @@ def set_current_user(user_id: str) -> None:
 def get_current_user() -> str:
     """Get the active user_id for the current context."""
     return _current_user_id.get()
+
+
+def mark_user_activity(at: datetime | None = None) -> datetime:
+    """Record recent user activity in both runtime memory and session state."""
+    global last_activity_at
+
+    activity_at = at or datetime.now()
+    last_activity_at = activity_at
+
+    import db
+
+    db.set_session(ACTIVITY_HEARTBEAT_KEY, "1")
+    return activity_at
+
+
+def get_last_user_activity() -> datetime | None:
+    """Return the freshest activity timestamp from memory or durable session state."""
+    candidates: list[datetime] = []
+    if last_activity_at is not None:
+        candidates.append(last_activity_at)
+
+    import db
+
+    updated_at = db.get_session_updated_at(ACTIVITY_HEARTBEAT_KEY)
+    if updated_at:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+            try:
+                parsed_utc = datetime.strptime(updated_at, fmt).replace(tzinfo=UTC)
+                candidates.append(parsed_utc.astimezone().replace(tzinfo=None))
+                break
+            except ValueError:
+                continue
+
+    if not candidates:
+        return None
+    return max(candidates)
 
 
 @asynccontextmanager

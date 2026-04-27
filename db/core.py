@@ -47,7 +47,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 # ============================================================================
@@ -173,6 +173,23 @@ def _init_knowledge_db():
             discord_id TEXT UNIQUE,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS scheduled_review_reminders (
+            user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+            question_text TEXT NOT NULL,
+            first_sent_at DATETIME NOT NULL,
+            last_sent_at DATETIME NOT NULL,
+            reminder_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'answered', 'skipped', 'expired', 'cancelled')),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_review_reminders_status
+            ON scheduled_review_reminders(status);
+        CREATE INDEX IF NOT EXISTS idx_scheduled_review_reminders_concept
+            ON scheduled_review_reminders(concept_id);
 
         CREATE TABLE IF NOT EXISTS scheduler_state (
             job_name TEXT PRIMARY KEY,

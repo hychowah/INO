@@ -19,6 +19,8 @@ Read these **before making any code changes**.
 
 **Quick reference by task type** — see `docs/DOC_STANDARD.md` for what to update.
 
+Reminder-system work: read `docs/ARCHITECTURE.md` for the live scheduler/reminder flow and `docs/DEVNOTES.md` §7 + §26 for the migration state before changing `services/scheduler.py`, `services/review_state.py`, or reminder persistence.
+
 ---
 
 ## For the Runtime LLM

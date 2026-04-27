@@ -581,7 +581,7 @@ async def handle_chat_message(text: str, author: str = "chat", source: str = "ch
     if not text:
         return _response("Message cannot be empty.", msg_type="error")
 
-    state.last_activity_at = datetime.now()
+    state.mark_user_activity()
     db.set_session("quiz_answered", None)
 
     if text.startswith("/"):

@@ -12,11 +12,10 @@ Pending review tracking (DB-backed, survives restarts):
 
 import asyncio
 import inspect
-import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 import discord
@@ -28,6 +27,13 @@ from services import backup as backup_service
 from services import pipeline, state
 from services.dedup import format_dedup_suggestions
 from services.formatting import truncate_for_discord
+from services.review_state import (
+    get_active_scheduled_review_reminder,
+    normalize_reminder_timestamp,
+    resolve_scheduler_reminder,
+    set_scheduler_reminder,
+    update_pending_review_delivery,
+)
 from services.views import DedupConfirmView
 
 logger = logging.getLogger("scheduler")
@@ -42,6 +48,7 @@ _owner_pid = os.getpid()
 _TICK_SECONDS = 60
 _REVIEW_STARTUP_DELAY_SECONDS = 30
 _OWNER_STALE_SECONDS = _TICK_SECONDS * 3
+_QUIET_HOURS_TZ = timezone(timedelta(hours=8))
 
 
 @dataclass(frozen=True)
@@ -52,47 +59,94 @@ class _ScheduledJob:
 
 
 # ============================================================================
-# Pending review helpers
+# Reminder helpers
 # ============================================================================
 
 
-def _get_pending_review() -> dict | None:
-    """Read pending review blob from session state. Returns dict or None."""
-    raw = db.get_session("pending_review")
-    if not raw:
+def _parse_session_timestamp(raw_value: str | None) -> datetime | None:
+    if not raw_value:
         return None
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Corrupt pending_review in session state — clearing")
-        db.set_session("pending_review", None)
-        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+        try:
+            parsed_utc = datetime.strptime(raw_value, fmt).replace(tzinfo=UTC)
+            return parsed_utc.astimezone().replace(tzinfo=None)
+        except ValueError:
+            continue
+    return None
 
 
-def _set_pending_review(concept_id: int, concept_title: str, question: str) -> None:
-    """Write a new pending review blob. Called AFTER DM is confirmed sent."""
-    blob = {
-        "concept_id": concept_id,
-        "concept_title": concept_title,
-        "question": question,
-        "sent_at": datetime.now().isoformat(),
-        "reminder_count": 0,
-    }
-    db.set_session("pending_review", json.dumps(blob))
-    logger.debug(f"Set pending review: concept #{concept_id}")
+def _is_within_review_quiet_hours(now_utc: datetime | None = None) -> bool:
+    current_utc = now_utc or datetime.now(UTC)
+    if current_utc.tzinfo is None:
+        current_utc = current_utc.replace(tzinfo=UTC)
+
+    local_time = current_utc.astimezone(_QUIET_HOURS_TZ)
+    hour = local_time.hour
+    return hour >= config.REVIEW_QUIET_HOURS_START_HOUR or hour < config.REVIEW_QUIET_HOURS_END_HOUR
+
+
+def _review_in_progress_active() -> bool:
+    value = db.get_session("review_in_progress")
+    if not value:
+        return False
+
+    updated_at = _parse_session_timestamp(db.get_session_updated_at("review_in_progress"))
+    if updated_at is None:
+        return True
+
+    stale_after = timedelta(minutes=config.QUIZ_STALENESS_TIMEOUT_MINUTES)
+    if updated_at <= datetime.now() - stale_after:
+        logger.info("Clearing stale review_in_progress gate")
+        db.set_session("review_in_progress", None)
+        return False
+
+    return True
 
 
 def _update_pending_reminder(pending: dict) -> None:
     """Increment reminder count + reset sent_at after sending a reminder."""
-    pending["reminder_count"] = pending.get("reminder_count", 0) + 1
-    pending["sent_at"] = datetime.now().isoformat()
-    db.set_session("pending_review", json.dumps(pending))
+    update_pending_review_delivery(pending)
 
 
-def _clear_pending_review() -> None:
-    """Clear pending review state (max reminders exhausted or concept deleted)."""
-    db.set_session("pending_review", None)
-    logger.debug("Cleared pending review state")
+def _get_scheduled_review_payload() -> str | None:
+    """Build a scheduler review payload from overdue concepts only.
+
+    Unlike pipeline.handle_review_check(), this path never falls back to the
+    next upcoming concept because scheduled reminders should only fire for
+    concepts that are already due.
+    """
+    due = db.get_due_concepts(limit=5)
+    if not due:
+        return None
+
+    concept = due[0]
+    detail = db.get_concept_detail(concept["id"])
+    if not detail:
+        return None
+
+    topic_names = [topic["title"] for topic in detail.get("topics", [])]
+    recent_reviews = detail.get("recent_reviews", [])
+    remark_summary = detail.get("remark_summary", "")
+
+    context_parts = [
+        f"Concept: {detail['title']} (#{detail['id']})",
+        f"Description: {detail.get('description', 'N/A')}",
+        f"Topics: {', '.join(topic_names) if topic_names else 'untagged'}",
+        f"Score: {detail['mastery_level']}/100, Reviews: {detail['review_count']}",
+    ]
+
+    if remark_summary:
+        context_parts.append(f"Latest remark: {remark_summary[:100]}")
+
+    if recent_reviews:
+        last = recent_reviews[0]
+        context_parts.append(f"Last Q: {last.get('question_asked', 'N/A')}")
+        context_parts.append(f"Last quality: {last.get('quality', 'N/A')}/5")
+
+    if len(due) > 1:
+        logger.info("%s more concept(s) due for review", len(due) - 1)
+
+    return f"{concept['id']}|{' | '.join(context_parts)}"
 
 
 # ============================================================================
@@ -117,27 +171,32 @@ async def _check_reviews():
             logger.debug("Skipping review check — pipeline busy")
             return
 
-        if state.last_activity_at:
+        last_activity_at = state.get_last_user_activity()
+        if last_activity_at:
             cutoff = datetime.now() - timedelta(minutes=config.SESSION_TIMEOUT_MINUTES)
-            if state.last_activity_at > cutoff:
+            if last_activity_at > cutoff:
                 logger.debug("Skipping review check — user active in session")
                 return
+
+        if _is_within_review_quiet_hours():
+            logger.debug("Skipping review check — within quiet hours")
+            return
 
         logger.debug("Running review-check...")
 
         # Suppress if /review command is actively generating a quiz
-        if db.get_session("review_in_progress"):
+        if _review_in_progress_active():
             logger.debug("Skipping review check — /review command in progress")
             return
 
-        pending = _get_pending_review()
+        pending = get_active_scheduled_review_reminder()
         if pending:
             cid = pending.get("concept_id")
             if cid and not db.get_concept(cid):
                 logger.info(f"Pending concept #{cid} no longer exists — clearing")
-                _clear_pending_review()
+                resolve_scheduler_reminder("cancelled")
             else:
-                sent_at_str = pending.get("sent_at", "")
+                sent_at_str = pending.get("last_sent_at") or pending.get("first_sent_at") or ""
                 try:
                     sent_at = datetime.fromisoformat(sent_at_str)
                 except (ValueError, TypeError):
@@ -161,21 +220,20 @@ async def _check_reviews():
                         f"Pending review #{cid} — {reminder_count} reminders sent, "
                         f"giving up and moving to next concept"
                     )
-                    _clear_pending_review()
+                    resolve_scheduler_reminder("expired")
                 else:
                     await _send_review_reminder(pending)
                     return
 
         try:
-            review_lines = pipeline.handle_review_check()
+            review_payload = _get_scheduled_review_payload()
 
-            if not review_lines:
+            if not review_payload:
                 logger.debug("No pending reviews")
                 return
 
-            line = review_lines[0]
-            logger.info(f"Review due: {line[:80]}")
-            await _send_review_quiz(line)
+            logger.info(f"Review due: {review_payload[:80]}")
+            await _send_review_quiz(review_payload)
 
         except Exception as e:
             logger.error(f"Error in review-check: {e}", exc_info=True)
@@ -304,7 +362,7 @@ async def _send_review_quiz(payload: str):
                 if cid:
                     concept = db.get_concept(cid)
                     concept_title = concept["title"] if concept else "Unknown"
-                    _set_pending_review(cid, concept_title, message[:500])
+                    set_scheduler_reminder(cid, concept_title, message[:500])
             else:
                 logger.debug("Empty result for review quiz")
 

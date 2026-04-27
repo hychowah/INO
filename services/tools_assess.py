@@ -1,6 +1,4 @@
-"""
-Assessment and quiz action handlers, extracted from services/tools.py.
-"""
+"""Assessment and quiz action handlers, extracted from services/tools.py."""
 
 import json
 import logging
@@ -10,6 +8,11 @@ from typing import Any, Dict, Tuple
 
 import config
 import db
+from services.review_state import (
+    get_pending_review,
+    restore_pending_review_context,
+    set_pending_review,
+)
 from services.tools import execute_action
 
 logger = logging.getLogger("tools")
@@ -25,72 +28,6 @@ _QUIZ_STATE_KEYS = (
     "p1_target_facet",
     "p1_difficulty",
 )
-
-
-# ============================================================================
-# Pending review helpers
-# ============================================================================
-
-
-def get_pending_review() -> dict | None:
-    """Read pending review state from the session store."""
-    raw = db.get_session("pending_review")
-    if not raw:
-        return None
-    try:
-        pending = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Corrupt pending_review in session state — clearing")
-        db.set_session("pending_review", None)
-        return None
-
-    if not isinstance(pending, dict):
-        db.set_session("pending_review", None)
-        return None
-    return pending
-
-
-def set_pending_review(concept_id: int, question: str, *, concept_title: str | None = None) -> None:
-    """Persist a single outstanding review question for late-answer recovery."""
-    title = concept_title
-    if title is None:
-        concept = db.get_concept(concept_id)
-        title = concept["title"] if concept else "Unknown"
-
-    blob = {
-        "concept_id": int(concept_id),
-        "concept_title": title,
-        "question": (question or "")[:500],
-        "sent_at": datetime.now().isoformat(),
-        "reminder_count": 0,
-    }
-    db.set_session("pending_review", json.dumps(blob))
-
-
-def restore_pending_review_context() -> dict | None:
-    """Restore quiz anchor state from an unresolved pending review when possible."""
-    pending = get_pending_review()
-    if not pending:
-        return None
-
-    concept_id = pending.get("concept_id")
-    if concept_id is None:
-        db.set_session("pending_review", None)
-        return None
-
-    concept = db.get_concept(int(concept_id))
-    if not concept:
-        db.set_session("pending_review", None)
-        return None
-
-    db.set_session("active_concept_id", str(concept_id))
-    db.set_session("quiz_anchor_concept_id", str(concept_id))
-
-    question = (pending.get("question") or "").strip()
-    if question:
-        db.set_session("last_quiz_question", question)
-
-    return pending
 
 
 # ============================================================================
@@ -268,6 +205,7 @@ def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
     db.set_session("active_concept_ids", None)
     db.set_session("active_concept_id", None)
     db.set_session("pending_review", None)
+    db.resolve_scheduled_review_reminder("answered")
 
     default_msg = f"Multi-assess ({len(results)} concepts):\n" + "\n".join(results)
     return ("reply", params.get("message", default_msg))
@@ -402,6 +340,7 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
 
     # Clear pending review state — the quiz has been answered
     db.set_session("pending_review", None)
+    db.resolve_scheduled_review_reminder("answered")
 
     p1_question_type = db.get_session("p1_question_type")
     p1_target_facet = db.get_session("p1_target_facet")
@@ -638,6 +577,7 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
     db.set_session("last_assess_quality", "5")
 
     # Clean up session state
+    db.resolve_scheduled_review_reminder("skipped")
     clear_quiz_state(mark_answered=True)
 
     # Audit trail
