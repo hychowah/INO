@@ -70,6 +70,8 @@ async def send_review_question(
     send_fn, question: str, concept_id: int | None, message_handler: Callable[..., Awaitable]
 ) -> "discord.Message":
     """Send a review question and attach the skip button when eligible."""
+    db.set_session("quiz_answered", None)
+
     view = None
     concept = None
 

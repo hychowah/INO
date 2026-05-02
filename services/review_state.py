@@ -84,8 +84,22 @@ def restore_pending_review_context() -> dict | None:
 def normalize_reminder_timestamp(raw_value: str | None) -> str:
     parsed = db._parse_datetime(raw_value)
     if not parsed:
+        if raw_value:
+            logger.warning("Invalid pending_review timestamp %r; resetting to now", raw_value)
         return db._now_iso()
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _clear_invalid_pending_review(reason: str, pending: dict | None = None) -> None:
+    concept_id = None
+    if isinstance(pending, dict):
+        concept_id = pending.get("concept_id")
+    logger.warning(
+        "Clearing invalid pending_review state: reason=%s concept_id=%s",
+        reason,
+        concept_id,
+    )
+    clear_pending_review()
 
 
 def get_active_scheduled_review_reminder() -> dict | None:
@@ -105,11 +119,27 @@ def get_active_scheduled_review_reminder() -> dict | None:
 
     concept_id = pending.get("concept_id")
     if concept_id is None:
+        _clear_invalid_pending_review("missing_concept_id", pending)
+        return None
+
+    try:
+        concept_id = int(concept_id)
+    except (TypeError, ValueError):
+        _clear_invalid_pending_review("non_integer_concept_id", pending)
+        return None
+
+    concept = db.get_concept(concept_id)
+    if not concept:
+        _clear_invalid_pending_review("missing_concept", pending)
         return None
 
     normalized_sent_at = normalize_reminder_timestamp(pending.get("sent_at"))
+    logger.info(
+        "Importing legacy pending_review into scheduled_review_reminders: concept_id=%s",
+        concept_id,
+    )
     db.upsert_scheduled_review_reminder(
-        int(concept_id),
+        concept_id,
         pending.get("question", ""),
         first_sent_at=normalized_sent_at,
         last_sent_at=normalized_sent_at,
@@ -120,7 +150,7 @@ def get_active_scheduled_review_reminder() -> dict | None:
         return None
 
     reminder = dict(reminder)
-    reminder["concept_title"] = pending.get("concept_title", "Unknown")
+    reminder["concept_title"] = pending.get("concept_title") or concept["title"]
     reminder["question"] = pending.get("question", "")
     reminder["sent_at"] = normalized_sent_at
     return reminder

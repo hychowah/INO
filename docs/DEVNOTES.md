@@ -147,6 +147,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 - **Typed reminder state** (`scheduled_review_reminders` table): scheduler now persists one active reminder row per user with first/last sent timestamps, resend cooldown tracking, and terminal resolution (`answered`, `skipped`, `expired`)
 - **Chat history sanitized**: `[SCHEDULED_REVIEW]` → `[system: review quiz sent for concept #N — awaiting response]`
 - **Reminder bridge extracted**: `services/review_state.py` keeps `pending_review` and `scheduled_review_reminders` in sync so scheduler and assess flows do not drift
+- **Legacy reminder import is guarded**: when the scheduler has only `pending_review`, `services/review_state.py` now validates `concept_id`, normalizes timestamps, and clears invalid/deleted legacy state before importing it into `scheduled_review_reminders`; this prevents proactive reminders from stalling while manual `/review` still appears healthy
 - **Pending/reminder resolved on assess and skip** — casual messages still do not clear reminder state
 - **Static reminders** (no LLM call) with `REVIEW_REMINDER_MAX` (default 3) before moving on; resend cadence now defaults to `REVIEW_NAG_COOLDOWN_HOURS=2`
 - Set pending AFTER `user.send()` succeeds — avoids race condition
@@ -441,7 +442,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Anti-gaming guard:** The skip button only appears when `review_count >= 2` for the concept. First-time and once-reviewed concepts must be answered properly. Enforced in both `_send_quiz_response` (button visibility) and `skip_quiz()` (server-side check).
 
-**Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call. The Discord button's `clicked` flag also prevents duplicate button presses.
+**Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call, in shared chat message entry, and again at the fresh review delivery boundary in `bot.messages.send_review_question()` so a newly sent quiz does not inherit the prior question's answered/skip guard. The Discord button's `clicked` flag also prevents duplicate button presses.
 
 **4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` has two roles: (1) when `show_skip=True`, attach a `QuizQuestionView` with the skip button; (2) any non-None `quiz_meta` triggers `format_quiz_metadata()` being appended to the message footer. The delivery-path guard was widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py` so that all quiz deliveries — not only skip-eligible ones — receive the metadata footer. A prior regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed by passing `quiz_meta` through `_send_quiz_response()`. `Explain` remains plain-text by design.
 
@@ -449,7 +450,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Session cleanup:** `skip_quiz()` clears `last_quiz_question`, `last_assess_concept_id`, `last_assess_quality`, and `pending_review` to prevent stale state from interfering with subsequent interactions.
 
-**Delivery-path parity fix:** The manual `/review` command already attached `QuizQuestionView` when `review_count >= 2`, but scheduler-triggered review DMs originally sent plain text only. Both manual and scheduler review-question delivery now route through `bot.messages.send_review_question()`, so timer-triggered quizzes and manual reviews attach the skip button with the same eligibility rule, message-splitting behavior, and metadata footer.
+**Delivery-path parity fix:** The manual `/review` command already attached `QuizQuestionView` when `review_count >= 2`, but scheduler-triggered review DMs originally sent plain text only. Both manual and scheduler review-question delivery now route through `bot.messages.send_review_question()`, so timer-triggered quizzes and manual reviews attach the skip button with the same eligibility rule, message-splitting behavior, metadata footer, and fresh-question `quiz_answered` reset.
 
 **Quiz message metadata:** Every quiz question message now includes a bot-injected footer line produced by `format_quiz_metadata()` (in `services/formatting.py`): `📖 **{title}** · Score: N/100 · Review #N`. When `review_count < 2`, a hint `_(skip unlocks after N more review(s))_` is also appended. This is injected by the bot layer — the LLM does not generate it.
 

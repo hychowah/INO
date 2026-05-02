@@ -4,6 +4,14 @@ Key changes, newest first.
 
 ---
 
+## May 2026
+
+### Fixed
+
+- **Proactive reminder self-healing** — scheduler review checks now clear malformed or deleted legacy `pending_review` state before importing it into `scheduled_review_reminders`, so one stale reminder blob no longer aborts proactive Discord review delivery while manual `/review` still works
+- **Legacy reminder bridge recovery** — when only the compatibility `pending_review` mirror exists, the next scheduler pass can re-import it into the typed reminder row after validating concept existence and normalizing timestamps
+- **Skip-button re-arming on fresh reviews** — each newly delivered review question now resets the stale `quiz_answered` guard before sending the message, so `I know this` works on the next eligible question instead of incorrectly reporting the quiz was already answered or skipped
+
 ## April 2026
 
 ### Added

@@ -7,6 +7,7 @@ import pytest
 import db
 from bot.messages import send_long_with_view, send_review_question
 from services.parser import CONTROLLED_FORMAT_FAILURE_MESSAGE
+from services.tools_assess import skip_quiz
 from services.views import QuizQuestionView
 
 
@@ -64,3 +65,23 @@ async def test_send_review_question_attaches_skip_button_at_boundary(test_db):
     )
     assert isinstance(call.kwargs["view"], QuizQuestionView)
     assert call.kwargs["view"].concept_id == cid
+
+
+@pytest.mark.anyio
+async def test_send_review_question_clears_stale_quiz_answered_for_next_skip(test_db):
+    cid = db.add_concept("Repeat Skip Review", "Desc")
+    db.update_concept(cid, review_count=3)
+    db.set_session("quiz_answered", "1")
+    db.set_session("active_concept_id", str(cid))
+    db.set_session("quiz_anchor_concept_id", str(cid))
+    db.set_session("last_quiz_question", "What do you remember?")
+    send_fn = AsyncMock(return_value=MagicMock())
+
+    async def fake_handler(_text, _author):
+        return "ignored", None, None, None
+
+    await send_review_question(send_fn, "What do you remember?", cid, fake_handler)
+
+    assert db.get_session("quiz_answered") is None
+    result = skip_quiz(cid)
+    assert "error" not in result

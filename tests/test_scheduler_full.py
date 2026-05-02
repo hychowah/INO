@@ -77,6 +77,37 @@ async def test_check_reviews_resends_after_two_hours_when_unanswered(test_db):
 
 
 @pytest.mark.anyio
+async def test_check_reviews_clears_deleted_pending_review_before_fetching_due_review(test_db):
+    stale_concept_id = db.add_concept("Deleted Pending Concept", "Desc")
+    fresh_concept_id = db.add_concept("Fresh Due Concept", "Desc")
+    _set_pending_review(stale_concept_id)
+    assert db.delete_concept(stale_concept_id)
+
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+
+    try:
+        with (
+            patch("services.scheduler.state.get_last_user_activity", return_value=None),
+            patch("services.scheduler._is_within_review_quiet_hours", return_value=False),
+            patch("services.scheduler._review_in_progress_active", return_value=False),
+            patch(
+                "services.scheduler._get_scheduled_review_payload",
+                return_value=f"{fresh_concept_id}|context",
+            ) as payload_mock,
+            patch("services.scheduler._send_review_quiz", new=AsyncMock()) as quiz_mock,
+        ):
+            await scheduler._check_reviews()
+
+        payload_mock.assert_called_once_with()
+        quiz_mock.assert_awaited_once_with(f"{fresh_concept_id}|context")
+        assert db.get_session("pending_review") is None
+        assert db.get_scheduled_review_reminder() is None
+    finally:
+        state.last_activity_at = original_last_activity
+
+
+@pytest.mark.anyio
 async def test_check_maintenance_forwards_nonempty_context(test_db):
     with (
         patch("services.scheduler.pipeline.handle_maintenance", return_value="diag") as handle_mock,

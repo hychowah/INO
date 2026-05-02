@@ -15,7 +15,7 @@ Current shipped behavior is still single-user at the interface layer. Internally
 | Command | Description |
 |---------|-------------|
 | `/learn [text]` | Start or continue a learning session. Optionally pass a topic or question as `text`. |
-| `/review` | Trigger a spaced-repetition quiz session. Manual `/review` still uses the shared review selector and may fall back to the next upcoming concept when nothing is overdue. Scheduler-triggered review DMs now use a separate overdue-only path, persist a typed scheduled reminder plus a `pending_review` recovery mirror after successful delivery, and can still recover a later single-concept answer even if the transient quiz anchor has expired. |
+| `/review` | Trigger a spaced-repetition quiz session. Manual `/review` still uses the shared review selector and may fall back to the next upcoming concept when nothing is overdue. Scheduler-triggered review DMs now use a separate overdue-only path, persist a typed scheduled reminder plus a `pending_review` recovery mirror after successful delivery, re-import legacy reminder state when needed, and can still recover a later single-concept answer even if the transient quiz anchor has expired. |
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
@@ -33,7 +33,9 @@ The command remains registered so operators can re-enable maintenance without re
 
 - The Discord bot owns scheduled review DMs; `api.py` hosts only the shared non-DM background jobs.
 - Scheduler-triggered reviews select overdue concepts only and do not use the manual `/review` fallback to the next upcoming concept.
-- Unanswered scheduled reminders persist in `scheduled_review_reminders`, mirror compatibility state into `pending_review`, resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS`, and stop after `LEARN_REVIEW_REMINDER_MAX` reminders.
+- Unanswered scheduled reminders persist in `scheduled_review_reminders`, mirror compatibility state into `pending_review`, and can re-import legacy-only `pending_review` state into the typed reminder row on a later scheduler pass.
+- Invalid legacy reminder state is self-healed before delivery: malformed `pending_review` concept ids are cleared, deleted reminder concepts are cancelled, and the scheduler continues to the next eligible overdue concept instead of aborting the review check.
+- Unanswered scheduled reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX` reminders.
 - Scheduled review sends are suppressed while the user has recent activity, while `review_in_progress` is active, and during the UTC+8 quiet-hours window defined by `LEARN_REVIEW_QUIET_HOURS_START_HOUR` and `LEARN_REVIEW_QUIET_HOURS_END_HOUR`.
 - Assess and skip flows resolve the persisted scheduled reminder so the scheduler stops treating it as unanswered.
 
@@ -51,6 +53,7 @@ on_message → _handle_user_message → services/pipeline.py → LLM → tools/a
 - After an assessment, the bot shows navigation buttons: `Quiz again`, `Next due`, `Explain`, and `Done`.
 - The button emphasis adapts to the score: stronger answers promote `Next due`, while weaker answers promote `Explain`.
 - For concepts with `review_count >= 2`, eligible quiz questions can also show an `I know this` button that scores the review as confident recall without requiring a typed answer.
+- Each newly delivered review question clears the previous `quiz_answered` guard before the message is sent, so the next eligible skip button works for the new question while duplicate submit/skip protection still applies to that active quiz.
 - The skip button is a Discord-only UI affordance. It is not a public REST action and is not emitted by the LLM.
 
 ### Authentication

@@ -9,7 +9,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 
 - **LLM-driven pedagogy** — Topic/concept extraction, quiz generation, and knowledge assessment are all handled by the LLM via a modular prompt system with hot-reloadable skill files
 - **Score-based spaced repetition** — Asymmetric 0–100 scoring with exponential intervals (custom algorithm, not SM-2)
-- **Quiz skip button** — After 2+ reviews, eligible quiz questions show an `I know this` button that scores confident recall without forcing a typed answer
+- **Quiz skip button** — After 2+ reviews, eligible quiz questions show an `I know this` button that scores confident recall without forcing a typed answer; each fresh review delivery re-arms the button for the new question
 - **Hybrid search** — Qdrant vector store (768-dim, `all-mpnet-base-v2`) + SQLite FTS5, with graceful degradation if Qdrant is unavailable
 - **Multi-concept synthesis quizzes** — Semantically clusters related concepts for cross-topic questions
 - **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
@@ -129,7 +129,7 @@ Current web runtime notes:
 
 - `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
 - The Discord bot always owns scheduled review DMs. Maintenance, taxonomy, dedup, backup, and proposal cleanup run through a DB-backed owner lock, so either `bot.py` or `api.py` can host the shared background jobs without double-running them.
-- Scheduled review DMs now select overdue concepts only, persist one active reminder row per user, mirror `pending_review` for late-answer recovery, resend unresolved reminders after the configured cooldown, and suppress sends during quiet hours, recent user activity, or active manual review generation.
+- Scheduled review DMs now select overdue concepts only, persist one active reminder row per user, mirror `pending_review` for late-answer recovery, re-import legacy `pending_review` state when needed, clear invalid or deleted reminder state automatically, resend unresolved reminders after the configured cooldown, and suppress sends during quiet hours, recent user activity, or active manual review generation.
 - If `frontend/dist/` exists, FastAPI serves the built React SPA for any HTML request outside `/api`, `/assets`, and `/static`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
 - Canonical browser routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, and `/concept/{concept_id}`. Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain as SPA compatibility redirects, and `/actions` remains available as a standalone compatibility route even though Activity normally opens in a drawer.
 - `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while only `/api`, `/assets`, and `/static` are proxied to the FastAPI app on port 8080.

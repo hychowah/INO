@@ -289,13 +289,29 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   scheduler._review_loop()
          │
          ▼ (every REVIEW_CHECK_INTERVAL_MINUTES)
-  pipeline.handle_review_check()               ← sync, direct DB
-         │
-         ├── db.get_due_concepts(limit=5)
-         ├── db.get_concept_detail(concept_id)
-         └── return ["id|context_string", ...]   (or [] if nothing due)
-                    │
-                    ▼
+  scheduler._check_reviews()
+    │
+    ├── skip cycle when pipeline busy, user active, quiet hours,
+    │   or manual /review generation is in progress
+    │
+    ├── review_state.get_active_scheduled_review_reminder()
+    │      │
+    │      ├── read typed `scheduled_review_reminders` row if present
+    │      ├── otherwise import legacy `pending_review` compatibility state
+    │      └── clear invalid or deleted legacy reminder state before import
+    │
+    ├── pending reminder?
+    │      ├── deleted concept → cancel reminder and continue
+    │      ├── cooldown not elapsed → skip this cycle
+    │      ├── reminders left → send static reminder DM and update delivery count
+    │      └── max reminders reached → expire reminder and continue
+    │
+    ├── scheduler._get_scheduled_review_payload()   ← overdue only
+    │      ├── db.get_due_concepts(limit=5)
+    │      ├── db.get_concept_detail(concept_id)
+    │      └── return "id|context_string" (or None if nothing overdue)
+    │
+    ▼
   scheduler._send_review_quiz(payload)
          │
          ▼
@@ -322,7 +338,11 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   └────────────────────────────────────────────────────────────┘
          │
          ▼
-  DM user: "📚 Learning Review\n<quiz question>"
+    bot.messages.send_review_question(...)
+      │
+      ├── clears stale `quiz_answered` before a fresh review delivery
+      ├── attaches `QuizQuestionView` when skip is eligible
+      └── DM user: "📚 Learning Review\n<quiz question>"
 ```
 
 ### Flow 3: Shared maintenance jobs (persisted wall-clock cadence)
@@ -623,11 +643,12 @@ The core brain of the system. Coordinates everything:
 ### services/review_state.py — Reminder State Bridge
 - Centralizes the shared reminder lifecycle helpers that keep scheduler-owned reminder rows and the compatibility `pending_review` session blob in sync
 - Exposes `restore_pending_review_context()` for late-answer recovery and scheduler helpers such as `set_scheduler_reminder()`, `update_pending_review_delivery()`, and `resolve_scheduler_reminder()`
+- Validates legacy `pending_review` before importing it into `scheduled_review_reminders`; malformed concept ids, missing concepts, and invalid timestamps are cleared or normalized instead of poisoning the scheduler path
 - Lets assess/skip flows resolve scheduler reminders without duplicating reminder-state rules across `services/scheduler.py` and `services/tools_assess.py`
 
 ### services/scheduler.py — Background Tasks
 - Starts from both `bot.py` and `api.py`; review delivery remains bot-owned while shared jobs coordinate through a DB-backed owner heartbeat row
-- Review check: every 15 minutes (configurable), selects overdue concepts only, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
+- Review check: every 15 minutes (configurable), selects overdue concepts only, repairs or cancels invalid reminder state, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
 - **Suppresses reviews** when the user has recent durable activity, when `review_in_progress` is active, during configured quiet hours, or when the shared pipeline lock is busy
 - Unanswered reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX`; answered/skipped reminders are resolved by the assess and skip flows
 - Review and any enabled shared jobs skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
