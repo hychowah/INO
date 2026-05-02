@@ -1,6 +1,7 @@
 """Discord slash/hybrid command handlers."""
 
 import asyncio
+import functools
 import logging
 
 import config
@@ -29,11 +30,21 @@ from services.views import (
 logger = logging.getLogger("bot")
 
 
+def with_ctx_user_scope(func):
+    @functools.wraps(func)
+    async def wrapper(ctx, *args, **kwargs):
+        with state.current_user_scope(str(ctx.author.id)):
+            return await func(ctx, *args, **kwargs)
+
+    return wrapper
+
+
 @bot.hybrid_command(
     name="learn",
     description="AI learning coach — ask questions, get quizzed, track knowledge",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def learn_command(ctx, *, text: str = ""):
     """
     /learn why is stainless steel rust-proof?
@@ -47,7 +58,7 @@ async def learn_command(ctx, *, text: str = ""):
     try:
         async with ctx.channel.typing():
             response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
-                text or "hello", str(ctx.author)
+                text or "hello", str(ctx.author), user_id=str(ctx.author.id)
             )
 
         if pending_action:
@@ -109,6 +120,7 @@ async def ping_command(ctx):
 
 @bot.hybrid_command(name="sync", description="Sync slash commands")
 @authorized_only()
+@with_ctx_user_scope
 async def sync_command(ctx):
     synced = await bot.tree.sync()
     await ctx.send(f"Synced {len(synced)} command(s).")
@@ -119,6 +131,7 @@ async def sync_command(ctx):
     description="View or switch persona preset (mentor/coach/buddy)",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def persona_command(ctx, *, name: str = ""):
     """
     /persona          — show current persona + available presets
@@ -173,6 +186,7 @@ async def persona_command(ctx, *, name: str = ""):
 
 @bot.hybrid_command(name="due", description="Show concepts due for review")
 @authorized_only()
+@with_ctx_user_scope
 async def due_command(ctx):
     """Show due concepts and review stats without calling the LLM."""
     _ensure_db()
@@ -202,6 +216,7 @@ async def due_command(ctx):
 
 @bot.hybrid_command(name="topics", description="Show your knowledge map")
 @authorized_only()
+@with_ctx_user_scope
 async def topics_command(ctx):
     """Show the topic tree with mastery stats, no LLM call."""
     _ensure_db()
@@ -213,6 +228,7 @@ async def topics_command(ctx):
 
 @bot.hybrid_command(name="clear", description="Clear chat history")
 @authorized_only()
+@with_ctx_user_scope
 async def clear_command(ctx):
     """Clear learning agent chat history."""
     _ensure_db()
@@ -226,6 +242,7 @@ async def clear_command(ctx):
     description="Run maintenance + dedup check now",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def maintain_command(ctx):
     """Manually trigger maintenance diagnostics and dedup agent."""
     if not config.MAINTENANCE_MODE_ENABLED:
@@ -320,6 +337,7 @@ async def maintain_command(ctx):
     description="Pull your next due review quiz",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def review_command(ctx):
     """Manually trigger a review quiz for the next due concept."""
     is_interaction = ctx.interaction is not None
@@ -444,6 +462,7 @@ async def review_command(ctx):
     description="Run a manual backup of all databases and vector store now",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def backup_command(ctx):
     """Manually trigger a full backup-and-prune cycle."""
     is_interaction = ctx.interaction is not None
@@ -464,6 +483,7 @@ async def backup_command(ctx):
     description="Run taxonomy reorganization — cluster and clean up the topic tree now",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def reorganize_command(ctx):
     """Manually trigger the taxonomy reorganization agent."""
     from services.views import ProposedActionsView
@@ -528,6 +548,7 @@ async def reorganize_command(ctx):
     description="View or update your preferences",
 )
 @authorized_only()
+@with_ctx_user_scope
 async def preference_command(ctx, *, text: str = ""):
     """Show current preferences (no args) or edit them via LLM (with args)."""
     is_interaction = ctx.interaction is not None

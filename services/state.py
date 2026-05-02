@@ -35,6 +35,16 @@ def set_current_user(user_id: str) -> None:
     _current_user_id.set(user_id)
 
 
+@contextmanager
+def current_user_scope(user_id: str):
+    """Temporarily bind the active user for the current task/context."""
+    token = _current_user_id.set(user_id)
+    try:
+        yield
+    finally:
+        _current_user_id.reset(token)
+
+
 def get_current_user() -> str:
     """Get the active user_id for the current context."""
     return _current_user_id.get()

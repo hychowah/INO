@@ -17,7 +17,7 @@ Relation types (controlled vocabulary):
 import sqlite3
 from typing import Dict, List, Optional
 
-from db.core import _conn, _now_iso
+from db.core import _conn, _now_iso, _uid
 
 # Maximum number of relationships allowed per concept
 MAX_RELATIONS_PER_CONCEPT = 5
@@ -45,6 +45,8 @@ def add_relation(
     concept_id_b: int,
     relation_type: str = "builds_on",
     note: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> Optional[int]:
     """Create a relationship between two concepts.
 
@@ -56,6 +58,7 @@ def add_relation(
     """
     if relation_type not in VALID_RELATION_TYPES:
         return None
+    uid = user_id or _uid()
     try:
         low, high = _normalize_pair(concept_id_a, concept_id_b)
     except ValueError:
@@ -63,19 +66,40 @@ def add_relation(
 
     conn = _conn()
     try:
+        owned = conn.execute(
+            "SELECT id FROM concepts WHERE id IN (?, ?) AND user_id = ?",
+            (low, high, uid),
+        ).fetchall()
+        if len(owned) != 2:
+            return None
+
         # Cap check: neither concept should already have MAX_RELATIONS_PER_CONCEPT
         count_low = conn.execute(
-            "SELECT COUNT(*) FROM concept_relations "
-            "WHERE concept_id_low = ? OR concept_id_high = ?",
-            (low, low),
+            """
+            SELECT COUNT(*)
+            FROM concept_relations cr
+            JOIN concepts c1 ON c1.id = cr.concept_id_low
+            JOIN concepts c2 ON c2.id = cr.concept_id_high
+            WHERE (cr.concept_id_low = ? OR cr.concept_id_high = ?)
+              AND c1.user_id = ?
+              AND c2.user_id = ?
+            """,
+            (low, low, uid, uid),
         ).fetchone()[0]
         if count_low >= MAX_RELATIONS_PER_CONCEPT:
             return None
 
         count_high = conn.execute(
-            "SELECT COUNT(*) FROM concept_relations "
-            "WHERE concept_id_low = ? OR concept_id_high = ?",
-            (high, high),
+            """
+            SELECT COUNT(*)
+            FROM concept_relations cr
+            JOIN concepts c1 ON c1.id = cr.concept_id_low
+            JOIN concepts c2 ON c2.id = cr.concept_id_high
+            WHERE (cr.concept_id_low = ? OR cr.concept_id_high = ?)
+              AND c1.user_id = ?
+              AND c2.user_id = ?
+            """,
+            (high, high, uid, uid),
         ).fetchone()[0]
         if count_high >= MAX_RELATIONS_PER_CONCEPT:
             return None
@@ -96,12 +120,13 @@ def add_relation(
         conn.close()
 
 
-def get_relations(concept_id: int) -> List[Dict]:
+def get_relations(concept_id: int, *, user_id: Optional[str] = None) -> List[Dict]:
     """Get all relationships for a concept (both directions).
 
     Returns a list of dicts, each with:
         id, other_concept_id, other_title, other_mastery, relation_type, note
     """
+    uid = user_id or _uid()
     conn = _conn()
     rows = conn.execute(
         """
@@ -114,10 +139,13 @@ def get_relations(concept_id: int) -> List[Dict]:
         JOIN concepts c ON c.id = CASE WHEN cr.concept_id_low = ?
                                        THEN cr.concept_id_high
                                        ELSE cr.concept_id_low END
-        WHERE cr.concept_id_low = ? OR cr.concept_id_high = ?
+                JOIN concepts self_c ON self_c.id = ?
+                WHERE (cr.concept_id_low = ? OR cr.concept_id_high = ?)
+                    AND self_c.user_id = ?
+                    AND c.user_id = ?
         ORDER BY cr.created_at DESC
     """,
-        (concept_id, concept_id, concept_id, concept_id),
+                (concept_id, concept_id, concept_id, concept_id, concept_id, uid, uid),
     ).fetchall()
     conn.close()
 
@@ -134,8 +162,9 @@ def get_relations(concept_id: int) -> List[Dict]:
     ]
 
 
-def remove_relation(concept_id_a: int, concept_id_b: int) -> bool:
+def remove_relation(concept_id_a: int, concept_id_b: int, *, user_id: Optional[str] = None) -> bool:
     """Remove the relationship between two concepts. Returns True if one existed."""
+    uid = user_id or _uid()
     try:
         low, high = _normalize_pair(concept_id_a, concept_id_b)
     except ValueError:
@@ -143,8 +172,20 @@ def remove_relation(concept_id_a: int, concept_id_b: int) -> bool:
 
     conn = _conn()
     cursor = conn.execute(
-        "DELETE FROM concept_relations WHERE concept_id_low = ? AND concept_id_high = ?",
-        (low, high),
+        """
+        DELETE FROM concept_relations
+        WHERE concept_id_low = ?
+          AND concept_id_high = ?
+          AND EXISTS (
+              SELECT 1
+              FROM concepts c1
+              JOIN concepts c2 ON c2.id = ?
+              WHERE c1.id = ?
+                AND c1.user_id = ?
+                AND c2.user_id = ?
+          )
+        """,
+        (low, high, high, low, uid, uid),
     )
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -153,7 +194,11 @@ def remove_relation(concept_id_a: int, concept_id_b: int) -> bool:
 
 
 def add_relations_from_assess(
-    concept_id: int, related_ids: List[int], relation_type: str = "builds_on"
+    concept_id: int,
+    related_ids: List[int],
+    relation_type: str = "builds_on",
+    *,
+    user_id: Optional[str] = None,
 ) -> int:
     """Batch-add relationships from a quiz assessment.
 
@@ -162,16 +207,25 @@ def add_relations_from_assess(
     """
     if not related_ids or relation_type not in VALID_RELATION_TYPES:
         return 0
+    uid = user_id or _uid()
 
     created = 0
     conn = _conn()
     try:
+        source_exists = conn.execute(
+            "SELECT 1 FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)
+        ).fetchone()
+        if not source_exists:
+            return 0
+
         for rid in related_ids:
             if not isinstance(rid, int) or rid == concept_id:
                 continue
 
-            # Verify the related concept exists
-            exists = conn.execute("SELECT 1 FROM concepts WHERE id = ?", (rid,)).fetchone()
+            # Verify the related concept exists for this user
+            exists = conn.execute(
+                "SELECT 1 FROM concepts WHERE id = ? AND user_id = ?", (rid, uid)
+            ).fetchone()
             if not exists:
                 continue
 
@@ -180,9 +234,16 @@ def add_relations_from_assess(
             # Cap check for both concepts
             for cid in (low, high):
                 count = conn.execute(
-                    "SELECT COUNT(*) FROM concept_relations "
-                    "WHERE concept_id_low = ? OR concept_id_high = ?",
-                    (cid, cid),
+                                        """
+                                        SELECT COUNT(*)
+                                        FROM concept_relations cr
+                                        JOIN concepts c1 ON c1.id = cr.concept_id_low
+                                        JOIN concepts c2 ON c2.id = cr.concept_id_high
+                                        WHERE (cr.concept_id_low = ? OR cr.concept_id_high = ?)
+                                            AND c1.user_id = ?
+                                            AND c2.user_id = ?
+                                        """,
+                                        (cid, cid, uid, uid),
                 ).fetchone()[0]
                 if count >= MAX_RELATIONS_PER_CONCEPT:
                     break
@@ -207,8 +268,9 @@ def add_relations_from_assess(
     return created
 
 
-def get_all_relations() -> List[Dict]:
+def get_all_relations(*, user_id: Optional[str] = None) -> List[Dict]:
     """Get all concept relationships. Used for graph visualization."""
+    uid = user_id or _uid()
     conn = _conn()
     rows = conn.execute("""
         SELECT cr.id, cr.concept_id_low, cr.concept_id_high,
@@ -217,14 +279,15 @@ def get_all_relations() -> List[Dict]:
         FROM concept_relations cr
         JOIN concepts c1 ON c1.id = cr.concept_id_low
         JOIN concepts c2 ON c2.id = cr.concept_id_high
+        WHERE c1.user_id = ? AND c2.user_id = ?
         ORDER BY cr.created_at DESC
-    """).fetchall()
+    """, (uid, uid)).fetchall()
     conn.close()
 
     return [dict(r) for r in rows]
 
 
-def search_related(concept_id: int, depth: int = 2) -> List[Dict]:
+def search_related(concept_id: int, depth: int = 2, *, user_id: Optional[str] = None) -> List[Dict]:
     """BFS traversal: find concepts within N hops via relationships.
 
     Returns all concepts reachable within `depth` hops, excluding the
@@ -232,8 +295,16 @@ def search_related(concept_id: int, depth: int = 2) -> List[Dict]:
     """
     if depth < 1:
         return []
+    uid = user_id or _uid()
 
     conn = _conn()
+    exists = conn.execute(
+        "SELECT 1 FROM concepts WHERE id = ? AND user_id = ?", (concept_id, uid)
+    ).fetchone()
+    if not exists:
+        conn.close()
+        return []
+
     rows = conn.execute(
         """
         WITH RECURSIVE neighborhood AS (
@@ -250,16 +321,21 @@ def search_related(concept_id: int, depth: int = 2) -> List[Dict]:
             JOIN concept_relations cr
                 ON cr.concept_id_low = n.concept_id
                 OR cr.concept_id_high = n.concept_id
+            JOIN concepts c_low ON c_low.id = cr.concept_id_low
+            JOIN concepts c_high ON c_high.id = cr.concept_id_high
             WHERE n.hops < ?
+              AND c_low.user_id = ?
+              AND c_high.user_id = ?
         )
         SELECT DISTINCT c.id, c.title, c.mastery_level, MIN(n.hops) AS hop_count
         FROM neighborhood n
         JOIN concepts c ON c.id = n.concept_id
         WHERE n.concept_id != ?
+          AND c.user_id = ?
         GROUP BY c.id
         ORDER BY hop_count, c.title
     """,
-        (concept_id, depth, concept_id),
+        (concept_id, depth, uid, uid, concept_id, uid),
     ).fetchall()
     conn.close()
 
