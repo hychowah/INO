@@ -1,6 +1,6 @@
 ## Plan: Simpler Architecture Reset
 
-Refocus the system on a strong single-user modular monolith that preserves the LLM-first product model, keeps Discord + browser + scheduler + maintenance/taxonomy, and removes accidental complexity where it is actually concentrated: duplicated review flows, process-local turn coordination, scheduler-owned workflow branches, and approval behavior that is inconsistent across surfaces. The recommended path is not a microservice split and not a broad service lattice. It is a data-preserving architecture reset that introduces only the boundaries that remove real duplication.
+Refocus the system on a strong single-user modular monolith that preserves the LLM-first product model, keeps Discord + browser + scheduler + maintenance/taxonomy, and removes accidental complexity where it is actually concentrated: duplicated review flows, duplicated interactive turn orchestration, scheduler-owned workflow branches, provider-session locality, and approval behavior that is inconsistent across surfaces. The recommended path is not a microservice split and not a broad service lattice. It is a data-preserving architecture reset that introduces only the boundaries that remove real duplication.
 
 ## Companion Docs
 
@@ -18,7 +18,7 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 **Primary technical debt findings**
 - One logical review lifecycle is implemented three times across Discord, browser/API, and scheduler delivery.
 - Reminder state is mirrored across typed rows and legacy session blobs, creating a fragile compatibility bridge.
-- Cross-surface conversation continuity is a real product requirement, but turn coordination still relies on process-local state and a global pipeline lock.
+- Cross-surface conversation continuity is a real product requirement. Durable turn exclusivity now exists via the lease-backed gateway in `services/state.py` and `db/chat.py`, but provider-session locality and duplicated adapter orchestration still create fragility.
 - Confirmation behavior is split across durable proposals and lightweight same-turn confirms, but the split is inconsistent and some browser/API flows still drift from Discord.
 - Scheduler code still owns too much review and proposal workflow behavior instead of acting as a runner.
 - Core orchestration responsibilities are spread across transport adapters, scheduler code, and one oversized pipeline module.
@@ -27,7 +27,7 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 **Steps**
 1. Phase 0: Re-baseline the reset documents and invariants. Freeze the non-negotiable rules before further refactor work: one shared conversation across Discord and browser, one active learning turn for the single-user product, durable approvals only for destructive or long-running actions, raw LLM output never crossing the contract boundary, assessment always bound to the intended quiz/concept, and data-preserving migration only. This blocks all later work.
 2. Phase 0: Replace the target architecture framing with fewer seams. Keep adapters, a small turn-coordination boundary, a shared Review service, the fail-closed LLM runtime, and the existing db package as the repository layer. Defer separate Conversation, Proposal, Preferences, Maintenance, and Taxonomy services unless a later slice proves they remove real duplication. This depends on step 1.
-3. Phase 1: Introduce one durable single-user turn gateway shared by Discord and browser/API. Replace the current process-local serializer with a restart-safe turn lease or equivalent durable coordination primitive while preserving one shared conversation thread across surfaces. This depends on step 2.
+3. Phase 1: Treat the durable single-user turn gateway as complete and preserve it as the outer coordination boundary. Reuse the existing lease-backed gateway instead of designing a new coordination subsystem, and focus the next slices on provider-session locality and duplicated adapter orchestration. This depends on step 2.
 4. Phase 2: Extract one canonical Review service. Move manual review start, scheduled review send, quiz setup, assess, skip, reminder registration, reminder resend, reminder resolution, and late-answer recovery behind one shared boundary used by Discord, browser/API, and scheduler. This is the highest-value simplification and depends on step 3.
 5. Phase 2: Keep approvals intentionally split into two tiers. Reuse the existing durable proposal store only for destructive or long-running flows such as dedup, maintenance, and taxonomy. Keep add-concept, suggest-topic, and preference confirms lightweight and same-turn, but route them through shared helpers so Discord and browser logic stop drifting. This depends on step 2 and should align with step 4.
 6. Phase 3: Shrink the scheduler into a runner, not a workflow owner. Keep durable owner-election and due-time tracking, but move review state transitions and durable proposal creation behind the shared Review service and approval policy. This depends on steps 4-5.
@@ -37,10 +37,10 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 
 **Execution order and parallelism**
 1. Blocking sequence: steps 1 -> 2 -> 3 -> 4/5 -> 6/7 -> 8 -> 9.
-2. Parallelizable work: review extraction and approval split can proceed together once the turn gateway shape is fixed; scheduler cleanup and automation-runner cleanup can proceed together once the Review boundary is stable; acceptance work should run continuously throughout the implementation.
+2. Parallelizable work: review extraction and approval split can proceed together once the adapter orchestration seam is fixed; scheduler cleanup and automation-runner cleanup can proceed together once the Review boundary is stable; acceptance work should run continuously throughout the implementation.
 
 **Relevant files**
-- [services/state.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/state.py) — current global serialization; the main anchor for the durable turn gateway.
+- [services/state.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/state.py) — existing lease-backed turn gateway; preserve as the outer coordination boundary.
 - [bot/handler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/bot/handler.py) — Discord chat entry and shared conversation flow anchor.
 - [api/routes/chat.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/api/routes/chat.py) — HTTP adapter that must share the same turn gateway.
 - [services/chat_session.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/chat_session.py) — browser/API review and confirmation behavior that should shrink behind shared helpers.
@@ -63,7 +63,7 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 
 **Verification**
 1. Architecture sign-off review: verify every proposed simplification preserves the frozen invariants from step 1 and removes one identified debt source.
-2. Turn-gateway validation: after the first code slice, run the narrow chat and entry-path tests that guard shared conversation behavior before doing further structural changes.
+2. Turn-gateway validation: keep the durable gateway green with narrow chat and entry-path tests while adapter orchestration is consolidated above it.
 3. Review extraction validation: run the focused regression set for review fallback, quiz anchor, assess safety, reminder lifecycle, and scheduler ownership after each review-state change.
 4. Approval split validation: keep lightweight confirmation behavior green in API/browser flows and durable proposal persistence green in scheduler/Discord flows.
 5. Manual parity matrix: verify Discord chat, browser chat, manual review, scheduled review, confirmation/decline flows, maintenance proposals, taxonomy proposals, and reminder recovery behave the same through the new shared boundaries.
@@ -80,6 +80,6 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 - Deliberately excluded from immediate scope: microservice decomposition, full multi-user activation, remote-browser production auth rollout, and optional vector-search optimization work unless they block the core reset.
 
 **Further considerations**
-1. If the durable turn gateway can be implemented by extending existing persisted state safely, prefer that over creating a brand-new subsystem or table.
+1. If provider-session continuity still matters after the shared entry orchestration is simplified, keep it as an optimization over durable chat history rather than treating provider session state as authoritative.
 2. If review extraction exposes that maintenance and taxonomy share less code than expected, keep them as separate workflows over one automation-runner pattern rather than forcing a false unification.
 3. Existing multi-user groundwork may remain in place if it is low-cost, but it is no longer a planning driver for the reset.

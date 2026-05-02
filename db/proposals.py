@@ -122,6 +122,16 @@ def update_proposal_message_id(
         )
 
 
+def update_proposal_payload(proposal_id: int, payload: list[dict], *, user_id: str | None = None):
+    """Replace the stored payload for a pending proposal."""
+    uid = user_id or _uid()
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE pending_proposals SET payload = ? WHERE id = ? AND user_id = ?",
+            (json.dumps(payload), proposal_id, uid),
+        )
+
+
 def delete_proposal(proposal_id: int, *, user_id: str | None = None):
     """Delete a proposal (after execution or rejection)."""
     uid = user_id or _uid()

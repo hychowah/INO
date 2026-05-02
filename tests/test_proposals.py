@@ -51,3 +51,26 @@ def test_delete_proposal_only_removes_matching_user(test_db):
 
     db.delete_proposal(proposal_a, user_id="user_a")
     assert db.get_proposal(proposal_a, user_id="user_a") is None
+
+
+def test_update_proposal_payload_replaces_payload_for_matching_user(test_db):
+    proposal_id = db.save_proposal(
+        "maintenance",
+        [
+            {"action": "update_topic", "_proposal_item_id": "maintenance-0"},
+            {"action": "delete_topic", "_proposal_item_id": "maintenance-1"},
+        ],
+        user_id="owner",
+    )
+
+    db.update_proposal_payload(
+        proposal_id,
+        [{"action": "delete_topic", "_proposal_item_id": "maintenance-1"}],
+        user_id="owner",
+    )
+
+    proposal = db.get_proposal(proposal_id, user_id="owner")
+    assert proposal is not None
+    assert proposal["payload"] == [
+        {"action": "delete_topic", "_proposal_item_id": "maintenance-1"}
+    ]

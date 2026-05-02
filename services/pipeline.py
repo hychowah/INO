@@ -1337,12 +1337,9 @@ async def execute_dedup_merges(groups: list[dict]) -> list[str]:
     return await run_dedup_merges(groups)
 
 
-async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
-    """Execute a list of maintenance actions that were approved by the user.
-    Returns summary strings for each executed action."""
-    # Ensure approved maintenance proposals keep the 'maintenance' source
-    # so code-level guards (e.g. score-field stripping) still apply.
-    tools.set_action_source("maintenance")
+async def execute_approved_actions(actions: list[dict], *, source: str = "maintenance") -> list[str]:
+    """Execute approved actions while preserving their policy source."""
+    tools.set_action_source(source)
 
     summaries = []
     for action_data in actions:
@@ -1359,6 +1356,11 @@ async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
         is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
         status = "❌" if is_error else "✅"
         summaries.append(f"{status} `{action_name}` — {action_msg[:80]}")
-        logger.info(f"Approved maintenance action: {action_name} → {'error' if is_error else 'ok'}")
+        logger.info(f"Approved {source} action: {action_name} → {'error' if is_error else 'ok'}")
 
     return summaries
+
+
+async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
+    """Compatibility wrapper for maintenance approvals."""
+    return await execute_approved_actions(actions, source="maintenance")

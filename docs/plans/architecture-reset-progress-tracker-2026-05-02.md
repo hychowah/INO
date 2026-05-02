@@ -7,7 +7,9 @@ Use this document as the session handoff ledger for the architecture reset work.
 - Branch: `refactor/architecture-reset`
 - Strategy: single-user modular monolith with a few shared boundaries, not a microservice split
 - Refactor style: small validated slices, checkpoint frequently, do not widen scope before a focused check passes
-- Latest completed direction: finish Milestone 2 by converging review generation, recovery, and successful delivery ownership on shared review helpers
+- Latest completed direction: finish Milestone 3 by making durable approvals explicit across Discord, scheduler, and browser/API while keeping lightweight confirms intentionally lightweight
+- Immediate next milestone: Milestone 4
+- Immediate next slice: shrink scheduler review decision ownership without reopening the approval model or the turn gateway
 
 ## Completed Planning Baseline
 
@@ -88,6 +90,28 @@ Use this document as the session handoff ledger for the architecture reset work.
 - Updated Discord button-driven review resend flows to register pending review state after successful send
 - Result: manual review start, scheduled review send, reminder resend, and Discord button-driven quiz delivery now converge on one canonical review-state boundary without adding a heavyweight Review service
 
+### Slice 10: Shared Learn Turn Execution
+
+- Extracted the repeated command-turn execution sequence into a shared helper in `services/learn_turn.py`
+- Moved both Discord message handling and browser/API learn-message handling onto the same fetch, parse, intercept, execute, and metadata path
+- Kept caller-owned side effects such as intercepted-history writes at the adapter boundary instead of broadening the helper into a larger service layer
+- Result: interactive command turns no longer drift across Discord and browser/API, while the boundary stays small and concrete
+
+### Slice 11: Approval Source Alignment
+
+- Replaced maintenance-only approved-action execution semantics with a shared source-aware executor
+- Propagated proposal source through Discord views, browser/API action handling, and scheduler-delivered taxonomy proposals
+- Stopped taxonomy approvals from executing and logging under maintenance semantics
+- Result: durable approval behavior now preserves policy source where it matters without adding a heavyweight proposal service
+
+### Slice 12: Durable Browser/API Proposal Actions
+
+- Switched browser/API maintenance, taxonomy, and dedup proposal-review buttons from inline executable payloads to durable `proposal_id` plus stable `proposal_item_id` references
+- Added proposal-payload update support in `db/proposals.py` so partial approve/reject operations can update the remaining durable row instead of deleting everything
+- Reused existing pending proposal rows in browser/API `/maintain` and `/reorganize` flows instead of only mentioning them or creating duplicate rows
+- Kept the existing frontend action envelope shape so the web client continues treating action payloads as opaque
+- Result: durable proposal handling is now shared across Discord, scheduler, and browser/API, satisfying the Milestone 3 approval split without frontend runtime churn
+
 ## Verified State
 
 The following checks passed for the current branch state before this tracker was written:
@@ -121,12 +145,22 @@ Additional focused checks passed after the latest slices:
 - `python -m pytest tests/test_review_fallback.py tests/test_scheduler.py tests/test_scheduler_full.py tests/test_quiz_views.py tests/test_messages.py tests/test_assess_no_quiz_guard.py tests/test_quiz_anchor.py -q -o "addopts="`
 - Result: `61 passed`
 
+- `python -m pytest tests/test_proposals.py tests/test_api.py -q -o "addopts="`
+- Result: `93 passed`
+
+- `python -m pytest c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_proposals.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_api.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_messages.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py -q -o "addopts="`
+- Result: `106 passed`
+
+- `npm test -- --run src/App.test.tsx -t "removes a proposal review item after a successful durable action"` from [frontend](c:/Users/user/OneDrive/Documents/PA/learning_agent/frontend)
+- Result: `1 passed`
+
 ## Intentional Simplifications
 
 - Scheduler user binding is handled once in [services/scheduler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/scheduler.py), not spread across each job helper
 - API request user binding is handled once in [api/auth.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/api/auth.py), not repeated in each route
 - Browser/API identity is still local-first. The existing header path remains a lightweight bridge, not a reset driver
 - Durable proposals are reserved for destructive or long-running flows; lightweight same-turn confirmations remain intentionally lightweight
+- Browser/API proposal-review blocks keep the same outer action envelope; only the server-side payload changed from raw executable actions to durable proposal references
 
 ## Current Code Areas Touched In The Latest Validated Slice
 
@@ -146,24 +180,64 @@ Additional focused checks passed after the latest slices:
 - [tests/test_scheduler_full.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py)
 - [services/views.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/views.py)
 - [tests/test_quiz_views.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_quiz_views.py)
+- [services/learn_turn.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/learn_turn.py)
+- [db/proposals.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/db/proposals.py)
+- [tests/test_proposals.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_proposals.py)
+- [frontend/src/App.test.tsx](c:/Users/user/OneDrive/Documents/PA/learning_agent/frontend/src/App.test.tsx)
 
 ## Next Session Starting Point
 
-Milestone 2 is complete. The next major decision is how far to centralize approval policy and remaining scheduler workflow ownership without prematurely inventing heavyweight services.
+Milestone 3 is complete. The next major decision is how far to shrink scheduler and runtime workflow ownership in Milestone 4 without prematurely inventing heavyweight services.
+
+### New Session Bootstrap
+
+Start the next session from this exact posture:
+
+1. Treat Milestone 3 as done unless a regression falsifies it.
+2. Do not reopen the turn gateway design; the durable lease-backed boundary is already landed.
+3. Do not redesign the approval model; durable proposals and lightweight same-turn confirms are already intentionally split.
+4. Start from `services/scheduler.py` and only step outward if the scheduler still owns a workflow decision that already exists elsewhere.
+5. Validate the first scheduler slice before touching `services/pipeline.py`.
+
+### First Milestone 4 Question
+
+Which scheduler decisions still belong somewhere else?
+
+Use this falsifiable test:
+
+- If the scheduler is deciding review lifecycle policy that is already represented in `services/review_state.py`, `services/review_flow.py`, or `services/tools_assess.py`, move that decision out.
+- If the scheduler is only deciding cadence, ownership, due-time triggering, or transport dispatch timing, keep it in the scheduler.
 
 Recommended next options, in order:
 
-1. Simplify durable versus lightweight approval handling now that the review paths are stable.
-2. Shrink remaining scheduler workflow ownership where it still decides behavior instead of just timing and dispatch.
-3. Re-evaluate whether any remaining review duplication actually justifies a real Review service, or whether helper-level centralization is already enough.
+1. Shrink remaining scheduler review decision branches so the scheduler owns cadence and dispatch, not review workflow policy.
+2. Move more business-specific orchestration out of `services/pipeline.py` now that review and approval boundaries are stabilized.
+3. Re-evaluate whether `services/learn_turn.py` needs any further simplification only if a third caller or materially different turn shape appears.
 
-### Recommended First Milestone 3 Slice
+### Recommended First Milestone 4 Slice
 
-- Start with the approval split, not a new service layer.
-- Use [services/chat_actions.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/chat_actions.py), [services/chat_session.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/chat_session.py), [services/views.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/views.py), [services/scheduler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/scheduler.py), and [db/proposals.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/db/proposals.py) as the first anchors.
-- Keep durable proposals for dedup, maintenance, and taxonomy.
-- Keep add-concept, suggest-topic, and preference confirmations lightweight unless one of them needs restart safety.
-- Re-run [tests/test_proposals.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_proposals.py), [tests/test_api.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_api.py), [tests/test_messages.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_messages.py), and [tests/test_scheduler_full.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py) after the first approval-policy cut.
+- Start with scheduler review decision cleanup, not another service map.
+- Use [services/scheduler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/scheduler.py), [services/review_state.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/review_state.py), [services/review_flow.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/review_flow.py), and [services/tools_assess.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/tools_assess.py) as the first anchors.
+- Keep owner election, cadence, and due-time checks in the scheduler.
+- Move only workflow decisions that still duplicate logic already present in shared review helpers.
+- Re-run [tests/test_scheduler_full.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py), [tests/test_scheduler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler.py), [tests/test_review_fallback.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_review_fallback.py), and [tests/test_quiz_anchor.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_quiz_anchor.py) after the first scheduler slice.
+
+### Explicit Non-Goals For The Next Session
+
+- Do not introduce a new `ReviewService` class unless helper-level extraction clearly fails.
+- Do not change browser identity, auth UX, or full multi-user activation.
+- Do not replace the durable proposal store with a new proposal subsystem.
+- Do not move generic prompt assembly or output validation out of `services/pipeline.py` until the first scheduler slice is validated.
+
+### Ready-To-Run Validation Set
+
+Use this narrow command after the first scheduler cleanup slice:
+
+- `python -m pytest c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_review_fallback.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_quiz_anchor.py -q -o "addopts="`
+
+Use this broader checkpoint only after that narrow slice is green:
+
+- `python -m pytest c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_proposals.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_api.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_messages.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py -q -o "addopts="`
 
 ## Guardrails For The Next Session
 

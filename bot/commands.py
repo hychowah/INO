@@ -313,6 +313,7 @@ async def maintain_command(ctx):
             maint_proposal_id,
             proposed_actions,
             pipeline.execute_maintenance_actions,
+            source="maintenance",
         )
         views_to_send.append(("maintenance", maint_view))
 
@@ -480,7 +481,11 @@ async def reorganize_command(ctx):
             view = ProposedActionsView(
                 proposal_id,
                 proposed_actions,
-                pipeline.execute_maintenance_actions,
+                lambda approved_actions: pipeline.execute_approved_actions(
+                    approved_actions,
+                    source="taxonomy",
+                ),
+                source="taxonomy",
             )
             await send_long(ctx, main_text)
             approve_text = "⏳ **Proposed taxonomy changes — approve or reject:**"

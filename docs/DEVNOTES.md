@@ -527,18 +527,18 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 ## 23. Process-Local Lock Hardening
 
-**Goal:** Keep the runtime single-user and trustworthy across bot, browser/API, and scheduler paths that still share mutable in-process state.
+**Goal:** Keep the runtime single-user-first and trustworthy across bot, browser/API, and scheduler paths that share mutable runtime state.
 
 **Key decisions:**
-- `services/state.py` now owns the shared `PIPELINE_LOCK` plus `pipeline_serialized()` and `pipeline_serialized_nowait()` helpers. This replaced the older chat-specific lock boundary and made the process-local boundary explicit.
-- Bot message handling, manual review/maintenance/taxonomy/preference flows, reply-based confirmations, direct Discord button bypasses, and FastAPI chat/confirm/decline now all serialize through the same lock.
-- The scheduler does **not** block waiting for that lock. Review, maintenance, taxonomy, and dedup checks skip the current cycle when the pipeline is busy so background work yields to active chat turns.
+- `services/state.py` now owns the shared `PIPELINE_LOCK` plus `pipeline_serialized()` and `pipeline_serialized_nowait()` helpers. The current implementation uses a durable session lease in `db/chat.py` for cross-process exclusivity and keeps `PIPELINE_LOCK` as the same-process mutex.
+- Bot message handling, manual review/maintenance/taxonomy/preference flows, reply-based confirmations, direct Discord button bypasses, and FastAPI chat/confirm/decline now all serialize through the same shared gateway.
+- The scheduler does **not** block waiting for that gateway. Review, maintenance, taxonomy, and dedup checks skip the current cycle when the runtime is busy so background work yields to active chat turns.
 - `db.chat` session helpers and `db.action_log.log_action()` now resolve omitted `user_id` through `_uid()`. `clear_session(None)` intentionally still means clear all users.
 - `OpenAICompatibleProvider._get_messages()` must return a copy of stored session messages. Returning the live list let callers mutate provider state accidentally.
 
 **Vector-search lesson:** Qdrant-first helpers must not early-return empty results when vector hits point at stale ids. `db.search_concepts()` and `db.diagnostics._get_relationship_candidates()` now fall back to SQL/FTS when vector-derived ids do not map back to current SQLite rows.
 
-**Important scope rule:** This hardening is process-local only. The runtime is still single-user externally until entry points call `set_current_user()` with real identities.
+**Important scope rule:** This started as process-local hardening, but cross-process exclusivity is now durable via the session lease. The product still targets a single-user-first architecture even though entry points can now propagate concrete user identities.
 
 ---
 

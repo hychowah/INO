@@ -34,6 +34,7 @@ from services.review_state import (
     normalize_reminder_timestamp,
     register_scheduler_review_delivery,
     resolve_scheduler_reminder,
+    update_pending_review_delivery,
 )
 from services.views import DedupConfirmView
 
@@ -379,7 +380,12 @@ async def _send_mode_report(
 
         if proposed_actions:
             proposal_id = db.save_proposal(proposal_type, proposed_actions)
-            view = ProposedActionsView(proposal_id, proposed_actions, execute_fn)
+            view = ProposedActionsView(
+                proposal_id,
+                proposed_actions,
+                execute_fn,
+                source=proposal_type,
+            )
             action_lines = []
             for i, a in enumerate(proposed_actions, 1):
                 name = a.get("action", "unknown")
@@ -454,7 +460,10 @@ async def _check_taxonomy():
                 final_result=final_result,
                 proposed_actions=proposed_actions,
                 proposal_type="taxonomy",
-                execute_fn=pipeline.execute_maintenance_actions,
+                execute_fn=lambda approved_actions: pipeline.execute_approved_actions(
+                    approved_actions,
+                    source="taxonomy",
+                ),
             )
         except Exception as e:
             logger.error(f"Error in taxonomy check: {e}", exc_info=True)

@@ -247,6 +247,186 @@ class TestChat:
         assert history[-1]["content"] == "✅ Created topic **Compilers** (#3)"
 
     @pytest.mark.anyio
+    async def test_chat_action_taxonomy_uses_taxonomy_source(self, client):
+        captured = {}
+        proposal_id = db.save_proposal(
+            "taxonomy",
+            [
+                {
+                    "action": "link_topics",
+                    "message": "Move topic under new parent",
+                    "params": {"parent_id": 1, "child_id": 2},
+                    "_proposal_item_id": "taxonomy-0",
+                },
+                {
+                    "action": "link_topics",
+                    "message": "Move second topic",
+                    "params": {"parent_id": 3, "child_id": 4},
+                    "_proposal_item_id": "taxonomy-1",
+                },
+            ],
+        )
+
+        async def fake_execute(actions, *, source="maintenance"):
+            captured["actions"] = actions
+            captured["source"] = source
+            return ["✅ `link_topics` — moved node"]
+
+        with patch(
+            "services.chat_session.pipeline.execute_approved_actions",
+            new=AsyncMock(side_effect=fake_execute),
+        ):
+            resp = await client.post(
+                "/api/chat/action",
+                json={
+                    "action": {
+                        "kind": "apply_maintenance_actions",
+                        "source": "taxonomy",
+                        "proposal_id": proposal_id,
+                        "proposal_item_ids": ["taxonomy-0"],
+                    }
+                },
+            )
+
+        assert resp.status_code == 200
+        assert captured == {
+            "actions": [
+                {
+                    "action": "link_topics",
+                    "message": "Move topic under new parent",
+                    "params": {"parent_id": 1, "child_id": 2},
+                    "_proposal_item_id": "taxonomy-0",
+                }
+            ],
+            "source": "taxonomy",
+        }
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Applied taxonomy changes:\n- ✅ `link_topics` — moved node",
+            "pending_action": None,
+        }
+
+        remaining = db.get_proposal(proposal_id)
+        assert remaining is not None
+        assert remaining["payload"] == [
+            {
+                "action": "link_topics",
+                "message": "Move second topic",
+                "params": {"parent_id": 3, "child_id": 4},
+                "_proposal_item_id": "taxonomy-1",
+            }
+        ]
+
+    @pytest.mark.anyio
+    async def test_reject_proposals_by_proposal_id_deletes_row(self, client):
+        proposal_id = db.save_proposal(
+            "maintenance",
+            [{"action": "update_topic", "message": "Rename topic", "_proposal_item_id": "maintenance-0"}],
+        )
+
+        resp = await client.post(
+            "/api/chat/action",
+            json={
+                "action": {
+                    "kind": "reject_proposals",
+                    "proposal_id": proposal_id,
+                    "all": True,
+                    "source": "maintenance",
+                }
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Rejected 1 proposal(s).",
+            "pending_action": None,
+        }
+        assert db.get_proposal(proposal_id) is None
+
+    @pytest.mark.anyio
+    async def test_chat_reorganize_reuses_existing_pending_taxonomy_proposal(self, client):
+        proposal_id = db.save_proposal(
+            "taxonomy",
+            [
+                {
+                    "action": "link_topics",
+                    "message": "Move topic under new parent",
+                    "params": {"parent_id": 1, "child_id": 2},
+                    "_proposal_item_id": "taxonomy-0",
+                }
+            ],
+        )
+
+        resp = await client.post("/api/chat", json={"message": "/reorganize"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["message"] == "Taxonomy — pending proposal already exists in the database."
+        assert body["pending_action"] is None
+        assert body["actions"] == [
+            {
+                "type": "proposal_review",
+                "title": "Taxonomy proposals",
+                "items": [
+                    {
+                        "id": "taxonomy-0",
+                        "label": "Move topic under new parent",
+                        "detail": '{"parent_id": 1, "child_id": 2}',
+                        "buttons": [
+                            {
+                                "label": "Approve",
+                                "style": "primary",
+                                "ui_effect": "remove_item",
+                                "action": {
+                                    "kind": "apply_maintenance_actions",
+                                    "proposal_id": proposal_id,
+                                    "proposal_item_ids": ["taxonomy-0"],
+                                    "source": "taxonomy",
+                                },
+                            },
+                            {
+                                "label": "Reject",
+                                "style": "secondary",
+                                "ui_effect": "remove_item",
+                                "action": {
+                                    "kind": "reject_proposals",
+                                    "proposal_id": proposal_id,
+                                    "proposal_item_ids": ["taxonomy-0"],
+                                    "source": "taxonomy",
+                                },
+                            },
+                        ],
+                    }
+                ],
+                "bulk_buttons": [
+                    {
+                        "label": "Approve all",
+                        "style": "primary",
+                        "ui_effect": "remove_block",
+                        "action": {
+                            "kind": "apply_maintenance_actions",
+                            "proposal_id": proposal_id,
+                            "all": True,
+                            "source": "taxonomy",
+                        },
+                    },
+                    {
+                        "label": "Reject all",
+                        "style": "secondary",
+                        "ui_effect": "remove_block",
+                        "action": {
+                            "kind": "reject_proposals",
+                            "proposal_id": proposal_id,
+                            "all": True,
+                            "source": "taxonomy",
+                        },
+                    },
+                ],
+            }
+        ]
+
+    @pytest.mark.anyio
     async def test_confirm_non_whitelisted_action_400(self, client):
         resp = await client.post(
             "/api/chat/confirm",

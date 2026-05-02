@@ -93,6 +93,7 @@ from db.proposals import (
     get_proposal,
     save_proposal,
     update_proposal_message_id,
+    update_proposal_payload,
 )
 
 # Concept Relations (cross-concept edges)

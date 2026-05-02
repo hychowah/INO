@@ -12,10 +12,10 @@ from services.chat_actions import (
     CHAT_CONFIRMABLE_ACTIONS,
     confirmation_history_entry,
     decline_history_entry,
-    is_intercepted_action,
     require_confirmable_action,
 )
 from services.dedup import execute_dedup_merges, format_dedup_suggestions
+from services.learn_turn import run_learn_turn
 from services.parser import guard_user_message, parse_llm_response, process_output
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import register_interactive_review_delivery
@@ -23,6 +23,7 @@ from services.tools import execute_action, execute_suggest_topic_accept, set_act
 from services.tools_assess import skip_quiz
 
 _db_initialized = False
+_PROPOSAL_ITEM_ID_KEY = "_proposal_item_id"
 
 
 def _response(
@@ -151,9 +152,92 @@ def _log_rejected_proposals(items: list[dict], source: str = "maintenance") -> N
             )
 
 
-def _dedup_proposal_actions(groups: list[dict]) -> list[dict]:
+def _proposal_item_id(item: dict, index: int, *, prefix: str) -> str:
+    raw = item.get(_PROPOSAL_ITEM_ID_KEY)
+    return str(raw) if raw else f"{prefix}-{index}"
+
+
+def _with_proposal_item_ids(items: list[dict], *, prefix: str) -> list[dict]:
+    prepared = []
+    for index, item in enumerate(items):
+        prepared_item = dict(item)
+        prepared_item.setdefault(_PROPOSAL_ITEM_ID_KEY, f"{prefix}-{index}")
+        prepared.append(prepared_item)
+    return prepared
+
+
+def _persist_proposal(proposal_type: str, items: list[dict]) -> tuple[int, list[dict]]:
+    prepared_items = _with_proposal_item_ids(items, prefix=proposal_type)
+    proposal_id = db.save_proposal(proposal_type, prepared_items)
+    return proposal_id, prepared_items
+
+
+def _proposal_type_from_source(source: str | None) -> str | None:
+    normalized = str(source or "").lower().strip()
+    if normalized in {"maintenance", "taxonomy", "dedup"}:
+        return normalized
+    return None
+
+
+def _resolve_proposal_items(action: dict, *, expected_type: str | None = None) -> tuple[dict, list[dict], list[dict]]:
+    proposal_id_raw = action.get("proposal_id")
+    if proposal_id_raw is None:
+        raise ValueError("Action requires proposal_id")
+
+    try:
+        proposal_id = int(proposal_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("proposal_id must be an integer") from exc
+
+    proposal = db.get_proposal(proposal_id)
+    if proposal is None:
+        raise ValueError("Proposal is no longer available")
+
+    proposal_type = proposal["proposal_type"]
+    if expected_type and proposal_type != expected_type:
+        raise ValueError(f"Proposal #{proposal_id} is not a {expected_type} proposal")
+
+    payload = proposal["payload"]
+    if action.get("all"):
+        return proposal, _with_proposal_item_ids(payload, prefix=proposal_type), []
+
+    selected_ids = {str(item_id).strip() for item_id in action.get("proposal_item_ids", []) if str(item_id).strip()}
+    if not selected_ids:
+        raise ValueError("Action requires proposal_item_ids or all=true")
+
+    selected = []
+    remaining = []
+    for index, item in enumerate(payload):
+        normalized_item = dict(item)
+        item_id = _proposal_item_id(normalized_item, index, prefix=proposal_type)
+        normalized_item.setdefault(_PROPOSAL_ITEM_ID_KEY, item_id)
+        if item_id in selected_ids:
+            selected.append(normalized_item)
+        else:
+            remaining.append(normalized_item)
+
+    if not selected:
+        raise ValueError("Selected proposal items are no longer available")
+
+    return proposal, selected, remaining
+
+
+def _store_remaining_proposal_items(proposal: dict, remaining_items: list[dict]) -> None:
+    proposal_id = int(proposal["id"])
+    proposal_type = proposal["proposal_type"]
+    if remaining_items:
+        db.update_proposal_payload(
+            proposal_id,
+            _with_proposal_item_ids(remaining_items, prefix=proposal_type),
+        )
+        return
+    db.delete_proposal(proposal_id)
+
+
+def _dedup_proposal_actions(proposal_id: int, groups: list[dict]) -> list[dict]:
     items = []
     for idx, group in enumerate(groups):
+        group_id = _proposal_item_id(group, idx, prefix="dedup")
         keep = db.get_concept(group["keep"])
         keep_title = keep["title"] if keep else f"#{group['keep']}"
         merge_titles = []
@@ -166,18 +250,27 @@ def _dedup_proposal_actions(groups: list[dict]) -> list[dict]:
 
         items.append(
             {
-                "id": f"dedup-{idx}",
+                "id": group_id,
                 "label": f"Keep {keep_title}",
                 "detail": detail,
                 "buttons": [
                     _proposal_button(
                         "Approve",
-                        {"kind": "apply_dedup_groups", "groups": [group]},
+                        {
+                            "kind": "apply_dedup_groups",
+                            "proposal_id": proposal_id,
+                            "proposal_item_ids": [group_id],
+                        },
                         style="primary",
                     ),
                     _proposal_button(
                         "Reject",
-                        {"kind": "reject_proposals", "items": [group], "source": "maintenance"},
+                        {
+                            "kind": "reject_proposals",
+                            "proposal_id": proposal_id,
+                            "proposal_item_ids": [group_id],
+                            "source": "dedup",
+                        },
                     ),
                 ],
             }
@@ -186,13 +279,13 @@ def _dedup_proposal_actions(groups: list[dict]) -> list[dict]:
     bulk_buttons = [
         _proposal_button(
             "Approve all",
-            {"kind": "apply_dedup_groups", "groups": groups},
+            {"kind": "apply_dedup_groups", "proposal_id": proposal_id, "all": True},
             style="primary",
             ui_effect="remove_block",
         ),
         _proposal_button(
             "Reject all",
-            {"kind": "reject_proposals", "items": groups, "source": "maintenance"},
+            {"kind": "reject_proposals", "proposal_id": proposal_id, "all": True, "source": "dedup"},
             ui_effect="remove_block",
         ),
     ]
@@ -206,15 +299,17 @@ def _dedup_proposal_actions(groups: list[dict]) -> list[dict]:
 
 def _action_proposal_actions(
     title: str,
+    proposal_id: int,
     actions: list[dict],
     *,
     source: str = "maintenance",
 ) -> list[dict]:
     items = []
     for idx, action_data in enumerate(actions):
+        item_id = _proposal_item_id(action_data, idx, prefix=source)
         items.append(
             {
-                "id": f"proposal-{idx}",
+                "id": item_id,
                 "label": action_data.get("message", action_data.get("action", "proposal")),
                 "detail": _format_action_detail(action_data),
                 "buttons": [
@@ -222,14 +317,20 @@ def _action_proposal_actions(
                         "Approve",
                         {
                             "kind": "apply_maintenance_actions",
-                            "actions": [action_data],
+                            "proposal_id": proposal_id,
+                            "proposal_item_ids": [item_id],
                             "source": source,
                         },
                         style="primary",
                     ),
                     _proposal_button(
                         "Reject",
-                        {"kind": "reject_proposals", "items": [action_data], "source": source},
+                        {
+                            "kind": "reject_proposals",
+                            "proposal_id": proposal_id,
+                            "proposal_item_ids": [item_id],
+                            "source": source,
+                        },
                     ),
                 ],
             }
@@ -238,13 +339,23 @@ def _action_proposal_actions(
     bulk_buttons = [
         _proposal_button(
             "Approve all",
-            {"kind": "apply_maintenance_actions", "actions": actions, "source": source},
+            {
+                "kind": "apply_maintenance_actions",
+                "proposal_id": proposal_id,
+                "all": True,
+                "source": source,
+            },
             style="primary",
             ui_effect="remove_block",
         ),
         _proposal_button(
             "Reject all",
-            {"kind": "reject_proposals", "items": actions, "source": source},
+            {
+                "kind": "reject_proposals",
+                "proposal_id": proposal_id,
+                "all": True,
+                "source": source,
+            },
             ui_effect="remove_block",
         ),
     ]
@@ -346,18 +457,34 @@ def _derive_actions(action_data: dict | None, reply: str) -> list[dict]:
 
 
 def _maintenance_review_actions(
-    dedup_groups: list[dict], proposed_actions: list[dict]
+    dedup_groups: tuple[int, list[dict]] | None,
+    proposed_actions: tuple[int, list[dict]] | None,
 ) -> list[dict]:
     actions = []
     if dedup_groups:
-        actions.extend(_dedup_proposal_actions(dedup_groups))
+        dedup_proposal_id, dedup_payload = dedup_groups
+        actions.extend(_dedup_proposal_actions(dedup_proposal_id, dedup_payload))
     if proposed_actions:
-        actions.extend(_action_proposal_actions("Maintenance proposals", proposed_actions))
+        maintenance_proposal_id, maintenance_payload = proposed_actions
+        actions.extend(
+            _action_proposal_actions(
+                "Maintenance proposals",
+                maintenance_proposal_id,
+                maintenance_payload,
+                source="maintenance",
+            )
+        )
     return actions
 
 
-def _taxonomy_review_actions(proposed_actions: list[dict]) -> list[dict]:
-    return _action_proposal_actions("Taxonomy proposals", proposed_actions)
+def _taxonomy_review_actions(proposed_actions: tuple[int, list[dict]]) -> list[dict]:
+    proposal_id, proposal_payload = proposed_actions
+    return _action_proposal_actions(
+        "Taxonomy proposals",
+        proposal_id,
+        proposal_payload,
+        source="taxonomy",
+    )
 
 
 def _ensure_db() -> None:
@@ -425,18 +552,29 @@ def _due_summary() -> str:
 
 
 async def _handle_learn_message(text: str, author: str = "chat", source: str = "chat") -> dict:
-    set_action_source(source)
-    llm_response = await pipeline.call_with_fetch_loop("command", text, author)
-    _prefix, message, action_data = parse_llm_response(llm_response)
+    result = await run_learn_turn(
+        text,
+        author,
+        source=source,
+        call_with_fetch_loop=pipeline.call_with_fetch_loop,
+        parse_response=parse_llm_response,
+        execute_response=pipeline.execute_llm_response,
+        process_output=process_output,
+        on_pending_intercept=lambda display_msg: _record_exchange(text, display_msg),
+    )
 
-    if action_data and is_intercepted_action(action_data) and not text.startswith("[BUTTON]"):
-        display_msg = action_data.get("message", message or "")
-        _record_exchange(text, display_msg)
-        return _response(display_msg, msg_type="pending_confirm", pending_action=action_data)
+    if result.pending_action:
+        return _response(
+            result.message,
+            msg_type=result.msg_type,
+            pending_action=result.pending_action,
+        )
 
-    final_result = await pipeline.execute_llm_response(text, llm_response, "command")
-    msg_type, reply = process_output(final_result)
-    return _response(reply, msg_type=msg_type, actions=_derive_actions(action_data, reply))
+    return _response(
+        result.message,
+        msg_type=result.msg_type,
+        actions=_derive_actions(result.action_data, result.message),
+    )
 
 
 async def _handle_review_command(raw_text: str, author: str = "chat", source: str = "chat") -> dict:
@@ -491,34 +629,51 @@ async def _handle_maintenance_command(raw_text: str) -> dict:
         return _response(message)
 
     parts = []
-    proposed_actions = []
-    dedup_groups = None
+    maintenance_proposal = None
+    dedup_proposal = None
 
-    maint_context = pipeline.handle_maintenance()
-    if maint_context:
-        result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
-        msg = result.removeprefix("REPLY: ").removeprefix("REPLY:").strip()
-        if msg:
-            parts.append(f"Maintenance\n{msg}")
+    existing_maintenance = db.get_pending_proposal("maintenance")
+    if existing_maintenance:
+        parts.append("Maintenance — pending proposal already exists in the database.")
+        maintenance_proposal = (
+            int(existing_maintenance["id"]),
+            _with_proposal_item_ids(existing_maintenance["payload"], prefix="maintenance"),
+        )
     else:
-        parts.append("Maintenance — no issues found.")
+        proposed_actions = []
+        maint_context = pipeline.handle_maintenance()
+        if maint_context:
+            result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
+            msg = result.removeprefix("REPLY: ").removeprefix("REPLY:").strip()
+            if msg:
+                parts.append(f"Maintenance\n{msg}")
+        else:
+            parts.append("Maintenance — no issues found.")
 
-    existing = db.get_pending_proposal("dedup")
-    if existing:
+        if proposed_actions:
+            maintenance_proposal = _persist_proposal("maintenance", proposed_actions)
+
+    existing_dedup = db.get_pending_proposal("dedup")
+    if existing_dedup:
         parts.append("Dedup — pending proposal already exists in the database.")
+        dedup_proposal = (
+            int(existing_dedup["id"]),
+            _with_proposal_item_ids(existing_dedup["payload"], prefix="dedup"),
+        )
     else:
         dedup_groups = await pipeline.handle_dedup_check()
         if dedup_groups:
             parts.append(format_dedup_suggestions(dedup_groups))
+            dedup_proposal = _persist_proposal("dedup", dedup_groups)
         else:
             parts.append("Dedup — no duplicates found.")
 
     message = "\n\n".join(parts).strip()
-    if dedup_groups or proposed_actions:
+    if dedup_proposal or maintenance_proposal:
         _record_exchange(raw_text, message)
         return _response(
             message,
-            actions=_maintenance_review_actions(dedup_groups or [], proposed_actions),
+            actions=_maintenance_review_actions(dedup_proposal, maintenance_proposal),
         )
 
     _record_exchange(raw_text, message)
@@ -526,6 +681,20 @@ async def _handle_maintenance_command(raw_text: str) -> dict:
 
 
 async def _handle_reorganize_command(raw_text: str) -> dict:
+    existing_taxonomy = db.get_pending_proposal("taxonomy")
+    if existing_taxonomy:
+        message = "Taxonomy — pending proposal already exists in the database."
+        _record_exchange(raw_text, message)
+        return _response(
+            message,
+            actions=_taxonomy_review_actions(
+                (
+                    int(existing_taxonomy["id"]),
+                    _with_proposal_item_ids(existing_taxonomy["payload"], prefix="taxonomy"),
+                )
+            ),
+        )
+
     taxonomy_context = pipeline.handle_taxonomy()
     if not taxonomy_context:
         message = "Taxonomy — no topics found yet."
@@ -537,8 +706,9 @@ async def _handle_reorganize_command(raw_text: str) -> dict:
     message = f"Taxonomy Reorganization\n\n{msg}" if msg else "Taxonomy Reorganization — complete."
 
     if proposed_actions:
+        taxonomy_proposal = _persist_proposal("taxonomy", proposed_actions)
         _record_exchange(raw_text, message)
-        return _response(message, actions=_taxonomy_review_actions(proposed_actions))
+        return _response(message, actions=_taxonomy_review_actions(taxonomy_proposal))
 
     _record_exchange(raw_text, message)
     return _response(message)
@@ -668,7 +838,10 @@ async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
                     "Applied dedup changes:\n" + "\n".join(f"- {s}" for s in dedup_summaries)
                 )
         if proposed_actions:
-            maint_summaries = await pipeline.execute_maintenance_actions(proposed_actions)
+            maint_summaries = await pipeline.execute_approved_actions(
+                proposed_actions,
+                source="maintenance",
+            )
             if maint_summaries:
                 parts.append(
                     "Applied maintenance changes:\n" + "\n".join(f"- {s}" for s in maint_summaries)
@@ -680,7 +853,7 @@ async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
 
     if action == "taxonomy_review":
         proposed_actions = params.get("proposed_actions", [])
-        summaries = await pipeline.execute_maintenance_actions(proposed_actions)
+        summaries = await pipeline.execute_approved_actions(proposed_actions, source="taxonomy")
         summary = (
             "Applied taxonomy changes:\n" + "\n".join(f"- {s}" for s in summaries)
             if summaries
@@ -727,11 +900,16 @@ async def handle_chat_action(action: dict, author: str = "chat", source: str = "
         return _response(message, actions=_quiz_navigation_actions(result["concept_id"], 5))
 
     if kind == "apply_dedup_groups":
-        groups = action.get("groups", [])
-        if not groups:
-            raise ValueError("apply_dedup_groups requires groups")
-        set_action_source("maintenance")
-        summaries = await execute_dedup_merges(groups)
+        proposal_id = action.get("proposal_id")
+        if proposal_id is not None:
+            proposal, groups, remaining_groups = _resolve_proposal_items(action, expected_type="dedup")
+            summaries = await execute_dedup_merges(groups)
+            _store_remaining_proposal_items(proposal, remaining_groups)
+        else:
+            groups = action.get("groups", [])
+            if not groups:
+                raise ValueError("apply_dedup_groups requires groups")
+            summaries = await execute_dedup_merges(groups)
         summary = (
             "Applied dedup changes:\n" + "\n".join(f"- {line}" for line in summaries)
             if summaries
@@ -740,11 +918,21 @@ async def handle_chat_action(action: dict, author: str = "chat", source: str = "
         return _response(summary)
 
     if kind == "apply_maintenance_actions":
-        actions = action.get("actions", [])
-        if not actions:
-            raise ValueError("apply_maintenance_actions requires actions")
-        summaries = await pipeline.execute_maintenance_actions(actions)
-        source_label = str(action.get("source", "maintenance")).title()
+        action_source = str(action.get("source", "maintenance")).lower().strip() or "maintenance"
+        proposal_id = action.get("proposal_id")
+        if proposal_id is not None:
+            proposal, actions, remaining_actions = _resolve_proposal_items(
+                action,
+                expected_type=_proposal_type_from_source(action_source),
+            )
+            summaries = await pipeline.execute_approved_actions(actions, source=action_source)
+            _store_remaining_proposal_items(proposal, remaining_actions)
+        else:
+            actions = action.get("actions", [])
+            if not actions:
+                raise ValueError("apply_maintenance_actions requires actions")
+            summaries = await pipeline.execute_approved_actions(actions, source=action_source)
+        source_label = action_source.title()
         summary = (
             f"Applied {source_label.lower()} changes:\n"
             + "\n".join(f"- {line}" for line in summaries)
@@ -754,10 +942,20 @@ async def handle_chat_action(action: dict, author: str = "chat", source: str = "
         return _response(summary)
 
     if kind == "reject_proposals":
+        reject_source = str(action.get("source", "maintenance"))
+        proposal_id = action.get("proposal_id")
+        if proposal_id is not None:
+            proposal, items, remaining_items = _resolve_proposal_items(
+                action,
+                expected_type=_proposal_type_from_source(reject_source),
+            )
+            _log_rejected_proposals(items, source=reject_source)
+            _store_remaining_proposal_items(proposal, remaining_items)
+            return _response(f"Rejected {len(items)} proposal(s).")
+
         items = action.get("items", [])
         if not items:
             raise ValueError("reject_proposals requires items")
-        reject_source = str(action.get("source", "maintenance"))
         _log_rejected_proposals(items, source=reject_source)
         return _response(f"Rejected {len(items)} proposal(s).")
 

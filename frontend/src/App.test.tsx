@@ -200,7 +200,7 @@ describe('App', () => {
     expect(window.sessionStorage.getItem('learning-agent-pending-action')).toBeNull();
   });
 
-  it('removes a proposal review item after a successful inline action', async () => {
+  it('removes a proposal review item after a successful durable action', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       if (String(input) === '/api/chat/bootstrap') {
         return jsonResponse({
@@ -234,7 +234,12 @@ describe('App', () => {
                             label: 'Approve',
                             style: 'primary',
                             ui_effect: 'remove_item',
-                            action: { kind: 'apply_maintenance_actions', actions: [{ action: 'update_topic' }] },
+                            action: {
+                              kind: 'apply_maintenance_actions',
+                              proposal_id: 17,
+                              proposal_item_ids: ['maintenance-0'],
+                              source: 'maintenance',
+                            },
                           },
                         ],
                       },

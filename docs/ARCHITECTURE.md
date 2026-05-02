@@ -139,7 +139,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
 | `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned overdue review reminders plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
-| `services/state.py` | ~65 | Process-local runtime coordination — shared pipeline lock helpers, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
+| `services/state.py` | ~65 | Hybrid runtime coordination — lease-backed turn gateway, same-process mutex helpers, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
@@ -556,7 +556,7 @@ session_state
   └── PK(user_id, key)
 ```
 
-Current runtime behavior is still single-user because the Discord bot, REST API, browser frontend, and scheduler do not yet set a non-default current user. The db layer is prepared for future activation via `services/state.py` + `db.core._uid()`, so all existing callers continue to resolve to `user_id='default'` until entry points start calling `set_current_user()`.
+Current product posture is still single-user-first, but the main entry points now propagate explicit user scope where available. The db layer remains the authority via `services/state.py` + `db.core._uid()`, so future multi-user activation can build on the same storage boundary without driving the current reset sequence.
 
 ---
 
@@ -569,7 +569,7 @@ Current runtime behavior is still single-user because the Discord bot, REST API,
 - Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
 - `bot/events.py` routes authorized plain messages through the learning pipeline, tracks `last_activity_at`, copies the runtime preferences file on startup if needed, and starts the scheduler on `on_ready`
 - `bot/messages.py` and `services/views.py` handle Discord-safe chunking plus persistent button views for confirmations, quiz navigation, and preference edits
-- Interactive bot entry points serialize against the shared process-local pipeline lock in `services/state.py` so the Discord path does not interleave with browser/API chat state
+- Interactive bot entry points serialize through the shared lease-backed turn gateway in `services/state.py`; the same-process lock remains as a local mutex while cross-process exclusivity is enforced durably
 
 ### context.py — Prompt Construction
 | Function | Purpose |
@@ -635,9 +635,9 @@ The core brain of the system. Coordinates everything:
 - When structured output mode is enabled, the provider sends `response_format` and retries once without it if an endpoint rejects that option, preserving portability across OpenAI-compatible backends
 
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
-- `services/state.py` owns the process-local `PIPELINE_LOCK`, async/sync lock helpers, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
+- `services/state.py` owns the lease-backed turn gateway, the same-process `PIPELINE_LOCK` mutex, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
-- `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the pipeline is busy rather than interleave with active chat work
+- `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the shared turn gateway is busy rather than interleave with active chat work
 - `services/chat_actions.py` centralizes confirmation whitelists and history-entry formatting for the FastAPI browser/API chat surfaces
 
 ### services/review_state.py — Reminder State Bridge
@@ -649,9 +649,9 @@ The core brain of the system. Coordinates everything:
 ### services/scheduler.py — Background Tasks
 - Starts from both `bot.py` and `api.py`; review delivery remains bot-owned while shared jobs coordinate through a DB-backed owner heartbeat row
 - Review check: every 15 minutes (configurable), selects overdue concepts only, repairs or cancels invalid reminder state, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
-- **Suppresses reviews** when the user has recent durable activity, when `review_in_progress` is active, during configured quiet hours, or when the shared pipeline lock is busy
+- **Suppresses reviews** when the user has recent durable activity, when `review_in_progress` is active, during configured quiet hours, or when the shared turn gateway is busy
 - Unanswered reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX`; answered/skipped reminders are resolved by the assess and skip flows
-- Review and any enabled shared jobs skip their current cycle when the shared pipeline lock is busy, so background work yields to active interactive traffic
+- Review and any enabled shared jobs skip their current cycle when the shared turn gateway is busy, so background work yields to active interactive traffic
 - Maintenance: optional, every `LEARN_MAINTENANCE_INTERVAL_HOURS` when `LEARN_ENABLE_MAINTENANCE=1`; calls `pipeline.handle_maintenance()` → LLM triages issues → sends report DM
 - Taxonomy: every `LEARN_TAXONOMY_INTERVAL_HOURS`, calls `pipeline.handle_taxonomy()` → LLM restructures topic tree → sends report DM
 - Dedup: optional, every `LEARN_DEDUP_INTERVAL_HOURS` when `LEARN_ENABLE_DEDUP=1`; proposes merges via DM

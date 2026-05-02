@@ -182,11 +182,14 @@ class ProposedActionsView(discord.ui.View):
         proposal_id: int,
         actions: list[dict],
         execute_fn: Callable[[list[dict]], Awaitable[list[str]]],
+        *,
+        source: str = "maintenance",
     ):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.proposal_id = proposal_id
         self.actions = actions
         self.execute_fn = execute_fn
+        self.source = source
         self.proposal_user_id = state.get_current_user()
         self.decisions: dict[int, bool | None] = {i: None for i in range(len(actions))}
         self._finalizing = False
@@ -226,7 +229,7 @@ class ProposedActionsView(discord.ui.View):
                             params=action.get("params", {}),
                             result_type="rejected",
                             result="",
-                            source="maintenance",
+                            source=self.source,
                         )
                 if rejected:
                     result_parts.append(f"❌ Rejected {len(rejected)} action(s).")
