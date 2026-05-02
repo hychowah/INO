@@ -3,8 +3,9 @@
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import config
 import db
 
 logger = logging.getLogger("review_state")
@@ -146,8 +147,15 @@ def get_active_scheduled_review_reminder() -> dict | None:
     reminder = db.get_scheduled_review_reminder()
     if reminder:
         concept = db.get_concept(int(reminder["concept_id"]))
+        if not concept:
+            logger.warning(
+                "Resolving scheduled review reminder for missing concept: concept_id=%s",
+                reminder["concept_id"],
+            )
+            resolve_scheduler_reminder("cancelled")
+            return None
         reminder = dict(reminder)
-        reminder["concept_title"] = concept["title"] if concept else "Unknown"
+        reminder["concept_title"] = concept["title"]
         reminder["question"] = reminder.get("question_text", "")
         reminder["sent_at"] = reminder.get("last_sent_at") or reminder.get("first_sent_at")
         return reminder
@@ -247,6 +255,47 @@ def note_scheduler_reminder_delivery(pending: dict) -> dict:
     """Record a delivered reminder and refresh active quiz context."""
     bind_single_quiz_context(int(pending["concept_id"]), question=pending.get("question", ""))
     return update_pending_review_delivery(pending)
+
+
+def decide_scheduler_review_action(*, now: datetime | None = None) -> tuple[str, dict | None]:
+    """Return the next scheduler review action after reminder-state evaluation.
+
+    Actions:
+    - ``wait``: keep the current pending reminder and do nothing yet.
+    - ``remind``: send another reminder for the returned pending reminder.
+    - ``send_new``: no blocking pending reminder remains; scheduler may fetch a new due review.
+    """
+    pending = get_active_scheduled_review_reminder()
+    if not pending:
+        return "send_new", None
+
+    sent_at_str = pending.get("last_sent_at") or pending.get("first_sent_at") or ""
+    sent_at = db._parse_datetime(sent_at_str) or now or datetime.now()
+    current_time = now or datetime.now()
+    cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
+    elapsed = current_time - sent_at
+
+    if elapsed < cooldown:
+        logger.debug(
+            "Pending review #%s — %.1fh < %sh cooldown, waiting",
+            pending.get("concept_id"),
+            elapsed.total_seconds() / 3600,
+            config.REVIEW_NAG_COOLDOWN_HOURS,
+        )
+        return "wait", pending
+
+    reminder_count = int(pending.get("reminder_count", 0))
+    max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
+    if reminder_count >= max_reminders:
+        logger.info(
+            "Pending review #%s — %s reminders sent, expiring and moving on",
+            pending.get("concept_id"),
+            reminder_count,
+        )
+        resolve_scheduler_reminder("expired")
+        return "send_new", None
+
+    return "remind", pending
 
 
 def resolve_scheduler_reminder(status: str) -> None:

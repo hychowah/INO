@@ -167,7 +167,7 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
         await bot_commands.review_command.callback(ctx)
 
     assert fallback.await_args.kwargs["mode"] == "review-check"
-    pending = json.loads(db.get_session("pending_review", user_id=str(ctx.author.id)))
+    pending = json.loads(db.get_session("pending_review", user_id=bot_commands.state.get_local_user_id()))
     assert pending["concept_id"] == cid
     assert pending["question"] == "Slash fallback question"
 
@@ -204,6 +204,6 @@ async def test_bot_review_does_not_persist_pending_when_send_fails(test_db):
     ):
         await bot_commands.review_command.callback(ctx)
 
-    assert db.get_session("pending_review", user_id=str(ctx.author.id)) is None
+    assert db.get_session("pending_review", user_id=bot_commands.state.get_local_user_id()) is None
     ctx.send.assert_awaited_once()
     assert "send failed" in ctx.send.await_args.args[0]

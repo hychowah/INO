@@ -13,6 +13,8 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 
+import config
+
 # Tracks the authorized user's last message time.
 # Updated by bot.py, read by scheduler.py for activity suppression.
 last_activity_at: datetime | None = None
@@ -53,6 +55,22 @@ def current_user_scope(user_id: str):
 def get_current_user() -> str:
     """Get the active user_id for the current context."""
     return _current_user_id.get()
+
+
+def get_local_user_id() -> str:
+    """Return the configured canonical user id for local-first single-user flows."""
+    candidate = (getattr(config, "LOCAL_USER_ID", "") or "").strip()
+    return candidate or "default"
+
+
+def begin_interactive_turn(*, reset_quiz_answered: bool = True) -> datetime:
+    """Apply the shared preamble for an interactive user turn."""
+    activity_at = mark_user_activity()
+    if reset_quiz_answered:
+        import db
+
+        db.set_session("quiz_answered", None)
+    return activity_at
 
 
 def mark_user_activity(at: datetime | None = None) -> datetime:

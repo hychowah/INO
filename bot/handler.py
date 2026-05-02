@@ -63,10 +63,7 @@ async def _handle_user_message(
     with state.current_user_scope(active_user):
         async with state.pipeline_serialized():
             _ensure_db()
-            state.mark_user_activity()
-
-            # Reset race guard — new message means new quiz cycle
-            db.set_session("quiz_answered", None)
+            state.begin_interactive_turn()
 
             result = await run_learn_turn(
                 text,

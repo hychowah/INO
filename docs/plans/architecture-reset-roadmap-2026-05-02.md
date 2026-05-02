@@ -11,6 +11,7 @@ This roadmap turns the master plan in [architecture-reset-master-plan-2026-05-02
 - Product posture: shared conversation across Discord and browser/API, single-user core.
 - Concurrency target: one active learning turn enforced durably rather than process-locally.
 - Rewrite rule: preserve invariants first, then simplify structure.
+- Current status on 2026-05-02: Milestones 0 through 4 are complete in code. Milestone 5 is now the active cleanup and cutover milestone.
 
 ## Milestone 0: Freeze Rewrite Boundaries
 
@@ -47,7 +48,7 @@ Replace the over-broad target architecture with the minimum boundaries needed to
 1. Revised target architecture sketch centered on Turn Gateway, Review service, approval policy split, LLM runtime, and db/infrastructure.
 2. Simplified canonical conversation state model focused on shared history plus durable turn ownership.
 3. Simplified canonical proposal state model focused on durable approvals only.
-4. Initial implementation design for the durable single-user turn gateway.
+4. Implemented durable single-user turn gateway reused by shared chat entry points, with shared interactive-turn preamble and user-scoped runtime session locality.
 
 ### Exit Criteria
 
@@ -111,13 +112,14 @@ Make approval ownership explicit and reduce scheduler workflow ownership.
 
 ### Goal
 
-Shrink oversized orchestrators only after behavior is centralized.
+Milestone 4 is complete in code. Scheduler and runtime ownership were narrowed without introducing heavyweight new services.
 
 ### Deliverables
 
-1. Scheduler runner cleanup that leaves owner election and due checks intact while removing remaining workflow-specific branches.
-2. LLM runtime cleanup that retains prompt assembly, fetch loop, output validation, repair, and tool execution while shedding business-specific orchestration.
-3. A reusable automation-runner pattern for maintenance and taxonomy where shared behavior is real.
+1. Scheduler review helpers now own reminder-state decisions and canonical review payload assembly while leaving owner election, due checks, quiet hours, and delivery timing intact.
+2. Shared chat controllers now own turn serialization for chat, confirm, decline, and chat-action flows instead of adapter wrappers.
+3. Lightweight confirmation behavior is shared across API and Discord surfaces, and runtime provider sessions are scoped per current user.
+4. The existing `call_action_loop()`/`execute_approved_actions()` pair remains the reusable automation-runner pattern, avoiding new maintenance or taxonomy service classes.
 
 ### Exit Criteria
 
@@ -169,12 +171,12 @@ Parallel guidance:
 - Milestone 4 scheduler and runtime cleanup can proceed together once review and approval ownership are stable.
 - Acceptance work starts early, but Milestone 5 only closes after migration rehearsal.
 
-## First Execution Slice
+## Next Execution Slice
 
-Implementation begins here, not with more architecture sprawl.
+Implementation now continues at Milestone 5.
 
-1. Rewrite the reset documents to match the narrowed architecture.
-2. Design and implement the durable single-user turn gateway.
-3. Validate shared conversation behavior before starting review extraction.
+1. Re-baseline the reset docs to match the implemented Milestone 4 slices.
+2. Retire the reminder dual-write bridge and remaining transport-specific workflow branches behind focused parity tests.
+3. Run migration rehearsal and acceptance coverage before closing Milestone 5.
 
-Only after those three are stable should the Review extraction widen the code change surface.
+Only after those three are stable should the branch be considered ready for final cutover or commit.

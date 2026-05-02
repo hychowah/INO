@@ -63,7 +63,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 
 The **fetch loop** is the key architectural pattern: the LLM can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before composing its response. This keeps the LLM in control of what data it needs, without sending everything upfront.
 
-Current runtime behavior is still single-user end-to-end: Discord access is gated by one `LEARN_AUTHORIZED_USER_ID`, the REST API uses one bearer token, and the Web UI is local-only. The DB layer now contains dormant per-user scaffolding (`user_id` columns, `users` table, ContextVar-based lookup), but entry points still resolve to the default user until that activation work is done.
+Current runtime behavior is still single-user end-to-end: Discord access is gated by one `LEARN_AUTHORIZED_USER_ID`, the REST API uses one bearer token, and the Web UI is local-only. The DB layer still contains dormant per-user scaffolding (`user_id` columns, `users` table, ContextVar-based lookup), but the shipped local-first runtime now binds Discord/API/browser flows to a canonical local alias via `LEARN_LOCAL_USER_ID`. API and browser requests may still override request scope with `X-Learning-User` when needed.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture documentation with data flow diagrams, schema definitions, and module responsibilities.
 
@@ -111,6 +111,7 @@ LEARN_LLM_BASE_URL=https://api.x.ai/v1    # or any OpenAI-compatible endpoint
 LEARN_LLM_API_KEY=your_api_key_here
 LEARN_LLM_MODEL=grok-3
 LEARN_AUTHORIZED_USER_ID=your_discord_user_id
+LEARN_LOCAL_USER_ID=default
 ```
 
 If you omit `LEARN_LLM_PROVIDER`, the app defaults to `openai_compat`. You still need to set `LEARN_LLM_BASE_URL`, `LEARN_LLM_API_KEY`, and `LEARN_LLM_MODEL`.
@@ -173,6 +174,7 @@ All settings are via environment variables (see [.env.example](.env.example) for
 | `LEARN_API_HOST` | `0.0.0.0` | REST API bind host |
 | `LEARN_API_PORT` | `8080` | REST API port |
 | `LEARN_API_SECRET_KEY` | _(empty)_ | API authentication secret (for `api.py`) |
+| `LEARN_LOCAL_USER_ID` | `default` | Canonical local-first user alias used when no `X-Learning-User` request header is provided |
 | `LEARN_DB_PATH` | `data/knowledge.db` | Path to the main knowledge database |
 | `LEARN_CHAT_DB_PATH` | `data/chat_history.db` | Path to the chat/session database |
 | `LEARN_LLM_TEMPERATURE` | _(provider default)_ | LLM sampling temperature |

@@ -97,16 +97,16 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `api/app.py` | ~55 | FastAPI app assembly and route registration |
-| `api/auth.py` | ~20 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; `/api/health` is always public |
+| `api/auth.py` | ~25 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; optional `X-Learning-User` request scoping falls back to `LEARN_LOCAL_USER_ID`; `/api/health` is always public |
 | `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
-| `config.py` | ~80 | Tokens, paths, timeouts, intervals |
+| `config.py` | ~80 | Tokens, paths, timeouts, intervals, and the canonical local-first runtime user alias |
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `services/review_state.py` | ~140 | Shared bridge between typed scheduled reminders and the compatibility `pending_review` session mirror |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
-| `services/chat_actions.py` | ~60 | Shared confirmation helpers and action whitelists used by the browser/API chat flows |
-| `services/chat_session.py` | ~430 | Shared chat-session controller used by FastAPI chat routes and the React browser flow |
+| `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
+| `services/chat_session.py` | ~460 | Shared chat-session controller used by FastAPI chat routes and the React browser flow; owns chat/confirm/decline/action serialization for those surfaces |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
@@ -139,7 +139,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
 | `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned overdue review reminders plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
-| `services/state.py` | ~65 | Hybrid runtime coordination — lease-backed turn gateway, same-process mutex helpers, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
+| `services/state.py` | ~80 | Hybrid runtime coordination — lease-backed turn gateway, same-process mutex helpers, canonical local-user helpers, shared interactive-turn preamble, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
@@ -453,7 +453,9 @@ FastAPI serves the built React SPA for any HTML request outside the reserved pre
          └── Most non-chat routes read directly from the db/ package
            (no pipeline, no LLM — pure DB ➜ JSON, plus explicit SPA entry serving)
            Chat and chat-confirmation routes go through
-           services/chat_session.py → pipeline → LLM / action execution
+           services/chat_session.py → pipeline → LLM / action execution,
+           with request-scope identity bound in api/auth.py and outer
+           serialization owned by the shared chat controller rather than the routes
 ```
 
 ---
@@ -556,7 +558,7 @@ session_state
   └── PK(user_id, key)
 ```
 
-Current product posture is still single-user-first, but the main entry points now propagate explicit user scope where available. The db layer remains the authority via `services/state.py` + `db.core._uid()`, so future multi-user activation can build on the same storage boundary without driving the current reset sequence.
+Current product posture is still single-user-first, but the shipped local-first runtime now resolves Discord, API, browser, and scheduler flows through one canonical alias (`LEARN_LOCAL_USER_ID`) exposed by `services/state.py`. FastAPI request scope can still override that alias with `X-Learning-User` when needed. The db layer remains the authority via `services/state.py` + `db.core._uid()`, so future multi-user activation can build on the same storage boundary without driving the current reset sequence.
 
 ---
 
@@ -564,10 +566,10 @@ Current product posture is still single-user-first, but the main entry points no
 
 ### bot.py + bot/ — Discord Interface
 - `bot.py` is a thin startup wrapper that loads env/config and launches the shared bot instance from `bot.app`
-- `bot/commands.py` registers the active hybrid commands: `/learn`, `/review`, `/due`, `/topics`, `/persona`, `/maintain`, `/reorganize`, `/preference`, `/backup`, `/clear`, `/ping`, and `/sync` (`/maintain` returns a disabled message unless `LEARN_ENABLE_MAINTENANCE=1`)
+- `bot/commands.py` registers the active hybrid commands: `/learn`, `/review`, `/due`, `/topics`, `/persona`, `/maintain`, `/reorganize`, `/preference`, `/backup`, `/clear`, `/ping`, and `/sync` (`/maintain` returns a disabled message unless `LEARN_ENABLE_MAINTENANCE=1`); command flows now bind to the canonical local runtime alias instead of scattering raw Discord ids through user-scoped helpers
 - `bot/auth.py` provides the `@authorized_only()` decorator used to gate commands to the configured Discord user
 - Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
-- `bot/events.py` routes authorized plain messages through the learning pipeline, tracks `last_activity_at`, copies the runtime preferences file on startup if needed, and starts the scheduler on `on_ready`
+- `bot/events.py` routes authorized plain messages through the learning pipeline, tracks durable recent activity, copies the runtime preferences file on startup if needed, starts the scheduler on `on_ready`, and reuses the shared lightweight confirmation helpers for reply-based confirms
 - `bot/messages.py` and `services/views.py` handle Discord-safe chunking plus persistent button views for confirmations, quiz navigation, and preference edits
 - Interactive bot entry points serialize through the shared lease-backed turn gateway in `services/state.py`; the same-process lock remains as a local mutex while cross-process exclusivity is enforced durably
 
@@ -635,10 +637,10 @@ The core brain of the system. Coordinates everything:
 - When structured output mode is enabled, the provider sends `response_format` and retries once without it if an endpoint rejects that option, preserving portability across OpenAI-compatible backends
 
 ### services/state.py + services/chat_actions.py — Shared Runtime Coordination
-- `services/state.py` owns the lease-backed turn gateway, the same-process `PIPELINE_LOCK` mutex, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
+- `services/state.py` owns the lease-backed turn gateway, the same-process `PIPELINE_LOCK` mutex, the canonical local-user helper, the shared `begin_interactive_turn()` preamble, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
 - `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the shared turn gateway is busy rather than interleave with active chat work
-- `services/chat_actions.py` centralizes confirmation whitelists and history-entry formatting for the FastAPI browser/API chat surfaces
+- `services/chat_actions.py` centralizes confirmation whitelists, history-entry formatting, and lightweight `add_concept` / `suggest_topic` confirm-decline execution shared by browser/API and Discord surfaces
 
 ### services/review_state.py — Reminder State Bridge
 - Centralizes the shared reminder lifecycle helpers that keep scheduler-owned reminder rows and the compatibility `pending_review` session blob in sync

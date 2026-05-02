@@ -54,9 +54,8 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        async with state.pipeline_serialized():
-            payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
-            return payload
+        payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
+        return payload
     except Exception as e:
         logger.exception("Chat endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
@@ -71,8 +70,7 @@ async def chat_stream(req: ChatRequest):
     async def event_stream():
         yield _sse_event("status", {"message": "Waiting for the learning agent..."})
         try:
-            async with state.pipeline_serialized():
-                payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
+            payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
             yield _sse_event("done", payload)
         except Exception as e:
             logger.exception("Chat stream endpoint error")
@@ -94,9 +92,8 @@ async def confirm_action(req: ConfirmRequest):
     """Confirm a pending action from /api/chat using the shared chat controller."""
 
     try:
-        async with state.pipeline_serialized():
-            payload = await confirm_chat_action(req.action_data, source="api")
-            return payload
+        payload = await confirm_chat_action(req.action_data, source="api")
+        return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -108,9 +105,8 @@ async def confirm_action(req: ConfirmRequest):
 async def decline_action(req: ConfirmRequest):
     """Decline a pending action from /api/chat using the shared chat controller."""
     try:
-        async with state.pipeline_serialized():
-            payload = await decline_chat_action(req.action_data, source="api")
-            return payload
+        payload = await decline_chat_action(req.action_data, source="api")
+        return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -122,9 +118,8 @@ async def decline_action(req: ConfirmRequest):
 async def run_chat_action(req: ChatActionRequest):
     """Run a structured chat UI action such as quiz navigation or skip."""
     try:
-        async with state.pipeline_serialized():
-            payload = await handle_chat_action(req.action, author="solo_user", source="api")
-            return payload
+        payload = await handle_chat_action(req.action, author="solo_user", source="api")
+        return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

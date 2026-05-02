@@ -8,7 +8,7 @@ This document describes the public API surfaces exposed by the Learning Agent: t
 
 The bot is the primary user-facing interface. All interactive commands except `/ping` require the calling user to match `LEARN_AUTHORIZED_USER_ID`.
 
-Current shipped behavior is still single-user at the interface layer. Internally, the database layer is now prepared for per-user scoping, but no entry point sets a non-default user identity yet, so all requests still resolve to the default user.
+Current shipped behavior is still single-user at the interface layer. Internally, the database layer remains prepared for per-user scoping, but the shipped local-first runtime now binds Discord, API, and browser flows to a canonical local alias via `LEARN_LOCAL_USER_ID`. API and browser requests may override request scope with `X-Learning-User`; missing header values fall back to the configured local alias.
 
 ### Commands
 
@@ -69,6 +69,8 @@ Controlled by the `LEARN_AUTHORIZED_USER_ID` environment variable (a single Disc
 ```
 Authorization: Bearer <LEARN_API_SECRET_KEY>
 ```
+
+Request scope selection is separate from bearer-token auth. The API also accepts an optional `X-Learning-User` header for request scoping. If the header is absent, the request falls back to `LEARN_LOCAL_USER_ID`. If the header value is present but invalid, the API returns HTTP `400`.
 
 Start the server:
 
@@ -244,7 +246,7 @@ The browser UI reads from the same FastAPI process as the API and routes chat th
 | REST API | Bearer token header for non-local callers; localhost requests on `API_PORT` bypass the token check | `LEARN_API_SECRET_KEY` |
 | FastAPI-served browser UI | Same FastAPI process and auth policy as the REST API; local browser requests on `API_PORT` use the localhost bypass | `LEARN_API_SECRET_KEY` |
 
-Internally, db functions now accept an optional `user_id` and default to a ContextVar-backed lookup, but that is not yet activated at the Discord/API/browser entry points. From an operator perspective, the app still behaves as a single-user system.
+Internally, db functions still accept an optional `user_id` and default to a ContextVar-backed lookup. From an operator perspective, the app remains a single-user local-first system, but request scope now resolves through the canonical local alias and optional `X-Learning-User` override instead of an unconditional default-user path.
 
 ---
 
@@ -264,6 +266,7 @@ See `.env.example` for the full list. Key variables:
 | `LEARN_BOT_TOKEN` | Discord bot token |
 | `LEARN_AUTHORIZED_USER_ID` | Discord user ID allowed to use the bot |
 | `LEARN_API_SECRET_KEY` | Bearer token for the REST API |
+| `LEARN_LOCAL_USER_ID` | Canonical local-first user alias used when `X-Learning-User` is not provided |
 | `LEARN_DB_PATH` | Path to `knowledge.db` (default: `data/knowledge.db`) |
 | `LEARN_CHAT_DB_PATH` | Path to `chat_history.db` (default: `data/chat_history.db`) |
 | `LEARN_SR_INTERVAL_EXPONENT` | Exponent for spaced-repetition interval formula (default: `0.075`); `interval_days = e^(score × exponent)` |

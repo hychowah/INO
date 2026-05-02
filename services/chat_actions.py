@@ -1,6 +1,11 @@
 """Shared chat action helpers for API and chat confirmation flows."""
 
+import db
+
+from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
+
 INTERCEPTED_ACTIONS = frozenset({"add_concept", "suggest_topic"})
+LIGHTWEIGHT_CONFIRMABLE_ACTIONS = frozenset({"add_concept", "suggest_topic"})
 API_CONFIRMABLE_ACTIONS = frozenset({"add_concept", "suggest_topic", "add_topic", "link_concept"})
 CHAT_CONFIRMABLE_ACTIONS = frozenset(
     {
@@ -13,6 +18,40 @@ CHAT_CONFIRMABLE_ACTIONS = frozenset(
 )
 
 WEBUI_CONFIRMABLE_ACTIONS = CHAT_CONFIRMABLE_ACTIONS
+
+
+def execute_lightweight_confirm(action_data: dict, *, source: str) -> tuple[bool, str]:
+    action = require_confirmable_action(
+        action_data,
+        LIGHTWEIGHT_CONFIRMABLE_ACTIONS,
+        "confirmed here",
+    )
+    set_action_source(source)
+
+    if action == "suggest_topic":
+        success, summary, _topic_id = execute_suggest_topic_accept(action_data)
+        if not success:
+            return False, f"⚠️ {summary}"
+        db.add_chat_message("user", confirmation_history_entry(action_data))
+        db.add_chat_message("assistant", summary)
+        return True, summary
+
+    msg_type, result = execute_action(action, action_data.get("params", {}))
+    if msg_type == "error":
+        return False, f"⚠️ Could not add concept: {result}"
+    success_message = f"✅ {result}"
+    db.add_chat_message("user", confirmation_history_entry(action_data))
+    db.add_chat_message("assistant", success_message)
+    return True, success_message
+
+
+def execute_lightweight_decline(action_data: dict) -> None:
+    require_confirmable_action(
+        action_data,
+        LIGHTWEIGHT_CONFIRMABLE_ACTIONS,
+        "declined here",
+    )
+    db.add_chat_message("user", decline_history_entry(action_data))
 
 
 def normalize_action(action_data: dict | str | None) -> str:

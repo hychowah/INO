@@ -31,6 +31,8 @@ AUTHORIZED_USER_ID = int(os.environ.get("LEARN_AUTHORIZED_USER_ID", "0"))
 API_HOST = os.environ.get("LEARN_API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("LEARN_API_PORT", "8080"))
 API_SECRET_KEY = os.environ.get("LEARN_API_SECRET_KEY", "")
+# Canonical local-first runtime user alias for Discord/API/browser flows.
+LOCAL_USER_ID = (os.environ.get("LEARN_LOCAL_USER_ID", "default") or "default").strip() or "default"
 
 # ============================================================================
 # OPTIONAL SETTINGS

@@ -18,6 +18,7 @@ from bot.handler import (
 )
 from bot.messages import send_long_with_view
 from services import pipeline, scheduler, state
+from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
 from services.formatting import format_quiz_metadata, truncate_with_suffix
 from services.views import (
     AddConceptConfirmView,
@@ -113,42 +114,20 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    with state.current_user_scope(str(message.author.id)):
+    with state.current_user_scope(state.get_local_user_id()):
         if message.reference and message.reference.message_id in _pending_confirmations:
             action_data, view = _pending_confirmations[message.reference.message_id]
             if not view.decided:
                 reply_text = text.lower().strip()
-                action_name = action_data.get("action", "").lower().strip()
                 if _is_affirmative(reply_text):
                     view.decided = True
                     view._disable_all()
                     async with state.pipeline_serialized():
-                        if action_name == "suggest_topic":
-                            from services.tools import execute_suggest_topic_accept
-
-                            success, summary, topic_id = execute_suggest_topic_accept(action_data)
-                            title = action_data.get("params", {}).get("title", "topic")
-                            if success:
-                                db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
-                                db.add_chat_message("assistant", summary)
-                                note = f"\n\n{summary}"
-                            else:
-                                note = f"\n\n⚠️ {summary}"
-                        else:
-                            from services.tools import execute_action
-
-                            msg_type, result = execute_action(
-                                action_data.get("action", "add_concept"),
-                                action_data.get("params", {}),
-                            )
-                            note = (
-                                f"\n\n⚠️ Could not add concept: {result}"
-                                if msg_type == "error"
-                                else f"\n\n✅ {result}"
-                            )
-                            if msg_type != "error":
-                                db.add_chat_message("user", "[confirmed: add concept]")
-                                db.add_chat_message("assistant", f"✅ {result}")
+                        _success, display_note = execute_lightweight_confirm(
+                            action_data,
+                            source="discord",
+                        )
+                        note = f"\n\n{display_note}"
                     try:
                         orig = await message.channel.fetch_message(message.reference.message_id)
                         await orig.edit(
@@ -163,11 +142,7 @@ async def on_message(message):
                     view.decided = True
                     view._disable_all()
                     async with state.pipeline_serialized():
-                        if action_name == "suggest_topic":
-                            title = action_data.get("params", {}).get("title", "topic")
-                            db.add_chat_message("user", f'[declined: add topic "{title}"]')
-                        else:
-                            db.add_chat_message("user", "[declined: add concept]")
+                        execute_lightweight_decline(action_data)
                     try:
                         orig = await message.channel.fetch_message(message.reference.message_id)
                         await orig.edit(view=view)

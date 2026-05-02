@@ -80,8 +80,10 @@ LEARN_LLM_MODEL=grok-3
 LEARN_BOT_TOKEN=your-discord-bot-token
 LEARN_AUTHORIZED_USER_ID=your-discord-user-id   # numeric ID
 
-# Current shipped runtime is still single-user at the interface layer.
-# The internal DB user_id scaffolding is present but not yet activated at entry points.
+# Local-first runtime identity (optional)
+# Discord/API/browser requests default to this canonical local alias when no
+# explicit X-Learning-User header is provided.
+# LEARN_LOCAL_USER_ID=default
 
 # REST API settings (required for api.py unless you use the defaults shown)
 # LEARN_API_HOST=0.0.0.0

@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document describes the target architecture for the reset. It is a planning sketch, not a final package layout. The goal is to make module ownership explicit before implementation begins.
+This document describes the target architecture after the first implementation slices. It remains a planning sketch rather than a final package layout, but it now serves as the baseline for Milestone 5 cleanup rather than a pre-implementation design note.
 
 ## Core Principle
 
-One local-first single-user backend owns the product. Adapters translate transport concerns. Only the use-case boundaries that remove real duplication should be introduced. The LLM runtime owns prompt and action orchestration. The existing db package remains the repository layer unless a narrower repository boundary proves necessary.
+One local-first single-user backend owns the product. Adapters translate transport concerns. Only the use-case boundaries that remove real duplication should be introduced. The LLM runtime owns provider calls, prompt assembly, output validation, repair, and tool execution. It is a boundary, not the owner of chat, review, approval, or scheduler workflow policy. The existing db package remains the repository layer unless a narrower repository boundary proves necessary.
 
 ## Target Shape
 
@@ -73,9 +73,9 @@ Only the boundaries that remove clear duplication should exist in the target sha
 Responsibilities:
 
 - Preserve one shared conversation across Discord and browser/API.
-- Own durable single-user turn acquisition and release.
+- Own durable single-user turn acquisition and release plus the shared interactive-turn preamble.
 - Keep adapters from coordinating turns through process-local state.
-- Append shared history and confirmation markers without becoming a large domain service.
+- Leave shared chat-history writes and lightweight confirmation markers in chat/controller helpers rather than broadening the gateway into a domain service.
 
 Primary current inputs:
 
@@ -225,7 +225,7 @@ Compatibility bridges may exist temporarily, but canonical write ownership must 
 ### Modules Likely To Become Transitional Or Disappear
 
 - [../../services/review_state.py](../../services/review_state.py) once reminder state is canonicalized.
-- Process-local turn coordination in [../../services/state.py](../../services/state.py) once a durable turn gateway replaces it.
+- The same-process mutex and compatibility surface inside [../../services/state.py](../../services/state.py) may shrink later, but the durable lease-backed gateway there is already the current coordination boundary.
 - Transport-specific confirmation glue currently spread across browser and Discord code where shared helpers can remove drift.
 
 ### Modules That Likely Remain But Under Narrower Contracts
@@ -244,7 +244,7 @@ Compatibility bridges may exist temporarily, but canonical write ownership must 
 
 ## Immediate Design Follow-Ups
 
-1. Draw the current-state workflow map against this target.
-2. Define the canonical state models in more detail.
-3. Identify the smallest implementation slice that creates the first real shared service boundary.
-4. Define the migration and rollback story for each compatibility bridge.
+1. Re-baseline the workflow and state-model docs against the implemented shared helpers.
+2. Define the minimum remaining review-lifecycle extraction, not a broader service split.
+3. Define Milestone 5 bridge-retirement and migration-rehearsal steps.
+4. Keep runtime shrink limited to business-policy leakage rather than generic prompt/tool plumbing.

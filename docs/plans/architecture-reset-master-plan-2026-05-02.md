@@ -1,6 +1,6 @@
 ## Plan: Simpler Architecture Reset
 
-Refocus the system on a strong single-user modular monolith that preserves the LLM-first product model, keeps Discord + browser + scheduler + maintenance/taxonomy, and removes accidental complexity where it is actually concentrated: duplicated review flows, duplicated interactive turn orchestration, scheduler-owned workflow branches, provider-session locality, and approval behavior that is inconsistent across surfaces. The recommended path is not a microservice split and not a broad service lattice. It is a data-preserving architecture reset that introduces only the boundaries that remove real duplication.
+Refocus the system on a strong single-user modular monolith that preserves the LLM-first product model, keeps Discord + browser + scheduler + maintenance/taxonomy, and removes accidental complexity where it still concentrates: duplicated review ownership, reminder compatibility bridges, residual scheduler-owned workflow branches, and remaining transport-specific entry glue. The recommended path is not a microservice split and not a broad service lattice. It is a data-preserving architecture reset that introduces only the boundaries that remove real duplication.
 
 ## Companion Docs
 
@@ -16,28 +16,33 @@ Refocus the system on a strong single-user modular monolith that preserves the L
 - [Multi-user gap inventory](architecture-reset-multi-user-gap-inventory-2026-05-02.md) — secondary reference only; not a reset driver for the current scope
 
 **Primary technical debt findings**
-- One logical review lifecycle is implemented three times across Discord, browser/API, and scheduler delivery.
+- One logical review lifecycle still spans Discord, browser/API, and scheduler delivery, even though several duplicated helper paths are now shared.
 - Reminder state is mirrored across typed rows and legacy session blobs, creating a fragile compatibility bridge.
-- Cross-surface conversation continuity is a real product requirement. Durable turn exclusivity now exists via the lease-backed gateway in `services/state.py` and `db/chat.py`, but provider-session locality and duplicated adapter orchestration still create fragility.
-- Confirmation behavior is split across durable proposals and lightweight same-turn confirms, but the split is inconsistent and some browser/API flows still drift from Discord.
-- Scheduler code still owns too much review and proposal workflow behavior instead of acting as a runner.
+- Cross-surface conversation continuity is a real product requirement. Durable turn exclusivity now exists via the lease-backed gateway in `services/state.py` and `db/chat.py`, runtime conversation sessions are now scoped per current user in `services/pipeline.py`, and interactive turn setup is partially consolidated in `services/state.py` and `services/chat_session.py`.
+- Confirmation behavior remains intentionally split across durable proposals and lightweight same-turn confirms, but lightweight approval execution is now shared in `services/chat_actions.py` and reused by Discord and browser/API paths.
+- Scheduler code is much closer to a runner, but the reminder compatibility bridge still needs retirement before the reset can close cleanly.
 - Core orchestration responsibilities are spread across transport adapters, scheduler code, and one oversized pipeline module.
 - Multi-user groundwork exists in storage and some boundaries, but full activation is not part of this reset and should not drive the architecture sequence.
 
 **Steps**
 1. Phase 0: Re-baseline the reset documents and invariants. Freeze the non-negotiable rules before further refactor work: one shared conversation across Discord and browser, one active learning turn for the single-user product, durable approvals only for destructive or long-running actions, raw LLM output never crossing the contract boundary, assessment always bound to the intended quiz/concept, and data-preserving migration only. This blocks all later work.
 2. Phase 0: Replace the target architecture framing with fewer seams. Keep adapters, a small turn-coordination boundary, a shared Review service, the fail-closed LLM runtime, and the existing db package as the repository layer. Defer separate Conversation, Proposal, Preferences, Maintenance, and Taxonomy services unless a later slice proves they remove real duplication. This depends on step 1.
-3. Phase 1: Treat the durable single-user turn gateway as complete and preserve it as the outer coordination boundary. Reuse the existing lease-backed gateway instead of designing a new coordination subsystem, and focus the next slices on provider-session locality and duplicated adapter orchestration. This depends on step 2.
+3. Phase 1: Treat the durable single-user turn gateway as complete and preserve it as the outer coordination boundary. This slice is complete in code. Reuse the existing lease-backed gateway instead of designing a new coordination subsystem, and focus the next slices on canonical review ownership, reminder-bridge retirement, and final adapter hardening. This depends on step 2.
 4. Phase 2: Extract one canonical Review service. Move manual review start, scheduled review send, quiz setup, assess, skip, reminder registration, reminder resend, reminder resolution, and late-answer recovery behind one shared boundary used by Discord, browser/API, and scheduler. This is the highest-value simplification and depends on step 3.
 5. Phase 2: Keep approvals intentionally split into two tiers. Reuse the existing durable proposal store only for destructive or long-running flows such as dedup, maintenance, and taxonomy. Keep add-concept, suggest-topic, and preference confirms lightweight and same-turn, but route them through shared helpers so Discord and browser logic stop drifting. This depends on step 2 and should align with step 4.
 6. Phase 3: Shrink the scheduler into a runner, not a workflow owner. Keep durable owner-election and due-time tracking, but move review state transitions and durable proposal creation behind the shared Review service and approval policy. This depends on steps 4-5.
 7. Phase 3: Collapse maintenance and taxonomy only where they truly share policy. Prefer one automation-runner pattern with different prompt/policy inputs over two heavyweight service abstractions. Preserve the current destructive-action safety model and taxonomy shadow rebuild preview/replay guarantees. This depends on step 5 and can proceed in parallel with step 6.
-8. Phase 4: Shrink the oversized pipeline into a cleaner LLM runtime boundary only after review, approvals, and scheduler ownership are clarified. Retain the fetch loop, skill loading, prompt assembly, output validation, repair/retry, and tool execution boundary, but move only business-specific orchestration out. This depends on steps 4-7.
-9. Phase 5: Replace compatibility bridges deliberately. Once the new boundaries are live, remove the reminder dual-write bridge, transport-specific workflow branches, and stale planning assumptions. Only remove a bridge after the matching regression suite and migration rehearsal pass.
+8. Phase 4: Shrink the oversized pipeline into a cleaner LLM runtime boundary only after review, approvals, and scheduler ownership are clarified. The implemented slices already scoped runtime conversation sessions per current user, extracted shared review payload construction, and preserved the existing automation runner pattern in `call_action_loop()` instead of inventing new service classes. Retain the fetch loop, skill loading, prompt assembly, output validation, repair/retry, and tool execution boundary, but move only business-specific orchestration out. This depends on steps 4-7.
+9. Phase 5: Replace compatibility bridges deliberately. Once the new boundaries are live, remove the reminder dual-write bridge, residual transport-specific workflow branches, and stale planning assumptions. Only remove a bridge after the matching regression suite and migration rehearsal pass.
 
 **Execution order and parallelism**
 1. Blocking sequence: steps 1 -> 2 -> 3 -> 4/5 -> 6/7 -> 8 -> 9.
 2. Parallelizable work: review extraction and approval split can proceed together once the adapter orchestration seam is fixed; scheduler cleanup and automation-runner cleanup can proceed together once the Review boundary is stable; acceptance work should run continuously throughout the implementation.
+
+**Status update (2026-05-02)**
+- Milestones 0 through 4 are complete in code.
+- The active milestone is now Milestone 5: surface hardening, bridge retirement, and migration rehearsal.
+- The next slice should start from adapter cleanup and reminder-bridge retirement, not from more turn-gateway or approval redesign.
 
 **Relevant files**
 - [services/state.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/state.py) — existing lease-backed turn gateway; preserve as the outer coordination boundary.

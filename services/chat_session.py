@@ -12,6 +12,8 @@ from services.chat_actions import (
     CHAT_CONFIRMABLE_ACTIONS,
     confirmation_history_entry,
     decline_history_entry,
+    execute_lightweight_confirm,
+    execute_lightweight_decline,
     require_confirmable_action,
 )
 from services.dedup import execute_dedup_merges, format_dedup_suggestions
@@ -715,13 +717,17 @@ async def _handle_reorganize_command(raw_text: str) -> dict:
 
 
 async def handle_chat_message(text: str, author: str = "chat", source: str = "chat") -> dict:
+    async with state.pipeline_serialized():
+        return await _handle_chat_message(text, author=author, source=source)
+
+
+async def _handle_chat_message(text: str, author: str = "chat", source: str = "chat") -> dict:
     _ensure_db()
     text = text.strip()
     if not text:
         return _response("Message cannot be empty.", msg_type="error")
 
-    state.mark_user_activity()
-    db.set_session("quiz_answered", None)
+    state.begin_interactive_turn()
 
     if text.startswith("/"):
         command, args = _split_command(text)
@@ -798,28 +804,22 @@ async def handle_chat_message(text: str, author: str = "chat", source: str = "ch
 
 
 async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
+    async with state.pipeline_serialized():
+        return await _confirm_chat_action(action_data, source=source)
+
+
+async def _confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
     _ensure_db()
-    set_action_source(source)
 
     action = require_confirmable_action(action_data, CHAT_CONFIRMABLE_ACTIONS, "confirmed here")
     message = action_data.get("message", "")
     params = action_data.get("params", {})
 
-    if action == "suggest_topic":
-        success, summary, _topic_id = execute_suggest_topic_accept(action_data)
-        if not success:
-            return _response(f"{message}\n\n⚠️ {summary}", msg_type="error")
-        db.add_chat_message("user", confirmation_history_entry(action_data))
-        db.add_chat_message("assistant", summary)
-        return _response(f"{message}\n\n{summary}")
+    if action in {"suggest_topic", "add_concept"}:
+        success, note = execute_lightweight_confirm(action_data, source=source)
+        return _response(f"{message}\n\n{note}", msg_type="reply" if success else "error")
 
-    if action == "add_concept":
-        msg_type, result = execute_action(action, params)
-        if msg_type == "error":
-            return _response(f"{message}\n\n⚠️ {result}", msg_type="error")
-        db.add_chat_message("user", confirmation_history_entry(action_data))
-        db.add_chat_message("assistant", f"✅ {result}")
-        return _response(f"{message}\n\n✅ {result}")
+    set_action_source(source)
 
     if action == "preference_update":
         result = await pipeline.execute_preference_update(params.get("content", ""))
@@ -867,14 +867,28 @@ async def confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
 
 
 async def decline_chat_action(action_data: dict, source: str = "chat") -> dict:
+    async with state.pipeline_serialized():
+        return await _decline_chat_action(action_data, source=source)
+
+
+async def _decline_chat_action(action_data: dict, source: str = "chat") -> dict:
     _ensure_db()
+    action = require_confirmable_action(action_data, CHAT_CONFIRMABLE_ACTIONS, "declined here")
+    if action in {"suggest_topic", "add_concept"}:
+        execute_lightweight_decline(action_data)
+        return _response("Declined.")
+
     set_action_source(source)
-    require_confirmable_action(action_data, CHAT_CONFIRMABLE_ACTIONS, "declined here")
     db.add_chat_message("user", decline_history_entry(action_data))
     return _response("Declined.")
 
 
 async def handle_chat_action(action: dict, author: str = "chat", source: str = "chat") -> dict:
+    async with state.pipeline_serialized():
+        return await _handle_chat_action(action, author=author, source=source)
+
+
+async def _handle_chat_action(action: dict, author: str = "chat", source: str = "chat") -> dict:
     _ensure_db()
     kind = str(action.get("kind", "")).lower().strip()
 
@@ -882,14 +896,14 @@ async def handle_chat_action(action: dict, author: str = "chat", source: str = "
         message = str(action.get("message", "")).strip()
         if not message:
             raise ValueError("Action message cannot be empty")
-        return await handle_chat_message(message, author=author, source=source)
+        return await _handle_chat_message(message, author=author, source=source)
 
     if kind == "skip_quiz":
         concept_id = action.get("concept_id")
         if concept_id is None:
             raise ValueError("skip_quiz action requires concept_id")
 
-        result = skip_quiz(int(concept_id), user_id=author, source=source)
+        result = skip_quiz(int(concept_id), user_id=state.get_current_user(), source=source)
         if "error" in result:
             return _response(result["error"], msg_type="error")
 

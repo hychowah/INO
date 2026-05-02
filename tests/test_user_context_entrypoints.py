@@ -1,14 +1,18 @@
 """Focused tests for adapter-level current-user scoping."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api import app
+from bot import commands
 from bot import handler
 from services import state
 from api import auth as api_auth
+from services import chat_session
+from services import views
 
 
 @pytest.fixture
@@ -74,7 +78,7 @@ async def test_api_chat_uses_explicit_local_user_scope(client):
     assert resp.status_code == 200
     assert resp.json() == {
         "type": "reply",
-        "message": f"{api_auth.LOCAL_API_USER_ID}|solo_user|api",
+        "message": f"{api_auth.local_api_user_id()}|solo_user|api",
         "pending_action": None,
     }
     assert state.get_current_user() == previous_user
@@ -94,7 +98,7 @@ async def test_api_non_chat_route_uses_request_user_scope(client):
 
     assert resp.status_code == 200
     assert resp.json() == []
-    assert seen == {"user": api_auth.LOCAL_API_USER_ID}
+    assert seen == {"user": api_auth.local_api_user_id()}
     assert state.get_current_user() == previous_user
 
 
@@ -122,3 +126,61 @@ async def test_api_chat_uses_explicit_header_user_scope(client):
         "pending_action": None,
     }
     assert state.get_current_user() == previous_user
+
+
+def test_resolve_api_user_id_defaults_to_configured_local_alias(monkeypatch):
+    monkeypatch.setattr(api_auth.state.config, "LOCAL_USER_ID", "shared-local-user")
+    assert api_auth._resolve_api_user_id(None) == "shared-local-user"
+
+
+@pytest.mark.anyio
+async def test_discord_command_scope_uses_local_user_alias():
+    seen = {}
+    previous_user = state.get_current_user()
+
+    async def fake_handler(ctx):
+        seen["user"] = state.get_current_user()
+        return "ok"
+
+    wrapped = commands.with_ctx_user_scope(fake_handler)
+    ctx = SimpleNamespace(author=SimpleNamespace(id=42))
+
+    await wrapped(ctx)
+
+    assert seen == {"user": state.get_local_user_id()}
+    assert state.get_current_user() == previous_user
+
+
+def test_discord_interaction_views_use_local_user_alias():
+    interaction = SimpleNamespace(user=SimpleNamespace(id=42))
+    assert views._interaction_user_id(interaction) == state.get_local_user_id()
+
+
+@pytest.mark.anyio
+async def test_chat_action_skip_uses_current_scoped_user(test_db):
+    captured = {}
+
+    def fake_skip_quiz(concept_id, *, user_id, source):
+        captured["concept_id"] = concept_id
+        captured["user_id"] = user_id
+        captured["source"] = source
+        return {
+            "old_score": 10,
+            "new_score": 20,
+            "interval_days": 3,
+            "concept_id": concept_id,
+        }
+
+    with (
+        state.current_user_scope("browser-user-7"),
+        patch("services.chat_session.skip_quiz", side_effect=fake_skip_quiz),
+    ):
+        payload = await chat_session.handle_chat_action(
+            {"kind": "skip_quiz", "concept_id": 12},
+            author="solo_user",
+            source="api",
+        )
+
+    assert captured == {"concept_id": 12, "user_id": "browser-user-7", "source": "api"}
+    assert payload["type"] == "reply"
+    assert payload["message"].startswith("⏭️ Skipped — score:")

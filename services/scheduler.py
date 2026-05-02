@@ -29,11 +29,10 @@ from services.dedup import format_dedup_suggestions
 from services.formatting import truncate_for_discord
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import (
+    decide_scheduler_review_action,
     get_active_scheduled_review_reminder,
     note_scheduler_reminder_delivery,
-    normalize_reminder_timestamp,
     register_scheduler_review_delivery,
-    resolve_scheduler_reminder,
     update_pending_review_delivery,
 )
 from services.views import DedupConfirmView
@@ -62,7 +61,7 @@ class _ScheduledJob:
 
 def _scheduler_user_id() -> str:
     """Resolve the scheduler's effective actor for user-scoped persistence."""
-    return str(_authorized_user_id) if _authorized_user_id is not None else "default"
+    return state.get_local_user_id()
 
 
 # ============================================================================
@@ -127,33 +126,14 @@ def _get_scheduled_review_payload() -> str | None:
         return None
 
     concept = due[0]
-    detail = db.get_concept_detail(concept["id"])
-    if not detail:
+    payload = pipeline.build_review_payload(int(concept["id"]))
+    if not payload:
         return None
-
-    topic_names = [topic["title"] for topic in detail.get("topics", [])]
-    recent_reviews = detail.get("recent_reviews", [])
-    remark_summary = detail.get("remark_summary", "")
-
-    context_parts = [
-        f"Concept: {detail['title']} (#{detail['id']})",
-        f"Description: {detail.get('description', 'N/A')}",
-        f"Topics: {', '.join(topic_names) if topic_names else 'untagged'}",
-        f"Score: {detail['mastery_level']}/100, Reviews: {detail['review_count']}",
-    ]
-
-    if remark_summary:
-        context_parts.append(f"Latest remark: {remark_summary[:100]}")
-
-    if recent_reviews:
-        last = recent_reviews[0]
-        context_parts.append(f"Last Q: {last.get('question_asked', 'N/A')}")
-        context_parts.append(f"Last quality: {last.get('quality', 'N/A')}/5")
 
     if len(due) > 1:
         logger.info("%s more concept(s) due for review", len(due) - 1)
 
-    return f"{concept['id']}|{' | '.join(context_parts)}"
+    return payload
 
 
 # ============================================================================
@@ -196,41 +176,12 @@ async def _check_reviews():
             logger.debug("Skipping review check — /review command in progress")
             return
 
-        pending = get_active_scheduled_review_reminder()
-        if pending:
-            cid = pending.get("concept_id")
-            if cid and not db.get_concept(cid):
-                logger.info(f"Pending concept #{cid} no longer exists — clearing")
-                resolve_scheduler_reminder("cancelled")
-            else:
-                sent_at_str = pending.get("last_sent_at") or pending.get("first_sent_at") or ""
-                try:
-                    sent_at = datetime.fromisoformat(sent_at_str)
-                except (ValueError, TypeError):
-                    sent_at = datetime.now()
-
-                cooldown = timedelta(hours=config.REVIEW_NAG_COOLDOWN_HOURS)
-                elapsed = datetime.now() - sent_at
-
-                if elapsed < cooldown:
-                    logger.debug(
-                        f"Pending review #{cid} — {elapsed.total_seconds() / 3600:.1f}h "
-                        f"< {config.REVIEW_NAG_COOLDOWN_HOURS}h cooldown, skipping"
-                    )
-                    return
-
-                reminder_count = pending.get("reminder_count", 0)
-                max_reminders = getattr(config, "REVIEW_REMINDER_MAX", 3)
-
-                if reminder_count >= max_reminders:
-                    logger.info(
-                        f"Pending review #{cid} — {reminder_count} reminders sent, "
-                        f"giving up and moving to next concept"
-                    )
-                    resolve_scheduler_reminder("expired")
-                else:
-                    await _send_review_reminder(pending)
-                    return
+        review_action, pending = decide_scheduler_review_action()
+        if review_action == "wait":
+            return
+        if review_action == "remind" and pending is not None:
+            await _send_review_reminder(pending)
+            return
 
         try:
             review_payload = _get_scheduled_review_payload()

@@ -225,38 +225,39 @@ def invalidate_prompt_cache():
 def reset_conversation_session():
     """Force a new conversation session. Call after persona switch so the
     OpenAI provider doesn't serve the old system prompt from cached messages."""
-    global _conv_session_name, _conv_session_last_used
-    if _conv_session_name:
+    user_id = state.get_current_user()
+    session_state = _conv_sessions.pop(user_id, None)
+    if session_state:
+        session_name, _last_used = session_state
         provider = get_provider()
-        provider.clear_session(_conv_session_name)
-        logger.info(f"Cleared LLM session: {_conv_session_name}")
-    _conv_session_name = None
-    _conv_session_last_used = None
+        provider.clear_session(session_name)
+        logger.info("Cleared LLM session: %s user=%s", session_name, user_id)
 
 
 # Conversation session state (see DEVNOTES.md §2.3)
-_conv_session_name: str | None = None
-_conv_session_last_used: datetime | None = None
+_conv_sessions: dict[str, tuple[str, datetime]] = {}
 
 
 def _get_conv_session() -> tuple[str, bool]:
     """Return a conversation session name, rotating after SESSION_TIMEOUT_MINUTES idle.
     Returns (session_name, is_new) — is_new=True means first call needs full context."""
-    global _conv_session_name, _conv_session_last_used
     now = datetime.now()
     user_id = state.get_current_user()
     timeout = getattr(config, "SESSION_TIMEOUT_MINUTES", 5)
+    existing = _conv_sessions.get(user_id)
+    session_name = existing[0] if existing else None
+    last_used = existing[1] if existing else None
     if (
-        _conv_session_name is None
-        or _conv_session_last_used is None
-        or (now - _conv_session_last_used).total_seconds() > timeout * 60
+        session_name is None
+        or last_used is None
+        or (now - last_used).total_seconds() > timeout * 60
     ):
-        _conv_session_name = f"learn_{user_id}_{now.strftime('%H%M%S')}"
-        _conv_session_last_used = now
-        logger.info(f"New conversation session: {_conv_session_name}")
-        return _conv_session_name, True
-    _conv_session_last_used = now
-    return _conv_session_name, False
+        session_name = f"learn_{user_id}_{now.strftime('%H%M%S')}"
+        _conv_sessions[user_id] = (session_name, now)
+        logger.info("New conversation session: %s user=%s", session_name, user_id)
+        return session_name, True
+    _conv_sessions[user_id] = (session_name, now)
+    return session_name, False
 
 
 def _make_isolated_session_name(mode: str) -> str:
@@ -966,27 +967,13 @@ async def package_quiz_for_discord(p1_result: dict, concept_id: int) -> str:
     return formatted
 
 
-# ============================================================================
-# Direct Mode Handlers (no subprocess)
-# ============================================================================
-
-
-def handle_review_check() -> list[str]:
-    """Find due concepts and return REVIEW payload strings.
-    Falls back to the nearest upcoming concept if nothing is overdue."""
-    due = db.get_due_concepts(limit=5)
-    if due:
-        concept = due[0]
-    else:
-        # Nothing overdue — fall back to the next upcoming concept
-        concept = db.get_next_review_concept()
-        if not concept:
-            return []
-    detail = db.get_concept_detail(concept["id"])
+def build_review_payload(concept_id: int) -> str | None:
+    """Build the canonical review payload for one concept."""
+    detail = db.get_concept_detail(concept_id)
     if not detail:
-        return []
+        return None
 
-    topic_names = [t["title"] for t in detail.get("topics", [])]
+    topic_names = [topic["title"] for topic in detail.get("topics", [])]
     recent_reviews = detail.get("recent_reviews", [])
     remark_summary = detail.get("remark_summary", "")
 
@@ -1005,8 +992,29 @@ def handle_review_check() -> list[str]:
         context_parts.append(f"Last Q: {last.get('question_asked', 'N/A')}")
         context_parts.append(f"Last quality: {last.get('quality', 'N/A')}/5")
 
-    context_str = " | ".join(context_parts)
-    lines = [f"{concept['id']}|{context_str}"]
+    return f"{detail['id']}|{' | '.join(context_parts)}"
+
+
+# ============================================================================
+# Direct Mode Handlers (no subprocess)
+# ============================================================================
+
+
+def handle_review_check() -> list[str]:
+    """Find due concepts and return REVIEW payload strings.
+    Falls back to the nearest upcoming concept if nothing is overdue."""
+    due = db.get_due_concepts(limit=5)
+    if due:
+        concept = due[0]
+    else:
+        # Nothing overdue — fall back to the next upcoming concept
+        concept = db.get_next_review_concept()
+        if not concept:
+            return []
+    payload = build_review_payload(int(concept["id"]))
+    if not payload:
+        return []
+    lines = [payload]
 
     if len(due) > 1:
         logger.info(f"{len(due) - 1} more concept(s) due for review")

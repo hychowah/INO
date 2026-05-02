@@ -34,7 +34,7 @@ logger = logging.getLogger("bot")
 def with_ctx_user_scope(func):
     @functools.wraps(func)
     async def wrapper(ctx, *args, **kwargs):
-        with state.current_user_scope(str(ctx.author.id)):
+        with state.current_user_scope(state.get_local_user_id()):
             return await func(ctx, *args, **kwargs)
 
     return wrapper
@@ -58,8 +58,9 @@ async def learn_command(ctx, *, text: str = ""):
 
     try:
         async with ctx.channel.typing():
+            active_user_id = state.get_local_user_id()
             response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
-                text or "hello", str(ctx.author), user_id=str(ctx.author.id)
+                text or "hello", str(ctx.author), user_id=active_user_id
             )
 
         if pending_action:

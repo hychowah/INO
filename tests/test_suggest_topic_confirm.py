@@ -323,6 +323,44 @@ class TestSuggestTopicChatHistory:
         assert any(marker == c for c in contents)
 
 
+class TestLightweightSuggestTopicApproval:
+    def test_confirm_writes_shared_history_and_summary(self):
+        from services.chat_actions import execute_lightweight_confirm
+
+        action_data = {
+            "action": "suggest_topic",
+            "params": {
+                "title": "Embedding Models",
+                "concepts": [
+                    {"title": "Sentence Embeddings", "description": "Dense vectors"},
+                ],
+            },
+        }
+
+        success, note = execute_lightweight_confirm(action_data, source="discord")
+
+        assert success is True
+        assert "Embedding Models" in note
+        history = db.get_chat_history(limit=5)
+        contents = [m["content"] for m in history]
+        assert any('[confirmed: add topic "Embedding Models"]' == c for c in contents)
+        assert any("Embedding Models" in c for c in contents)
+
+    def test_decline_writes_shared_history_marker(self):
+        from services.chat_actions import execute_lightweight_decline
+
+        execute_lightweight_decline(
+            {
+                "action": "suggest_topic",
+                "params": {"title": "Embedding Models"},
+            }
+        )
+
+        history = db.get_chat_history(limit=5)
+        contents = [m["content"] for m in history]
+        assert any('[declined: add topic "Embedding Models"]' == c for c in contents)
+
+
 # ============================================================================
 # Phantom-add detection (log-only)
 # ============================================================================

@@ -209,7 +209,8 @@ class TestChat:
             "params": {"title": "Ownership"},
         }
         with patch(
-            "services.chat_session.execute_action", return_value=("reply", "Added concept #7")
+            "services.chat_actions.execute_action",
+            return_value=("reply", "Added concept #7"),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
 
@@ -231,7 +232,7 @@ class TestChat:
             "params": {"title": "Compilers"},
         }
         with patch(
-            "services.chat_session.execute_suggest_topic_accept",
+            "services.chat_actions.execute_suggest_topic_accept",
             return_value=(True, "✅ Created topic **Compilers** (#3)", 3),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})

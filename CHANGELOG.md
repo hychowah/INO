@@ -6,8 +6,20 @@ Key changes, newest first.
 
 ## May 2026
 
+### Changed
+
+- **Local-first runtime identity boundary** — Discord, API, browser, and scheduler flows now resolve through the canonical `LEARN_LOCAL_USER_ID`; FastAPI request scope may still override that alias with `X-Learning-User`
+
+### Refactored
+
+- **Shared chat entry ownership** — FastAPI chat, confirm, decline, and structured chat-action flows now serialize inside `services/chat_session.py`; interactive turn setup is centralized in `services/state.begin_interactive_turn()` instead of duplicated across adapters
+- **Lightweight approval parity** — `add_concept` and `suggest_topic` confirmation/decline side effects are now shared in `services/chat_actions.py` across browser/API chat, Discord views, and reply-based Discord confirms
+- **Scheduler review-policy narrowing** — canonical single-concept review payload construction now lives in `services/pipeline.py`, while reminder cooldown/expiry decisions moved into `services/review_state.py`
+
 ### Fixed
 
+- **Scoped provider session leakage** — runtime provider conversation sessions are now keyed by current user instead of one process-global cache
+- **Browser/API skip user mismatch** — the shared `skip_quiz` action path now uses the current scoped user rather than the adapter display author
 - **Proactive reminder self-healing** — scheduler review checks now clear malformed or deleted legacy `pending_review` state before importing it into `scheduled_review_reminders`, so one stale reminder blob no longer aborts proactive Discord review delivery while manual `/review` still works
 - **Legacy reminder bridge recovery** — when only the compatibility `pending_review` mirror exists, the next scheduler pass can re-import it into the typed reminder row after validating concept existence and normalizing timestamps
 - **Skip-button re-arming on fresh reviews** — each newly delivered review question now resets the stale `quiz_answered` guard before sending the message, so `I know this` works on the next eligible question instead of incorrectly reporting the quiz was already answered or skipped

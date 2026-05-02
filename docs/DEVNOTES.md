@@ -38,6 +38,7 @@
 25. [React Frontend & Dev Server URL Routing](#25-react-frontend--dev-server-url-routing)
 26. [Persisted Scheduler & Shared Owner Lock](#26-persisted-scheduler--shared-owner-lock)
 27. [LLM Output Contract Boundary](#27-llm-output-contract-boundary)
+28. [Local Alias And Shared Chat Entry Boundaries](#28-local-alias-and-shared-chat-entry-boundaries)
 
 ---
 
@@ -357,6 +358,8 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Key files:** `frontend/src/routes.tsx`, `frontend/src/lib/navigation.ts`, `frontend/src/components/AppShell.tsx`, `frontend/src/components/AppLayout.tsx`, `frontend/src/components/ActivityDrawer.tsx`, `frontend/src/components/CommandPalette.tsx`, `frontend/src/components/ui/resizable-panels.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/ProgressPage.tsx`, `frontend/src/pages/TopicsListPage.tsx`, `frontend/src/pages/ConceptsListPage.tsx`, `frontend/src/pages/GraphPage.tsx`, `services/chat_session.py`, `api/routes/pages.py`, `api/auth.py`, `.github/workflows/frontend.yml`, `frontend/playwright.config.ts`, `frontend/e2e/knowledge-surfaces.spec.ts`.
 
+---
+
 ## 21. Preference-Edit Isolated Skill Path
 
 **What changed:** `/preference` now has two modes. With no arguments it shows the current runtime `data/preferences.md`. With text input it enters a one-shot edit flow that asks the LLM to rewrite the full preferences file, then shows `PreferenceUpdateView` Apply/Reject buttons before any write happens.
@@ -368,6 +371,26 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Why there is no DB-backed proposal:** `PreferenceUpdateView` carries the proposed file content in memory and calls `execute_preference_update()` directly on approval. Unlike maintenance or dedup proposals, this flow edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
 
 **Key files:** `bot/commands.py` (`/preference`), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/pipeline.py` (`SKILL_SETS["preference-edit"]`, `_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
+
+---
+
+## 28. Local Alias And Shared Chat Entry Boundaries
+
+**Problem:** the repo had user-scoping groundwork in storage, but local-first runtime entry points still drifted in practice. Some paths used raw Discord ids, API requests implicitly fell back to a hardcoded default user, provider conversation sessions were process-global, interactive turn setup was duplicated, and lightweight `add_concept` / `suggest_topic` confirmations drifted across browser/API, Discord button views, and reply-based Discord confirms.
+
+**Fix — one local alias plus boundary-owned entry logic:**
+
+- `LEARN_LOCAL_USER_ID` in `config.py` is now the canonical local-first runtime alias. `services.state.get_local_user_id()` is the shared accessor used by Discord commands, plain-message flows, views, and scheduler jobs.
+- `api/auth.py` now owns request-scope binding for the FastAPI surface. `X-Learning-User` is optional and validated there; missing values fall back to `LEARN_LOCAL_USER_ID`.
+- `services.state.begin_interactive_turn()` centralizes the shared pre-turn work: durable activity heartbeat plus `quiz_answered` reset. Do not duplicate that preamble in adapters.
+- `services.chat_session.py` now owns outer serialization for FastAPI chat, confirm, decline, and chat-action flows. Routes should call the shared controller directly rather than wrapping `pipeline_serialized()` themselves.
+- Runtime provider conversation sessions in `services/pipeline.py` are now keyed by current user, so one scoped user does not inherit another scoped user's provider session.
+- `services.chat_actions.py` now owns the lightweight confirm/decline executor for `add_concept` and `suggest_topic`. Keep those actions lightweight and same-turn; do not widen them into durable proposal flows unless the product semantics change.
+- `skip_quiz` in the shared chat-action path now uses `state.get_current_user()` rather than the adapter display author, so browser/API skip actions hit the correct scoped user.
+
+**Design rule:** for local-first runtime behavior, identity, serialization, and turn-entry bookkeeping should each be bound once at the owning boundary. Avoid reintroducing route-level or view-level copies of those rules.
+
+**Key files:** `config.py`, `services/state.py`, `api/auth.py`, `api/routes/chat.py`, `services/chat_session.py`, `services/chat_actions.py`, `bot/commands.py`, `bot/events.py`, `services/views.py`, `services/pipeline.py`, `tests/test_user_context_entrypoints.py`, `tests/test_pipeline_sessions.py`.
 
 ---
 

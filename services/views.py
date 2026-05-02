@@ -8,6 +8,7 @@ import discord
 
 import db
 from services import state
+from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
 from services.dedup import execute_dedup_merges
 from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
 from services.review_state import register_interactive_review_delivery
@@ -18,7 +19,7 @@ VIEW_TIMEOUT = 86400
 
 
 def _interaction_user_id(interaction: discord.Interaction) -> str:
-    return str(interaction.user.id)
+    return state.get_local_user_id()
 
 
 class DedupConfirmView(discord.ui.View):
@@ -340,19 +341,13 @@ class AddConceptConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        from services.tools import execute_action
-
         with state.current_user_scope(_interaction_user_id(interaction)):
             async with state.pipeline_serialized():
-                action = self.action_data.get("action", "add_concept")
-                params = self.action_data.get("params", {})
-                msg_type, result = execute_action(action, params)
-                if msg_type == "error":
-                    note = f"\n\n⚠️ Could not add concept: {result}"
-                else:
-                    note = f"\n\n✅ {result}"
-                    db.add_chat_message("user", "[confirmed: add concept]")
-                    db.add_chat_message("assistant", f"✅ {result}")
+                _success, display_note = execute_lightweight_confirm(
+                    self.action_data,
+                    source="discord",
+                )
+                note = f"\n\n{display_note}"
 
         try:
             original = interaction.message.content or ""
@@ -374,7 +369,7 @@ class AddConceptConfirmView(discord.ui.View):
 
         with state.current_user_scope(_interaction_user_id(interaction)):
             async with state.pipeline_serialized():
-                db.add_chat_message("user", "[declined: add concept]")
+                execute_lightweight_decline(self.action_data)
 
         try:
             original = interaction.message.content or ""
@@ -414,18 +409,13 @@ class SuggestTopicConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        from services.tools import execute_suggest_topic_accept
-
         with state.current_user_scope(_interaction_user_id(interaction)):
             async with state.pipeline_serialized():
-                success, summary, topic_id = execute_suggest_topic_accept(self.action_data)
-                title = self.action_data.get("params", {}).get("title", "topic")
-                if success:
-                    db.add_chat_message("user", f'[confirmed: add topic "{title}"]')
-                    db.add_chat_message("assistant", summary)
-                    note = f"\n\n{summary}"
-                else:
-                    note = f"\n\n⚠️ {summary}"
+                _success, display_note = execute_lightweight_confirm(
+                    self.action_data,
+                    source="discord",
+                )
+                note = f"\n\n{display_note}"
 
         try:
             original = interaction.message.content or ""
@@ -447,8 +437,7 @@ class SuggestTopicConfirmView(discord.ui.View):
 
         with state.current_user_scope(_interaction_user_id(interaction)):
             async with state.pipeline_serialized():
-                title = self.action_data.get("params", {}).get("title", "topic")
-                db.add_chat_message("user", f'[declined: add topic "{title}"]')
+                execute_lightweight_decline(self.action_data)
 
         try:
             original = interaction.message.content or ""
@@ -678,7 +667,7 @@ class _QuizSkipButton(discord.ui.Button):
                         await interaction.followup.send(f"⚠️ {result['error']}")
                         self.parent_view.stop()
                         return
-                    state.last_activity_at = datetime.now()
+                    state.mark_user_activity()
                     confirmation = (
                         f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
                         f"next review in {result['interval_days']}d"
