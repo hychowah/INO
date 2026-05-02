@@ -2,6 +2,7 @@
 Chat history and session state operations.
 """
 
+import json
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -13,6 +14,7 @@ from db.core import (
     CLEANUP_THROTTLE_SECONDS,
     MAX_CHAT_HISTORY,
     _now_iso,
+    _parse_datetime,
     _uid,
 )
 
@@ -138,6 +140,103 @@ def clear_session(*, user_id: Optional[str] = None):
         conn.execute("DELETE FROM session_state WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+
+def try_acquire_session_lease(
+    key: str,
+    owner_token: str,
+    lease_seconds: int,
+    *,
+    user_id: Optional[str] = None,
+    now: Optional[str] = None,
+) -> bool:
+    """Acquire or steal a session lease if it is missing or expired."""
+    uid = user_id or _uid()
+    now_value = now or _now_iso()
+    now_dt = _parse_datetime(now_value) or datetime.now()
+    expires_at = (now_dt + timedelta(seconds=lease_seconds)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    payload = json.dumps({"owner_token": owner_token, "expires_at": expires_at})
+
+    conn = sqlite3.connect(_chat_db_path(), timeout=0, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM session_state WHERE user_id = ? AND key = ?", (uid, key)
+        ).fetchone()
+        if row:
+            current = _parse_session_lease_value(row[0])
+            if current:
+                current_expires_at = _parse_datetime(current.get("expires_at"))
+                same_owner = current.get("owner_token") == owner_token
+                if not same_owner and current_expires_at and current_expires_at > now_dt:
+                    conn.rollback()
+                    return False
+
+        conn.execute(
+            (
+                "INSERT INTO session_state "
+                "(user_id, key, value, updated_at) "
+                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at"
+            ),
+            (uid, key, payload),
+        )
+        conn.commit()
+        return True
+    except sqlite3.OperationalError:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def release_session_lease(key: str, owner_token: str, *, user_id: Optional[str] = None) -> bool:
+    """Release a session lease if it is still owned by the given token."""
+    uid = user_id or _uid()
+    conn = sqlite3.connect(_chat_db_path(), timeout=0, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM session_state WHERE user_id = ? AND key = ?", (uid, key)
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False
+
+        current = _parse_session_lease_value(row[0])
+        if not current or current.get("owner_token") != owner_token:
+            conn.rollback()
+            return False
+
+        cursor = conn.execute(
+            "DELETE FROM session_state WHERE user_id = ? AND key = ?", (uid, key)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.OperationalError:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def get_session_lease(key: str, *, user_id: Optional[str] = None) -> Optional[dict]:
+    """Return the parsed session lease payload for a key, if present."""
+    raw = get_session(key, user_id=user_id)
+    return _parse_session_lease_value(raw)
+
+
+def _parse_session_lease_value(raw: Optional[str]) -> Optional[dict]:
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def _cleanup_chat_history(session_id: str = "learn"):

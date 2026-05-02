@@ -18,7 +18,8 @@ from services import backup as backup_service
 from services import pipeline, state
 from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
-from services.tools_assess import set_pending_review
+from services.review_flow import generate_review_quiz_from_payload
+from services.review_state import register_interactive_review_delivery
 from services.views import (
     AddConceptConfirmView,
     PreferenceUpdateView,
@@ -356,68 +357,24 @@ async def review_command(ctx):
         async with state.pipeline_serialized():
             review_lines = pipeline.handle_review_check()
             if review_lines:
-                payload = review_lines[0]
-                review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
+                async with ctx.channel.typing():
+                    quiz = await generate_review_quiz_from_payload(
+                        review_lines[0],
+                        author=str(ctx.author),
+                        source="discord",
+                        track_in_progress=True,
+                    )
+                cid = quiz.concept_id
+                response = quiz.message
+                assess_meta = None
 
-                try:
-                    cid = int(payload.split("|", 1)[0])
-                except (ValueError, IndexError):
-                    cid = None
-
-                try:
-                    if cid:
-                        db.set_session("active_concept_id", str(cid))
-                        db.set_session("quiz_anchor_concept_id", str(cid))
-
-                    db.set_session("review_in_progress", str(cid) if cid else "1")
-
-                    async with ctx.channel.typing():
-                        from services.llm import LLMError
-
-                        try:
-                            if cid:
-                                p1_result = await pipeline.generate_quiz_question(cid)
-                                llm_response = await pipeline.package_quiz_for_discord(
-                                    p1_result, cid
-                                )
-                            else:
-                                raise LLMError("No concept_id in payload", retryable=True)
-                        except LLMError as e:
-                            logger.warning(
-                                "Two-prompt pipeline failed (%s), falling back to "
-                                "single-prompt flow",
-                                e,
-                            )
-                            llm_response = await pipeline.call_with_fetch_loop(
-                                mode="review-check",
-                                text=review_text,
-                                author=str(ctx.author),
-                            )
-
-                        final_result = await pipeline.execute_llm_response(
-                            review_text, llm_response, "reply"
-                        )
-                        _msg_type, response = pipeline.process_output(final_result)
-                        assess_meta = None
-
-                        if _msg_type == "reply":
-                            prefix, _msg, action_data = parse_llm_response(llm_response)
-                            if (
-                                action_data
-                                and action_data.get("action", "").lower().strip() == "assess"
-                                and action_data.get("params", {}).get("quality") is not None
-                            ):
-                                assess_meta = {
-                                    "concept_id": action_data["params"].get("concept_id", cid),
-                                    "quality": action_data["params"]["quality"],
-                                }
-
-                    if not response or not response.strip():
-                        response = "Could not generate a review quiz. Try again?"
-                    else:
-                        db.set_session("last_quiz_question", response.strip())
-                finally:
-                    db.set_session("review_in_progress", None)
+                if quiz.action_data and quiz.action_data.get("action", "").lower().strip() == "assess":
+                    params = quiz.action_data.get("params", {})
+                    if params.get("quality") is not None:
+                        assess_meta = {
+                            "concept_id": params.get("concept_id", cid),
+                            "quality": params["quality"],
+                        }
 
         if not review_lines:
             msg = "✅ No concepts to review — add some topics first!"
@@ -445,7 +402,7 @@ async def review_command(ctx):
             else:
                 send_fn = ctx.send
             await send_review_question(send_fn, response, cid, _handle_user_message)
-            set_pending_review(cid, response.strip())
+            register_interactive_review_delivery(cid, response.strip())
         else:
             await send_long(ctx, response)
     except Exception as e:

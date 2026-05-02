@@ -10,6 +10,7 @@ import db
 from services import state
 from services.dedup import execute_dedup_merges
 from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
+from services.review_state import register_interactive_review_delivery
 
 logger = logging.getLogger("views")
 
@@ -717,10 +718,12 @@ async def _send_quiz_response(
                     show_skip=True,
                 )
                 await interaction.followup.send(truncate_for_discord(response + meta_suffix), view=view)
+                register_interactive_review_delivery(int(quiz_cid), response)
                 return
             meta = format_quiz_metadata(concept)
             meta_suffix = f"\n\n{meta}" if meta else ""
             await interaction.followup.send(truncate_for_discord(response + meta_suffix))
+            register_interactive_review_delivery(int(quiz_cid), response)
             return
 
         if quiz_cid is not None:
@@ -744,10 +747,12 @@ async def _send_quiz_response(
                 show_skip=True,
             )
             await interaction.followup.send(truncate_for_discord(response + meta_suffix), view=view)
+            register_interactive_review_delivery(int(quiz_cid), response)
             return
         meta = format_quiz_metadata(concept)
         meta_suffix = f"\n\n{meta}" if meta else ""
         await interaction.followup.send(truncate_for_discord(response + meta_suffix))
+        register_interactive_review_delivery(int(quiz_cid), response)
         return
 
     await interaction.followup.send(truncate_for_discord(response))

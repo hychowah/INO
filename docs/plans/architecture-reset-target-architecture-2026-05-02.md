@@ -6,16 +6,16 @@ This document describes the target architecture for the reset. It is a planning 
 
 ## Core Principle
 
-One user-scoped backend owns the product. Adapters translate transport concerns. Application services own use cases. The LLM runtime owns prompt and action orchestration. Repositories and infrastructure own persistence and external integrations.
+One local-first single-user backend owns the product. Adapters translate transport concerns. Only the use-case boundaries that remove real duplication should be introduced. The LLM runtime owns prompt and action orchestration. The existing db package remains the repository layer unless a narrower repository boundary proves necessary.
 
 ## Target Shape
 
 ```text
 Discord Adapter ─┐
-HTTP Adapter    ├──> Application Services ───> LLM Runtime
-Scheduler Worker┘             │                     │
-                              │                     │
-                              └──────> Repositories / Infrastructure
+HTTP Adapter    ├──> Shared Boundaries ───> LLM Runtime
+Scheduler Worker┘           │                  │
+                            │                  │
+                            └──────> DB / Infrastructure
 ```
 
 ## Layer 1: Adapters
@@ -64,26 +64,25 @@ Likely source files to shrink into this layer:
 
 - [../../services/scheduler.py](../../services/scheduler.py)
 
-## Layer 2: Application Services
+## Layer 2: Shared Boundaries
 
-Application services own business use cases and shared state transitions.
+Only the boundaries that remove clear duplication should exist in the target shape.
 
-### Conversation Service
+### Turn Gateway
 
 Responsibilities:
 
-- Cross-surface conversation/session state.
-- Per-user turn ownership and serialization.
-- Command dispatch into the correct use case.
-- Chat history persistence policy.
-- Confirmation marker lifecycle and user-visible conversation continuity.
+- Preserve one shared conversation across Discord and browser/API.
+- Own durable single-user turn acquisition and release.
+- Keep adapters from coordinating turns through process-local state.
+- Append shared history and confirmation markers without becoming a large domain service.
 
 Primary current inputs:
 
-- [../../services/chat_session.py](../../services/chat_session.py)
-- [../../bot/handler.py](../../bot/handler.py)
-- [../../db/chat.py](../../db/chat.py)
 - [../../services/state.py](../../services/state.py)
+- [../../bot/handler.py](../../bot/handler.py)
+- [../../api/routes/chat.py](../../api/routes/chat.py)
+- [../../db/chat.py](../../db/chat.py)
 
 ### Review Service
 
@@ -91,7 +90,7 @@ Responsibilities:
 
 - Select due concepts.
 - Generate quizzes.
-- Bind quiz instance to concept and session state.
+- Bind quiz instance to reminder and session state.
 - Assess answers.
 - Register, resend, and resolve reminders.
 - Recover delayed answers safely.
@@ -100,18 +99,17 @@ Primary current inputs:
 
 - [../../services/tools_assess.py](../../services/tools_assess.py)
 - [../../services/review_state.py](../../services/review_state.py)
-- [../../services/pipeline.py](../../services/pipeline.py)
+- [../../services/chat_session.py](../../services/chat_session.py)
+- [../../services/scheduler.py](../../services/scheduler.py)
 - [../../db/review_reminders.py](../../db/review_reminders.py)
 
-### Proposal Service
+### Approval Policy Boundary
 
 Responsibilities:
 
-- Create approval records.
-- Expire approvals.
-- Approve or reject actions.
-- Provide one canonical audit trail.
-- Hand approved actions to execution services.
+- Keep durable proposals only for destructive or long-running flows.
+- Keep lightweight same-turn confirmations lightweight, but shared.
+- Provide one place to decide which path a requested action belongs to.
 
 Primary current inputs:
 
@@ -120,49 +118,20 @@ Primary current inputs:
 - [../../services/chat_actions.py](../../services/chat_actions.py)
 - [../../services/chat_session.py](../../services/chat_session.py)
 
-### Maintenance Service
+### Automation Runner Pattern
 
 Responsibilities:
 
-- Build maintenance context.
-- Run maintenance action loop through the LLM runtime.
-- Enforce safe versus approval-required actions.
-- Emit durable results for scheduler, Discord, and browser.
+- Provide one reusable orchestration shape for maintenance and taxonomy.
+- Reuse the same approval policy and runtime boundary.
+- Preserve existing safety guardrails without inventing heavyweight peer services.
 
 Primary current inputs:
 
-- [../../services/context.py](../../services/context.py)
 - [../../services/pipeline.py](../../services/pipeline.py)
-- [../../db/diagnostics.py](../../db/diagnostics.py)
-
-### Taxonomy Service
-
-Responsibilities:
-
-- Build taxonomy context.
-- Run taxonomy restructuring loops.
-- Preserve rename suppression and structural safety.
-- Integrate with preview/apply workflows.
-
-Primary current inputs:
-
 - [../../services/context.py](../../services/context.py)
-- [../../services/pipeline.py](../../services/pipeline.py)
+- [../../services/scheduler.py](../../services/scheduler.py)
 - [../../scripts/taxonomy_shadow_rebuild.py](../../scripts/taxonomy_shadow_rebuild.py)
-- [../../db/action_log.py](../../db/action_log.py)
-
-### Preferences Service
-
-Responsibilities:
-
-- Persona selection.
-- Preference reads and edits.
-- Preference-edit approval or confirmation policy if needed.
-
-Primary current inputs:
-
-- [../../db/preferences.py](../../db/preferences.py)
-- [../../services/pipeline.py](../../services/pipeline.py)
 
 ## Layer 3: LLM Runtime
 
@@ -188,14 +157,14 @@ Primary current inputs:
 Constraints:
 
 - It must stay fail-closed.
-- It must not become the permanent owner of review, maintenance, taxonomy, or scheduler policy.
+- It must not remain the permanent owner of review lifecycle, approval policy, maintenance policy, taxonomy policy, or scheduler behavior.
 
-## Layer 4: Repositories And Infrastructure
+## Layer 4: DB And Infrastructure
 
 Responsibilities:
 
-- Persist user-scoped knowledge, reviews, reminders, approvals, and scheduler state.
-- Provide narrow repository boundaries to services.
+- Persist knowledge, reviews, reminders, approvals, and scheduler state.
+- Keep the current db package as the default repository boundary unless a narrower split proves necessary.
 - Own external integrations such as vector search, backup, and notification transport.
 
 Primary current inputs:
@@ -214,33 +183,33 @@ Primary current inputs:
 
 ## Canonical State Ownership
 
-The target architecture needs one canonical owner for each hard state machine.
+The target architecture needs one canonical owner for each hard state machine, but not every concern needs a heavyweight service.
 
-- Conversation/session state: owned by the Conversation service.
-- Review/reminder state: owned by the Review service.
-- Proposal/approval state: owned by the Proposal service.
+- Shared conversation continuity and turn ownership: owned by the Turn Gateway.
+- Review/reminder lifecycle: owned by the Review service.
+- Durable proposal state for destructive or long-running flows: owned by the existing proposal store plus approval policy boundary.
+- Lightweight same-turn confirmations: remain lightweight and shared, but are not promoted into durable proposal state.
 - Scheduler timing and shared ownership: owned by the Scheduler worker plus scheduler-state repositories.
 
-Compatibility bridges may exist temporarily, but canonical write ownership must be singular.
+Compatibility bridges may exist temporarily, but canonical write ownership must still be singular where real state machines exist.
 
 ## Cross-Cutting Policies
 
 ### User Context
 
-- Every adapter sets explicit user context.
-- Services never guess user identity.
-- No new workflow depends on implicit default-user fallback.
+- The current reset assumes a single-user product and keeps existing local-first identity rules.
+- New workflow boundaries should not introduce fresh default-user assumptions even if dormant multi-user plumbing remains in code.
 
 ### Concurrency
 
-- One active learning turn per user.
+- One active learning turn for the single-user product.
 - Shared background jobs remain single-owner across processes.
-- Cross-user concurrency is allowed once state is isolated.
+- Cross-surface coordination must be durable rather than process-local.
 
 ### Safety
 
 - Raw provider output never bypasses runtime validation.
-- Destructive actions always go through durable approval policy.
+- Destructive or long-running actions always go through durable approval policy.
 - Maintenance and taxonomy never silently modify learning scores.
 
 ## Current-To-Target Mapping
@@ -256,7 +225,8 @@ Compatibility bridges may exist temporarily, but canonical write ownership must 
 ### Modules Likely To Become Transitional Or Disappear
 
 - [../../services/review_state.py](../../services/review_state.py) once reminder state is canonicalized.
-- Transport-specific confirmation glue currently spread across browser and Discord code.
+- Process-local turn coordination in [../../services/state.py](../../services/state.py) once a durable turn gateway replaces it.
+- Transport-specific confirmation glue currently spread across browser and Discord code where shared helpers can remove drift.
 
 ### Modules That Likely Remain But Under Narrower Contracts
 

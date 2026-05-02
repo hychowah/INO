@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime
 
 import db
@@ -71,14 +72,52 @@ def restore_pending_review_context() -> dict | None:
         clear_pending_review()
         return None
 
-    db.set_session("active_concept_id", str(concept_id))
-    db.set_session("quiz_anchor_concept_id", str(concept_id))
-
-    question = (pending.get("question") or "").strip()
-    if question:
-        db.set_session("last_quiz_question", question)
+    bind_single_quiz_context(int(concept_id), question=(pending.get("question") or "").strip())
 
     return pending
+
+
+def bind_single_quiz_context(concept_id: int, *, question: str | None = None) -> None:
+    """Bind the active single-concept quiz context for delivery, recovery, or reminders."""
+    db.set_session("active_concept_id", str(concept_id))
+    db.set_session("quiz_anchor_concept_id", str(concept_id))
+    if question:
+        db.set_session("last_quiz_question", question.strip())
+
+
+def resolve_assess_concept(requested_concept_id: int | None) -> tuple[int | None, dict | None]:
+    """Resolve the concept targeted by assess using the established fallback chain."""
+    concept = None
+    concept_id = requested_concept_id
+
+    if concept_id is not None:
+        concept = db.get_concept(int(concept_id))
+        if concept:
+            return int(concept_id), concept
+
+    anchor_cid = db.get_session("quiz_anchor_concept_id")
+    if anchor_cid:
+        concept = db.get_concept(int(anchor_cid))
+        if concept:
+            return int(anchor_cid), concept
+
+    active_cid = db.get_session("active_concept_id")
+    if active_cid:
+        concept = db.get_concept(int(active_cid))
+        if concept:
+            return int(active_cid), concept
+
+    history = db.get_chat_history(limit=6)
+    for msg in reversed(history):
+        match = re.search(r"quiz on concept #(\d+)", msg.get("content", ""))
+        if not match:
+            continue
+        fallback_cid = int(match.group(1))
+        concept = db.get_concept(fallback_cid)
+        if concept:
+            return fallback_cid, concept
+
+    return None, None
 
 
 def normalize_reminder_timestamp(raw_value: str | None) -> str:
@@ -168,6 +207,24 @@ def set_scheduler_reminder(concept_id: int, concept_title: str, question: str) -
     set_pending_review(concept_id, question, concept_title=concept_title)
 
 
+def register_interactive_review_delivery(concept_id: int, question: str) -> None:
+    """Register a successfully delivered interactive review question."""
+    bind_single_quiz_context(concept_id, question=question)
+    set_pending_review(concept_id, question)
+
+
+def register_scheduler_review_delivery(
+    concept_id: int, question: str, *, concept_title: str | None = None
+) -> None:
+    """Register a successfully delivered scheduler review question."""
+    bind_single_quiz_context(concept_id, question=question)
+    title = concept_title
+    if title is None:
+        concept = db.get_concept(concept_id)
+        title = concept["title"] if concept else "Unknown"
+    set_scheduler_reminder(concept_id, title, question[:500])
+
+
 def update_pending_review_delivery(pending: dict) -> dict:
     pending = dict(pending)
     pending["reminder_count"] = int(pending.get("reminder_count", 0)) + 1
@@ -184,6 +241,12 @@ def update_pending_review_delivery(pending: dict) -> dict:
         last_sent_at=normalize_reminder_timestamp(pending["sent_at"]),
     )
     return pending
+
+
+def note_scheduler_reminder_delivery(pending: dict) -> dict:
+    """Record a delivered reminder and refresh active quiz context."""
+    bind_single_quiz_context(int(pending["concept_id"]), question=pending.get("question", ""))
+    return update_pending_review_delivery(pending)
 
 
 def resolve_scheduler_reminder(status: str) -> None:

@@ -98,7 +98,7 @@ async def test_chat_review_fallback_uses_review_check_mode(test_db):
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Fallback question"),
         ),
-        patch("services.chat_session.process_output", return_value=("reply", "Fallback question")),
+        patch("services.pipeline.process_output", return_value=("reply", "Fallback question")),
     ):
         result = await chat_session._handle_review_command("/review")
 
@@ -128,10 +128,7 @@ async def test_chat_review_registers_pending_review(test_db):
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Why is Fabric smoother?"),
         ),
-        patch(
-            "services.chat_session.process_output",
-            return_value=("reply", "Why is Fabric smoother?"),
-        ),
+        patch("services.pipeline.process_output", return_value=("reply", "Why is Fabric smoother?")),
     ):
         result = await chat_session._handle_review_command("/review")
 

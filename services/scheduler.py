@@ -27,12 +27,13 @@ from services import backup as backup_service
 from services import pipeline, state
 from services.dedup import format_dedup_suggestions
 from services.formatting import truncate_for_discord
+from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import (
     get_active_scheduled_review_reminder,
+    note_scheduler_reminder_delivery,
     normalize_reminder_timestamp,
+    register_scheduler_review_delivery,
     resolve_scheduler_reminder,
-    set_scheduler_reminder,
-    update_pending_review_delivery,
 )
 from services.views import DedupConfirmView
 
@@ -277,13 +278,8 @@ async def _send_review_reminder(pending: dict):
         await user.send(msg)
         logger.info(f"Sent review reminder #{reminder_count} for concept #{cid}")
 
-        # Re-set active_concept_id so the assess pipeline knows which
-        # concept the user's eventual reply is about
-        db.set_session("active_concept_id", str(cid))
-        db.set_session("quiz_anchor_concept_id", str(cid))
-
-        # Update pending state (increment counter, reset timer)
-        _update_pending_reminder(pending)
+        # Update pending state and re-bind quiz context for late answers.
+        note_scheduler_reminder_delivery(pending)
 
     except discord.Forbidden:
         logger.error("Cannot send DM (forbidden)")
@@ -310,51 +306,17 @@ async def _send_review_quiz(payload: str):
             logger.error(f"Could not find user {_authorized_user_id}")
             return
 
-        # Extract concept_id from payload for pending state
         try:
-            cid = int(payload.split("|", 1)[0])
-        except (ValueError, IndexError):
-            cid = None
-
-        try:
-            # Set action source for audit trail
-            from services.tools import set_action_source
-
-            set_action_source("scheduler")
-
-            # Set active concept for subsequent assess action
-            if cid:
-                db.set_session("active_concept_id", str(cid))
-                db.set_session("quiz_anchor_concept_id", str(cid))
-
-            review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
-
-            # --- Two-prompt pipeline (with fallback) ---
-            from services.llm import LLMError
-
-            try:
-                if cid:
-                    p1_result = await pipeline.generate_quiz_question(cid)
-                    llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
-                else:
-                    raise LLMError("No concept_id in payload", retryable=True)
-            except LLMError as e:
-                logger.warning(
-                    f"Two-prompt pipeline failed ({e}), falling back to single-prompt flow"
-                )
-                llm_response = await pipeline.call_with_fetch_loop(
-                    mode="review-check",
-                    text=review_text,
-                    author=str(_authorized_user_id),
-                )
-
-            # Parse action JSON and extract human-readable message
-            final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
-            _msg_type, message = pipeline.process_output(final_result)
+            quiz = await generate_review_quiz_from_payload(
+                payload,
+                author=str(_authorized_user_id),
+                source="scheduler",
+                track_in_progress=False,
+            )
+            cid = quiz.concept_id
+            message = quiz.message
 
             if message and message.strip():
-                # Store the actual question text for accurate review logging
-                db.set_session("last_quiz_question", message.strip())
                 from bot.handler import _handle_user_message
 
                 await send_review_question(user.send, message, cid, _handle_user_message)
@@ -365,9 +327,7 @@ async def _send_review_quiz(payload: str):
                 # during the LLM await but the user answers a previous
                 # quiz in the meantime.
                 if cid:
-                    concept = db.get_concept(cid)
-                    concept_title = concept["title"] if concept else "Unknown"
-                    set_scheduler_reminder(cid, concept_title, message[:500])
+                    register_scheduler_review_delivery(cid, message)
             else:
                 logger.debug("Empty result for review quiz")
 

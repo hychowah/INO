@@ -9,7 +9,10 @@ from typing import Any, Dict, Tuple
 import config
 import db
 from services.review_state import (
+    bind_single_quiz_context,
     get_pending_review,
+    resolve_assess_concept,
+    resolve_scheduler_reminder,
     restore_pending_review_context,
     set_pending_review,
 )
@@ -42,6 +45,19 @@ def clear_quiz_state(*, mark_answered: bool = False) -> None:
     db.set_session("quiz_answered", "1" if mark_answered else None)
 
 
+def _get_stored_quiz_metadata() -> tuple[str | None, str | None, int | None]:
+    question_type = db.get_session("p1_question_type")
+    target_facet = db.get_session("p1_target_facet")
+    difficulty_raw = db.get_session("p1_difficulty")
+    difficulty = int(difficulty_raw) if difficulty_raw and difficulty_raw.isdigit() else None
+    return question_type, target_facet, difficulty
+
+
+def _stash_last_assess_result(concept_id: int, quality: int) -> None:
+    db.set_session("last_assess_concept_id", str(concept_id))
+    db.set_session("last_assess_quality", str(quality))
+
+
 def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     """The quiz action is special: the LLM generates the question text itself.
     This action just records that a quiz was started and returns metadata
@@ -53,8 +69,7 @@ def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     # injection use the correct concept even if fetch overwrites
     # active_concept_id mid-loop.  See DEVNOTES §16.
     if cid is not None:
-        db.set_session("active_concept_id", str(cid))
-        db.set_session("quiz_anchor_concept_id", str(cid))
+        bind_single_quiz_context(int(cid))
         logger.debug(f"[quiz_anchor] SET to concept #{cid} by _handle_quiz")
         message += f"\n_(quiz on concept #{cid})_"
 
@@ -204,8 +219,7 @@ def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
     # Clear multi-concept session state
     db.set_session("active_concept_ids", None)
     db.set_session("active_concept_id", None)
-    db.set_session("pending_review", None)
-    db.resolve_scheduled_review_reminder("answered")
+    resolve_scheduler_reminder("answered")
 
     default_msg = f"Multi-assess ({len(results)} concepts):\n" + "\n".join(results)
     return ("reply", params.get("message", default_msg))
@@ -246,39 +260,9 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     if question_difficulty is not None:
         question_difficulty = max(0, min(100, int(question_difficulty)))
 
-    # Get current concept state
-    concept = db.get_concept(cid)
-    if not concept:
-        # Fallback 1: quiz anchor (sacred, protected from fetch overwrites)
-        anchor_cid = db.get_session("quiz_anchor_concept_id")
-        if anchor_cid:
-            concept = db.get_concept(int(anchor_cid))
-            if concept:
-                cid = int(anchor_cid)
-
-    if not concept:
-        # Fallback 2: active_concept_id (may have been overwritten by fetch)
-        active_cid = db.get_session("active_concept_id")
-        if active_cid:
-            concept = db.get_concept(int(active_cid))
-            if concept:
-                cid = int(active_cid)
-
-    if not concept:
-        # Fallback 3: search chat history for the last quiz concept_id
-        history = db.get_chat_history(limit=6)
-        import re
-
-        for msg in reversed(history):
-            m = re.search(r"quiz on concept #(\d+)", msg.get("content", ""))
-            if m:
-                fallback_cid = int(m.group(1))
-                concept = db.get_concept(fallback_cid)
-                if concept:
-                    cid = fallback_cid
-                    break
-        if not concept:
-            return ("error", f"Concept #{cid} not found")
+    cid, concept = resolve_assess_concept(cid)
+    if not concept or cid is None:
+        return ("error", f"Concept #{params.get('concept_id')} not found")
 
     current_score = concept.get("mastery_level", 0)
 
@@ -335,19 +319,13 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     )
 
     # Stash for QuizNavigationView (bot.py reads these after execute)
-    db.set_session("last_assess_concept_id", str(cid))
-    db.set_session("last_assess_quality", str(quality))
+    _stash_last_assess_result(cid, quality)
 
-    # Clear pending review state — the quiz has been answered
-    db.set_session("pending_review", None)
-    db.resolve_scheduled_review_reminder("answered")
+    # Clear pending review state — the quiz has been answered.
+    # pipeline.execute_action() handles the broader quiz-state cleanup.
+    resolve_scheduler_reminder("answered")
 
-    p1_question_type = db.get_session("p1_question_type")
-    p1_target_facet = db.get_session("p1_target_facet")
-    p1_difficulty_raw = db.get_session("p1_difficulty")
-    p1_difficulty = (
-        int(p1_difficulty_raw) if p1_difficulty_raw and p1_difficulty_raw.isdigit() else None
-    )
+    p1_question_type, p1_target_facet, p1_difficulty = _get_stored_quiz_metadata()
 
     # Log the review
     db.add_review(
@@ -548,12 +526,7 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
 
     # Log the review
     stored_question = db.get_session("last_quiz_question") or "(question not stored)"
-    p1_question_type = db.get_session("p1_question_type")
-    p1_target_facet = db.get_session("p1_target_facet")
-    p1_difficulty_raw = db.get_session("p1_difficulty")
-    p1_difficulty = (
-        int(p1_difficulty_raw) if p1_difficulty_raw and p1_difficulty_raw.isdigit() else None
-    )
+    p1_question_type, p1_target_facet, p1_difficulty = _get_stored_quiz_metadata()
     db.add_review(
         concept_id,
         stored_question,
@@ -573,11 +546,10 @@ def skip_quiz(concept_id: int, user_id: str = "default", source: str = "discord"
     )
 
     # Session vars for QuizNavigationView
-    db.set_session("last_assess_concept_id", str(concept_id))
-    db.set_session("last_assess_quality", "5")
+    _stash_last_assess_result(concept_id, 5)
 
     # Clean up session state
-    db.resolve_scheduled_review_reminder("skipped")
+    resolve_scheduler_reminder("skipped")
     clear_quiz_state(mark_answered=True)
 
     # Audit trail

@@ -9,6 +9,7 @@ import asyncio
 import contextvars
 import functools
 import threading
+import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 
@@ -18,8 +19,12 @@ last_activity_at: datetime | None = None
 ACTIVITY_HEARTBEAT_KEY = "user_activity_heartbeat"
 
 # Serializes access to the chat pipeline while process-global session state is
-# still shared between the bot, scheduler, and FastAPI chat entry points.
+# still shared between concurrent tasks in the same process. A durable lease in
+# session_state is the authoritative cross-process guard.
 PIPELINE_LOCK = threading.Lock()
+PIPELINE_LEASE_KEY = "pipeline_turn_lease"
+PIPELINE_LEASE_SCOPE = "__runtime__"
+PIPELINE_LEASE_SECONDS = 300
 
 # ============================================================================
 # Current user identity (ContextVar — set at entry points, read by db layer)
@@ -86,19 +91,50 @@ def get_last_user_activity() -> datetime | None:
     return max(candidates)
 
 
+def _try_acquire_pipeline_lease(owner_token: str) -> bool:
+    import db.chat as db_chat
+
+    return db_chat.try_acquire_session_lease(
+        PIPELINE_LEASE_KEY,
+        owner_token,
+        PIPELINE_LEASE_SECONDS,
+        user_id=PIPELINE_LEASE_SCOPE,
+    )
+
+
+def _release_pipeline_lease(owner_token: str) -> bool:
+    import db.chat as db_chat
+
+    return db_chat.release_session_lease(
+        PIPELINE_LEASE_KEY,
+        owner_token,
+        user_id=PIPELINE_LEASE_SCOPE,
+    )
+
+
 @asynccontextmanager
 async def pipeline_serialized(poll_interval: float = 0.05):
-    """Serialize async callers against the shared pipeline lock.
+    """Serialize async callers against a durable lease plus local mutex.
 
-    The lock is polled with ``blocking=False`` so task cancellation cannot strand
-    a worker thread waiting in ``lock.acquire()``.
+    The durable lease prevents overlapping turns across processes. The local
+    mutex preserves the existing same-process safety and keeps the public lock
+    surface stable for callers that only care about in-process coordination.
     """
-    while not PIPELINE_LOCK.acquire(blocking=False):
+    owner_token = uuid.uuid4().hex
+
+    while not _try_acquire_pipeline_lease(owner_token):
         await asyncio.sleep(poll_interval)
+
+    acquired_local = False
     try:
+        while not PIPELINE_LOCK.acquire(blocking=False):
+            await asyncio.sleep(poll_interval)
+        acquired_local = True
         yield
     finally:
-        PIPELINE_LOCK.release()
+        if acquired_local:
+            PIPELINE_LOCK.release()
+        _release_pipeline_lease(owner_token)
 
 
 def serialized_pipeline(func):
@@ -114,10 +150,21 @@ def serialized_pipeline(func):
 
 @contextmanager
 def pipeline_serialized_nowait():
-    """Try to acquire the shared pipeline lock without waiting."""
-    acquired = PIPELINE_LOCK.acquire(blocking=False)
+    """Try to acquire the shared pipeline turn without waiting."""
+    owner_token = uuid.uuid4().hex
+    acquired = _try_acquire_pipeline_lease(owner_token)
+    acquired_local = False
+
+    if acquired:
+        acquired_local = PIPELINE_LOCK.acquire(blocking=False)
+        if not acquired_local:
+            _release_pipeline_lease(owner_token)
+            acquired = False
+
     try:
         yield acquired
     finally:
-        if acquired:
+        if acquired_local:
             PIPELINE_LOCK.release()
+        if acquired:
+            _release_pipeline_lease(owner_token)

@@ -41,7 +41,14 @@ class _MockInteraction:
         self.followup = _MockFollowup()
         self.response = _MockResponse()
         self.channel = _MockChannel()
-        self.user = "test-user"
+        self.user = type(
+            "User",
+            (),
+            {
+                "id": "default",
+                "__str__": lambda self: "test-user",
+            },
+        )()
         self.message = type("Message", (), {"content": ""})()
 
 
@@ -133,7 +140,7 @@ class TestQuizNavigationButtonMetadata:
         interaction = _MockInteraction()
         captured = {}
 
-        async def message_handler(text, author):
+        async def message_handler(text, author, user_id=None):
             captured["handler_text"] = text
             captured["handler_author"] = author
             return "Fresh quiz", None, None, {"concept_id": cid, "show_skip": True}
@@ -166,7 +173,7 @@ class TestQuizNavigationButtonMetadata:
         interaction = _MockInteraction()
         captured = {}
 
-        async def message_handler(text, author):
+        async def message_handler(text, author, user_id=None):
             captured["handler_text"] = text
             captured["handler_author"] = author
             return "Due quiz", None, None, {"concept_id": cid, "show_skip": True}
@@ -213,7 +220,7 @@ class TestSkipQuizButtonRegression:
 
         interaction = _MockInteraction()
 
-        async def message_handler(_text, _author):
+        async def message_handler(_text, _author, user_id=None):
             return (
                 "Fresh quiz after skip",
                 None,
@@ -239,6 +246,7 @@ class TestSkipQuizButtonRegression:
         )
         assert isinstance(sent["view"], quiz_views.QuizQuestionView)
         assert sent["view"].concept_id == cid
+        assert db.get_session("pending_review") is not None
 
     def test_skip_button_callback_updates_session_and_navigation(self, test_db):
         """Clicking the skip button uses skip_quiz and returns navigation controls."""
@@ -248,7 +256,7 @@ class TestSkipQuizButtonRegression:
         db.set_session("quiz_anchor_concept_id", str(cid))
         db.set_session("last_quiz_question", "What do you already know?")
 
-        async def message_handler(_text, _author):
+        async def message_handler(_text, _author, user_id=None):
             return "unused", None, None, None
 
         interaction = _MockInteraction()

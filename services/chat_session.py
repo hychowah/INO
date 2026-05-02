@@ -16,10 +16,11 @@ from services.chat_actions import (
     require_confirmable_action,
 )
 from services.dedup import execute_dedup_merges, format_dedup_suggestions
-from services.llm import LLMError
 from services.parser import guard_user_message, parse_llm_response, process_output
+from services.review_flow import generate_review_quiz_from_payload
+from services.review_state import register_interactive_review_delivery
 from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
-from services.tools_assess import set_pending_review, skip_quiz
+from services.tools_assess import skip_quiz
 
 _db_initialized = False
 
@@ -444,47 +445,15 @@ async def _handle_review_command(raw_text: str, author: str = "chat", source: st
         _record_exchange(raw_text, "No concepts to review — add some topics first!")
         return _response("No concepts to review — add some topics first!")
 
-    payload = review_lines[0]
-    p1_result = None
-    try:
-        review_text = f"[SCHEDULED_REVIEW] Start a review quiz for this concept: {payload}"
-
-        try:
-            cid = int(payload.split("|", 1)[0])
-        except (ValueError, IndexError):
-            cid = None
-
-        if cid:
-            db.set_session("active_concept_id", str(cid))
-            db.set_session("quiz_anchor_concept_id", str(cid))
-
-        db.set_session("review_in_progress", str(cid) if cid else "1")
-        set_action_source(source)
-
-        try:
-            if cid:
-                p1_result = await pipeline.generate_quiz_question(cid)
-                llm_response = await pipeline.package_quiz_for_discord(p1_result, cid)
-            else:
-                raise LLMError("No concept_id in payload", retryable=True)
-        except LLMError:
-            llm_response = await pipeline.call_with_fetch_loop(
-                mode="review-check",
-                text=review_text,
-                author=author,
-            )
-
-        final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
-        _msg_type, response = process_output(final_result)
-        response = response.strip() if response else "Could not generate a review quiz. Try again?"
-        db.set_session("last_quiz_question", response)
-        if cid:
-            set_pending_review(cid, response)
-        return _response(
-            response, actions=_quiz_question_actions(cid, (p1_result or {}).get("choices"))
-        )
-    finally:
-        db.set_session("review_in_progress", None)
+    quiz = await generate_review_quiz_from_payload(
+        review_lines[0],
+        author=author,
+        source=source,
+        track_in_progress=True,
+    )
+    if quiz.concept_id:
+        register_interactive_review_delivery(quiz.concept_id, quiz.message)
+    return _response(quiz.message, actions=_quiz_question_actions(quiz.concept_id, quiz.choices))
 
 
 async def _handle_preference_command(raw_text: str, args: str) -> dict:
