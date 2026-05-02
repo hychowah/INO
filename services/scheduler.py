@@ -58,6 +58,11 @@ class _ScheduledJob:
     runner: Callable[[], Awaitable[None] | None]
 
 
+def _scheduler_user_id() -> str:
+    """Resolve the scheduler's effective actor for user-scoped persistence."""
+    return str(_authorized_user_id) if _authorized_user_id is not None else "default"
+
+
 # ============================================================================
 # Reminder helpers
 # ============================================================================
@@ -589,6 +594,10 @@ async def _check_proposal_cleanup():
     db.cleanup_expired_proposals()
 
 
+def _job_requires_user_binding(job: _ScheduledJob) -> bool:
+    return job.name in {"review_check", "maintenance", "taxonomy", "dedup"}
+
+
 _REVIEW_JOB = _ScheduledJob("review_check", _review_interval_seconds, _check_reviews)
 _shared_jobs = []
 if config.MAINTENANCE_MODE_ENABLED:
@@ -635,12 +644,14 @@ async def _run_job(job: _ScheduledJob, now: datetime, *, owner_label: str | None
     log_parts = [f"name={job.name}"]
     if owner_label:
         log_parts.append(f"owner={owner_label}")
+    log_parts.append(f"user={_scheduler_user_id()}")
     logger.info("scheduler.job.start %s", " ".join(log_parts))
 
     try:
-        result = job.runner()
-        if inspect.isawaitable(result):
-            await result
+        with state.current_user_scope(_scheduler_user_id()):
+            result = job.runner()
+            if inspect.isawaitable(result):
+                await result
         db.upsert_scheduler_state(
             job.name,
             last_run_at=now_iso,
@@ -670,6 +681,13 @@ async def _run_due_jobs(
     owner_label: str,
 ) -> None:
     for job in jobs:
+        if _job_requires_user_binding(job) and _authorized_user_id is None:
+            logger.info(
+                "scheduler.job.skip name=%s owner=%s reason=missing_user_binding",
+                job.name,
+                owner_label,
+            )
+            continue
         if not _job_due(job, now):
             continue
         await _run_job(job, now, owner_label=owner_label)

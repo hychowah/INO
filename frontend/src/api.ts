@@ -21,6 +21,31 @@ import type {
   TopicMapNode,
 } from './types';
 
+const API_USER_STORAGE_KEY = 'learning-agent.user-id';
+const API_USER_HEADER = 'X-Learning-User';
+
+function getApiUserId(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const value = window.localStorage.getItem(API_USER_STORAGE_KEY);
+    const trimmed = value?.trim();
+    return trimmed || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers = { ...extra };
+  const userId = getApiUserId();
+  if (userId) {
+    headers[API_USER_HEADER] = userId;
+  }
+  return headers;
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T;
   if (!response.ok) {
@@ -34,9 +59,9 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, {
-    headers: {
+    headers: buildHeaders({
       'X-Requested-With': 'fetch'
-    }
+    })
   });
   return parseJson<T>(response);
 }
@@ -48,10 +73,10 @@ export async function fetchBootstrap(): Promise<ChatBootstrap> {
 async function postJson<T>(path: string, payload: object): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
-    headers: {
+    headers: buildHeaders({
       'Content-Type': 'application/json',
       'X-Requested-With': 'fetch'
-    },
+    }),
     body: JSON.stringify(payload)
   });
   return parseJson<T>(response);
@@ -92,11 +117,11 @@ export async function streamChat(
 ): Promise<ChatEnvelope> {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
-    headers: {
+    headers: buildHeaders({
       'Accept': 'text/event-stream',
       'Content-Type': 'application/json',
       'X-Requested-With': 'fetch'
-    },
+    }),
     body: JSON.stringify({ message })
   });
 
@@ -268,9 +293,9 @@ export function fetchConcepts(params: {
 export async function deleteConcept(conceptId: number): Promise<{ message: string }> {
   const response = await fetch(`/api/concepts/${conceptId}`, {
     method: 'DELETE',
-    headers: {
+    headers: buildHeaders({
       'X-Requested-With': 'fetch',
-    },
+    }),
   });
   return parseJson<{ message: string }>(response);
 }

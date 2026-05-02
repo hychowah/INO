@@ -6,9 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api import app
-from api.routes import chat as chat_routes
 from bot import handler
 from services import state
+from api import auth as api_auth
 
 
 @pytest.fixture
@@ -74,7 +74,51 @@ async def test_api_chat_uses_explicit_local_user_scope(client):
     assert resp.status_code == 200
     assert resp.json() == {
         "type": "reply",
-        "message": f"{chat_routes.LOCAL_API_USER_ID}|solo_user|api",
+        "message": f"{api_auth.LOCAL_API_USER_ID}|solo_user|api",
+        "pending_action": None,
+    }
+    assert state.get_current_user() == previous_user
+
+
+@pytest.mark.anyio
+async def test_api_non_chat_route_uses_request_user_scope(client):
+    seen = {}
+    previous_user = state.get_current_user()
+
+    def fake_get_topics():
+        seen["user"] = state.get_current_user()
+        return []
+
+    with patch("api.routes.topics.db.get_hierarchical_topic_map", side_effect=fake_get_topics):
+        resp = await client.get("/api/topics")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    assert seen == {"user": api_auth.LOCAL_API_USER_ID}
+    assert state.get_current_user() == previous_user
+
+
+@pytest.mark.anyio
+async def test_api_chat_uses_explicit_header_user_scope(client):
+    async def fake_handle_chat_message(message, author, source):
+        return {
+            "type": "reply",
+            "message": f"{state.get_current_user()}|{author}|{source}",
+            "pending_action": None,
+        }
+
+    previous_user = state.get_current_user()
+    with patch("api.routes.chat.handle_chat_message", new=AsyncMock(side_effect=fake_handle_chat_message)):
+        resp = await client.post(
+            "/api/chat",
+            json={"message": "hello"},
+            headers={"X-Learning-User": "browser-user-7"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "type": "reply",
+        "message": "browser-user-7|solo_user|api",
         "pending_action": None,
     }
     assert state.get_current_user() == previous_user

@@ -21,7 +21,6 @@ from services.chat_session import (
 logger = logging.getLogger("api")
 
 router = APIRouter()
-LOCAL_API_USER_ID = "default"
 
 
 def _sse_event(event: str, data: dict) -> str:
@@ -31,22 +30,21 @@ def _sse_event(event: str, data: dict) -> str:
 @router.get("/api/chat/bootstrap", dependencies=[Depends(verify_token)])
 async def chat_bootstrap():
     """Bootstrap payload for the web chat frontend."""
-    with state.current_user_scope(LOCAL_API_USER_ID):
-        return {
-            "history": db.get_chat_history(limit=30),
-            "commands": [
-                {"label": "Review", "command": "/review"},
-                {"label": "Due", "command": "/due"},
-                {"label": "Topics", "command": "/topics"},
-                *(
-                    [{"label": "Maintain", "command": "/maintain"}]
-                    if config.MAINTENANCE_MODE_ENABLED
-                    else []
-                ),
-                {"label": "Reorganize", "command": "/reorganize"},
-                {"label": "Preference", "command": "/preference "},
-            ],
-        }
+    return {
+        "history": db.get_chat_history(limit=30),
+        "commands": [
+            {"label": "Review", "command": "/review"},
+            {"label": "Due", "command": "/due"},
+            {"label": "Topics", "command": "/topics"},
+            *(
+                [{"label": "Maintain", "command": "/maintain"}]
+                if config.MAINTENANCE_MODE_ENABLED
+                else []
+            ),
+            {"label": "Reorganize", "command": "/reorganize"},
+            {"label": "Preference", "command": "/preference "},
+        ],
+    }
 
 
 @router.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(verify_token)])
@@ -56,12 +54,9 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        with state.current_user_scope(LOCAL_API_USER_ID):
-            async with state.pipeline_serialized():
-                payload = await handle_chat_message(
-                    req.message.strip(), author="solo_user", source="api"
-                )
-                return payload
+        async with state.pipeline_serialized():
+            payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
+            return payload
     except Exception as e:
         logger.exception("Chat endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
@@ -76,11 +71,8 @@ async def chat_stream(req: ChatRequest):
     async def event_stream():
         yield _sse_event("status", {"message": "Waiting for the learning agent..."})
         try:
-            with state.current_user_scope(LOCAL_API_USER_ID):
-                async with state.pipeline_serialized():
-                    payload = await handle_chat_message(
-                        req.message.strip(), author="solo_user", source="api"
-                    )
+            async with state.pipeline_serialized():
+                payload = await handle_chat_message(req.message.strip(), author="solo_user", source="api")
             yield _sse_event("done", payload)
         except Exception as e:
             logger.exception("Chat stream endpoint error")
@@ -102,10 +94,9 @@ async def confirm_action(req: ConfirmRequest):
     """Confirm a pending action from /api/chat using the shared chat controller."""
 
     try:
-        with state.current_user_scope(LOCAL_API_USER_ID):
-            async with state.pipeline_serialized():
-                payload = await confirm_chat_action(req.action_data, source="api")
-                return payload
+        async with state.pipeline_serialized():
+            payload = await confirm_chat_action(req.action_data, source="api")
+            return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -117,10 +108,9 @@ async def confirm_action(req: ConfirmRequest):
 async def decline_action(req: ConfirmRequest):
     """Decline a pending action from /api/chat using the shared chat controller."""
     try:
-        with state.current_user_scope(LOCAL_API_USER_ID):
-            async with state.pipeline_serialized():
-                payload = await decline_chat_action(req.action_data, source="api")
-                return payload
+        async with state.pipeline_serialized():
+            payload = await decline_chat_action(req.action_data, source="api")
+            return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -132,10 +122,9 @@ async def decline_action(req: ConfirmRequest):
 async def run_chat_action(req: ChatActionRequest):
     """Run a structured chat UI action such as quiz navigation or skip."""
     try:
-        with state.current_user_scope(LOCAL_API_USER_ID):
-            async with state.pipeline_serialized():
-                payload = await handle_chat_action(req.action, author="solo_user", source="api")
-                return payload
+        async with state.pipeline_serialized():
+            payload = await handle_chat_action(req.action, author="solo_user", source="api")
+            return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

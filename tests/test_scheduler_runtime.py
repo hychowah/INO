@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import db
-from services import scheduler
+from services import scheduler, state
 
 
 @pytest.mark.anyio
@@ -40,6 +40,44 @@ async def test_run_due_jobs_persists_success_and_error(test_db):
     assert failing_row["last_run_at"] == "2026-04-22 10:05:00"
     assert failing_row["last_success_at"] is None
     assert failing_row["last_error"] == "boom"
+
+
+@pytest.mark.anyio
+async def test_run_job_binds_scheduler_user_scope(test_db):
+    del test_db
+
+    seen = {}
+
+    async def runner():
+        seen["user"] = state.get_current_user()
+
+    job = scheduler._ScheduledJob("scoped_job", lambda: 60, runner)
+
+    with patch.object(scheduler, "_authorized_user_id", 123456):
+        await scheduler._run_job(job, db._parse_datetime("2026-04-22 10:00:00"), owner_label="bot")
+
+    assert seen == {"user": "123456"}
+
+
+@pytest.mark.anyio
+async def test_run_due_jobs_skips_user_targeted_jobs_without_scheduler_user(test_db):
+    del test_db
+
+    maintenance = scheduler._ScheduledJob("maintenance", lambda: 60, AsyncMock())
+    backup = scheduler._ScheduledJob("backup", lambda: 60, AsyncMock())
+
+    with (
+        patch.object(scheduler, "_authorized_user_id", None),
+        patch("services.scheduler.backup_service.get_latest_backup_datetime", return_value=None),
+    ):
+        await scheduler._run_due_jobs(
+            (maintenance, backup),
+            db._parse_datetime("2026-04-22 10:00:00"),
+            owner_label="api",
+        )
+
+    maintenance.runner.assert_not_called()
+    backup.runner.assert_awaited_once()
 
 
 @pytest.mark.anyio

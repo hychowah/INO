@@ -814,6 +814,33 @@ class TestConceptCRUD:
         assert resp.status_code == 422
 
     @pytest.mark.anyio
+    async def test_api_user_header_scopes_concept_visibility(self, client):
+        create_resp = await client.post(
+            "/api/concepts",
+            json={"title": "Scoped Header Concept"},
+            headers={"X-Learning-User": "api-user-a"},
+        )
+        assert create_resp.status_code == 201
+
+        default_resp = await client.get("/api/concepts")
+        assert default_resp.status_code == 200
+        assert default_resp.json()["items"] == []
+
+        other_user_resp = await client.get(
+            "/api/concepts",
+            headers={"X-Learning-User": "api-user-b"},
+        )
+        assert other_user_resp.status_code == 200
+        assert other_user_resp.json()["items"] == []
+
+        owner_resp = await client.get(
+            "/api/concepts",
+            headers={"X-Learning-User": "api-user-a"},
+        )
+        assert owner_resp.status_code == 200
+        assert [item["title"] for item in owner_resp.json()["items"]] == ["Scoped Header Concept"]
+
+    @pytest.mark.anyio
     async def test_update_concept(self, client):
         cid = _make_concept("Old Name")
         resp = await client.put(f"/api/concepts/{cid}", json={"title": "New Name"})
@@ -1183,3 +1210,9 @@ class TestAuth:
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/health")
                 assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_400_with_invalid_user_header(self, client):
+        resp = await client.get("/api/topics", headers={"X-Learning-User": "bad user"})
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Invalid X-Learning-User header"

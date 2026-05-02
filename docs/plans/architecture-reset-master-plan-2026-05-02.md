@@ -4,6 +4,7 @@ Shift the system toward a user-scoped modular monolith that preserves the LLM-fi
 
 ## Companion Docs
 
+- [Progress tracker](architecture-reset-progress-tracker-2026-05-02.md)
 - [Architecture invariants](architecture-reset-invariants-2026-05-02.md)
 - [Milestone roadmap](architecture-reset-roadmap-2026-05-02.md)
 - [Debt register](architecture-reset-debt-register-2026-05-02.md)
