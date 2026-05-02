@@ -47,7 +47,7 @@ CHAT_CLEANUP_DAYS = 7
 CLEANUP_THROTTLE_SECONDS = 600  # only run cleanup every 10 minutes
 
 # Schema version — bump this when adding migrations
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 18
 
 
 # ============================================================================
@@ -160,12 +160,17 @@ def _init_knowledge_db():
 
         CREATE TABLE IF NOT EXISTS pending_proposals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT 'default',
             proposal_type TEXT NOT NULL,
             payload TEXT NOT NULL,
             discord_message_id INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             expires_at DATETIME NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_pending_proposals_user_type
+            ON pending_proposals(user_id, proposal_type, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pending_proposals_expires
+            ON pending_proposals(expires_at);
 
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,

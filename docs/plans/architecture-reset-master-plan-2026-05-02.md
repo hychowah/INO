@@ -8,6 +8,11 @@ Shift the system toward a user-scoped modular monolith that preserves the LLM-fi
 - [Milestone roadmap](architecture-reset-roadmap-2026-05-02.md)
 - [Debt register](architecture-reset-debt-register-2026-05-02.md)
 - [Target architecture sketch](architecture-reset-target-architecture-2026-05-02.md)
+- [Canonical conversation state model](architecture-reset-conversation-state-model-2026-05-02.md)
+- [Canonical review state model](architecture-reset-review-state-model-2026-05-02.md)
+- [Canonical proposal state model](architecture-reset-proposal-state-model-2026-05-02.md)
+- [Current workflow map](architecture-reset-current-workflow-map-2026-05-02.md)
+- [Multi-user gap inventory](architecture-reset-multi-user-gap-inventory-2026-05-02.md)
 
 **Primary technical debt findings**
 - One logical review lifecycle is implemented three times across Discord, browser/API, and scheduler delivery.

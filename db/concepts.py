@@ -81,9 +81,8 @@ def add_concept(
             (title, description, next_review_at, now, now, uid),
         )
     except sqlite3.IntegrityError:
-        # UNIQUE constraint on title — concept already exists.
+        # UNIQUE constraint on (user_id, title) — concept already exists for this user.
         # Return the existing concept's ID instead of creating a duplicate.
-        # NOTE: UNIQUE index is on title alone; future migration will make it (user_id, title)
         row = conn.execute(
             "SELECT id FROM concepts WHERE LOWER(title) = LOWER(?) AND user_id = ?", (title, uid)
         ).fetchone()

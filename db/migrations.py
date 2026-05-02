@@ -390,5 +390,38 @@ def _run_migrations():
         conn.close()
         print("[LEARN DB] Migration 16: scheduled review reminder table")
 
+    # --- Migration 17: user-scoped pending proposals ---
+    if current < 17:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        if _core._has_table("pending_proposals"):
+            if not _core._has_column("pending_proposals", "user_id"):
+                conn.execute(
+                    "ALTER TABLE pending_proposals ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pending_proposals_user_type "
+                "ON pending_proposals(user_id, proposal_type, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pending_proposals_expires "
+                "ON pending_proposals(expires_at)"
+            )
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 17: user-scoped pending proposals")
+
+    # --- Migration 18: user-scoped concept title uniqueness ---
+    if current < 18:
+        conn = sqlite3.connect(KNOWLEDGE_DB)
+        if _core._has_table("concepts"):
+            conn.execute("DROP INDEX IF EXISTS idx_concepts_title_nocase")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_user_title_nocase "
+                "ON concepts(user_id, title COLLATE NOCASE)"
+            )
+        conn.commit()
+        conn.close()
+        print("[LEARN DB] Migration 18: user-scoped concept title uniqueness")
+
     _core._set_schema_version(SCHEMA_VERSION)
     print(f"[LEARN DB] Migrated schema to version {SCHEMA_VERSION}")
