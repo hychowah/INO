@@ -26,6 +26,7 @@
 | `CHANGELOG.md` | High-level change log, newest first, for major shipped behavior and architecture milestones |
 | `CODING.md` | Development instructions for AI coding assistants |
 | `docs/SETUP.md` | Step-by-step local development setup guide |
+| `docs/CHAT_FLOW_HARNESS.md` | Manual guide for the sandboxed multi-turn chat-flow harness that drives the real shared chat pipeline |
 | `docs/API.md` | API reference: Discord commands, FastAPI routes, and FastAPI-served browser routes/endpoints |
 | `docs/ARCHITECTURE.md` | System architecture, file map, data flow, frontend shell/routing, diagrams; **includes the live scheduled review reminder lifecycle and scheduler schema** |
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **see §7 for pending review tracking and §26 for persisted scheduler/reminder state** |

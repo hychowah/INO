@@ -154,8 +154,9 @@ async def on_message(message):
 
         try:
             async with message.channel.typing():
+                active_user_id = state.get_local_user_id()
                 response, pending_action, assess_meta, quiz_meta = await _handle_user_message(
-                    text, str(message.author), user_id=str(message.author.id)
+                    text, str(message.author), user_id=active_user_id
                 )
 
             if not response or not response.strip():

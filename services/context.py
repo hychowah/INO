@@ -281,6 +281,7 @@ def _append_active_quiz_context(parts: list) -> None:
     # which may have been overwritten by fetch.  See DEVNOTES §16.
     anchor_cid = db.get_session("quiz_anchor_concept_id")
     active_cid = anchor_cid or db.get_session("active_concept_id")
+    active_question = (db.get_session("last_quiz_question") or "").strip()
     pending_review = None
     if not active_cid:
         from services.review_state import get_pending_review
@@ -288,6 +289,7 @@ def _append_active_quiz_context(parts: list) -> None:
         pending_review = get_pending_review()
         if pending_review and pending_review.get("concept_id") is not None:
             active_cid = str(pending_review["concept_id"])
+            active_question = (pending_review.get("question") or "").strip()
 
     if active_cid:
         concept = db.get_concept(int(active_cid))
@@ -295,10 +297,10 @@ def _append_active_quiz_context(parts: list) -> None:
             rel_lines = _format_relations_snippet(int(active_cid))
             rel_section = "\n" + "\n".join(rel_lines) + "\n" if rel_lines else ""
             pending_section = ""
-            if pending_review and pending_review.get("question"):
-                pending_section = (
-                    f"Pending question: {pending_review['question']}\n"
-                )
+            if not active_question and pending_review and pending_review.get("question"):
+                active_question = pending_review["question"].strip()
+            if active_question:
+                pending_section = f"Pending question: {active_question}\n"
             parts.append(
                 f"## Active Quiz Context\n"
                 f"Quizzed concept: **#{active_cid} — {concept['title']}** "

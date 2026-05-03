@@ -178,6 +178,15 @@ The test suite uses mocked LLM responses plus isolated temporary SQLite database
 
 The Python CI workflow in `.github/workflows/tests.yml` now runs a `pytest --collect-only tests/` guard on Python 3.12 before the full matrix test run so non-test scripts cannot silently slip back under `tests/`.
 
+For manual multi-turn pipeline debugging, use the sandboxed chat-flow harness:
+
+```bash
+python scripts/test_chat_flow.py --turn "/ping"
+python scripts/test_chat_flow.py --scenario review --answer "induced drag is cut in half"
+```
+
+That script drives the real shared chat controller, prints per-turn transcript/state snapshots, and writes a JSON log under `scripts/prompt_logs/`. See `docs/CHAT_FLOW_HARNESS.md` for the full option surface.
+
 ---
 
 ## 6. Lint and Format

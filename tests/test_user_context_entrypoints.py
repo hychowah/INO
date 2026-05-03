@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api import app
 from bot import commands
+from bot import events
 from bot import handler
 from services import state
 from api import auth as api_auth
@@ -149,6 +150,48 @@ async def test_discord_command_scope_uses_local_user_alias():
 
     assert seen == {"user": state.get_local_user_id()}
     assert state.get_current_user() == previous_user
+
+
+@pytest.mark.anyio
+async def test_discord_on_message_uses_local_user_alias():
+    seen = {}
+
+    class _Typing:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=events.config.AUTHORIZED_USER_ID, bot=False, __str__=lambda self: "Richarcl"),
+        content="my answer",
+        reference=None,
+        channel=SimpleNamespace(typing=lambda: _Typing()),
+        reply=AsyncMock(),
+        add_reaction=AsyncMock(),
+    )
+
+    async def fake_handle_user_message(text, author, *, user_id=None):
+        seen["text"] = text
+        seen["author"] = author
+        seen["user_id"] = user_id
+        seen["scoped_user"] = state.get_current_user()
+        return "done", None, None, None
+
+    with (
+        patch("bot.events.bot.process_commands", new=AsyncMock()),
+        patch("bot.events._handle_user_message", new=AsyncMock(side_effect=fake_handle_user_message)),
+        patch("bot.events.send_long_with_view", new=AsyncMock()),
+    ):
+        await events.on_message(message)
+
+    assert seen == {
+        "text": "my answer",
+        "author": str(message.author),
+        "user_id": state.get_local_user_id(),
+        "scoped_user": state.get_local_user_id(),
+    }
 
 
 def test_discord_interaction_views_use_local_user_alias():

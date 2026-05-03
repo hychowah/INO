@@ -263,6 +263,7 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 - **P1 (Reasoning model):** `generate_quiz_question()` uses `data/skills/quiz_generator.md` plus injected Active Persona and runtime User Preferences. It receives concept detail + related concepts + recent structured review metadata and returns JSON: `question`, `formatted_question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`, and optional `choices`. Calls use `response_format={"type": "json_object"}`.
 - **Delivery stage:** `package_quiz_for_discord()` is now a deterministic compatibility wrapper over `format_quiz_action()`. It uses `formatted_question` (or `question` as fallback) and returns the final `REPLY:` string. No LLM packaging stage remains in the scheduled-quiz flow.
 - **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler, chat review, and slash `/review` commands fall back to single-prompt `call_with_fetch_loop(mode="review-check")`.
+- **Open-response normalization:** the shared helper `services/review_flow.generate_review_quiz_from_payload()` must treat `p1_result["choices"] = None` the same as an empty choice list. P1 may legitimately emit `choices: null` for free-response questions; without normalization, `/review` and shared chat review crashed while iterating over `None`.
 
 **Migration 11:** Added `last_quiz_generator_output TEXT` column on `concepts` to store raw P1 JSON for debugging/inspection.
 
@@ -285,7 +286,9 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 **Context injection text** (`_append_active_quiz_context()`): reworded to "Use this concept_id for assess ONLY if the user's message actually answers the quiz question."
 
-**Key files:** `data/skills/core.md` (intent detection rules), `data/skills/quiz.md` (assess guard), `services/context.py` (staleness + dedup), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`), `config.py` (`QUIZ_STALENESS_TIMEOUT_MINUTES`), `db/chat.py` (`get_session_updated_at`).
+**Interactive turn routing:** `services.learn_turn.run_learn_turn()` now resolves `reply` mode whenever single-quiz state, multi-quiz state, or a pending scheduled review is active. Before this change, all follow-up turns used `command`, which bypassed the REPLY-mode quiz intent rules and let valid quiz answers drift into casual-Q&A behavior.
+
+**Key files:** `data/skills/core.md` (intent detection rules), `data/skills/quiz.md` (assess guard), `services/context.py` (staleness + dedup), `services/learn_turn.py` (interactive reply-vs-command mode resolution), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`), `config.py` (`QUIZ_STALENESS_TIMEOUT_MINUTES`), `db/chat.py` (`get_session_updated_at`).
 
 **`is_quiz_active()` — single source of truth for quiz state** (`pipeline.py`, lines ~235-248):
 Returns `True` if either of the two quiz session keys is set:
@@ -312,7 +315,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - **Durably backed** by `scheduled_review_reminders`: manual `/review`, shared chat review, and scheduler sends all register the same typed reminder row after successful delivery. This lets late single-concept answers recover even if `quiz_anchor_concept_id` was cleared by staleness or process drift, without needing a mirrored session blob.
 - **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
 - **Fallback chain** in `_handle_assess()` in `tools_assess.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
-- **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees.
+- **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees, and the exact question text now prefers volatile `last_quiz_question` before falling back to the typed reminder row. That keeps the first post-delivery answer turn grounded even when the reminder fallback path has not been used yet.
 - **Recovered** by `restore_pending_review_context()` in `services/review_state.py`: when an `assess` arrives with no active quiz keys but an unresolved typed reminder row exists, the guard restores `active_concept_id`, `quiz_anchor_concept_id`, and `last_quiz_question` before dispatching the real assess handler.
 - **Cleared** in `pipeline.py` alongside other quiz state by `_QUIZ_CLEARING_ACTIONS` (`assess`, `multi_assess`, `add_concept`, `suggest_topic`, `add_topic`, `remark`). Also cleared by staleness timeout in `context.py`.
 - **Not used** by multi-quiz flows (those use separate `active_concept_ids` key).
@@ -379,6 +382,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Fix — one local alias plus boundary-owned entry logic:**
 
 - `LEARN_LOCAL_USER_ID` in `config.py` is now the canonical local-first runtime alias. `services.state.get_local_user_id()` is the shared accessor used by Discord commands, plain-message flows, views, and scheduler jobs.
+- Plain Discord `on_message` replies must also pass that local alias into `bot.handler._handle_user_message()`. Using `str(message.author.id)` there split live freeform Discord replies onto a different user scope than scheduler and slash-command review state, which made active review answers appear as `active_quiz=False` and fall back into topic-suggestion behavior.
 - `api/auth.py` now owns request-scope binding for the FastAPI surface. `X-Learning-User` is optional and validated there; missing values fall back to `LEARN_LOCAL_USER_ID`.
 - `services.state.begin_interactive_turn()` centralizes the shared pre-turn work: durable activity heartbeat plus `quiz_answered` reset. Do not duplicate that preamble in adapters.
 - `services.chat_session.py` now owns outer serialization for FastAPI chat, confirm, decline, and chat-action flows. Routes should call the shared controller directly rather than wrapping `pipeline_serialized()` themselves.

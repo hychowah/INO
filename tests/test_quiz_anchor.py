@@ -263,6 +263,26 @@ class TestContextInjection:
         assert f"#{cid}" in parts[0]
         assert "Active Concept" in parts[0]
 
+    def test_context_includes_last_quiz_question_for_active_scheduled_review(self, test_db):
+        """Fresh scheduled review context includes the exact asked question."""
+        import services.context as ctx
+        from services.review_state import register_scheduler_review_delivery
+
+        cid = db.add_concept("Induced Drag", "Desc")
+        register_scheduler_review_delivery(
+            cid,
+            "If you double a wing's aspect ratio, what happens to induced drag?",
+        )
+
+        parts = []
+        with patch.object(db, "get_session_updated_at", return_value=None):
+            ctx._append_active_quiz_context(parts)
+
+        assert len(parts) == 1
+        assert f"#{cid}" in parts[0]
+        assert "Pending question:" in parts[0]
+        assert "double a wing's aspect ratio" in parts[0]
+
     def test_context_falls_back_to_typed_review_reminder(self, test_db):
         """When volatile quiz state is gone, typed reminder state still restores quiz context."""
         import services.context as ctx

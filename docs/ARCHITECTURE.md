@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-04-25
+> Last updated: 2026-05-03
 
 ## Overview
 
@@ -94,7 +94,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `bot/auth.py` | ~20 | Authorization decorator that gates Discord commands to the configured user |
 | `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
 | `bot/commands.py` | ~545 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
-| `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors) |
+| `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors); plain-message turns now bind the same local user alias scope as slash commands and scheduler review state |
 | `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
 | `api/app.py` | ~55 | FastAPI app assembly and route registration |
 | `api/auth.py` | ~25 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; optional `X-Learning-User` request scoping falls back to `LEARN_LOCAL_USER_ID`; `/api/health` is always public |
@@ -107,6 +107,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
 | `services/chat_session.py` | ~460 | Shared chat-session controller used by FastAPI chat routes and the React browser flow; owns chat/confirm/decline/action serialization for those surfaces |
+| `services/learn_turn.py` | ~70 | Interactive-turn adapter that resolves `command` vs `reply` mode before calling the shared pipeline and packages quiz/navigation metadata for adapters |
+| `services/review_flow.py` | ~90 | Shared review-quiz generation helper used by scheduler, Discord `/review`, and shared chat review flows |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
@@ -146,13 +148,16 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
 | `scripts/maintenance_smoke.py` | ~160 | Manual maintenance and dedup smoke script; intentionally kept outside automated pytest/CI runs |
 | `scripts/live_output_contract_smoke.py` | ~280 | Manual real-provider smoke script for `.env`-backed output-contract validation and retry-path checks |
+| `scripts/test_chat_flow.py` | ~415 | Manual real-pipeline chat harness — scripted multi-turn runs with sandboxed DB copies, transcript printing, and JSON log output |
 | `scripts/test_prompts.py` | ~180 | Prompt-debugging harness for maintenance, reorganize, and quiz prompt assembly |
 | `scripts/test_quiz_generator.py` | ~120 | Manual test harness for the two-prompt quiz generation pipeline |
 | `scripts/test_similarity.py` | ~200 | Interactive similarity test harness — configurable concept pairs with scored output |
 | **tests/** | | |
 | `tests/test_api.py` | ~1000 | Backend API/chat/auth coverage for REST routes and shared chat controller behavior |
 | `tests/test_api_pages.py` | ~155 | FastAPI-served SPA alias and HTML-fallback coverage for browser routes |
+| `tests/test_chat_flow_script.py` | ~60 | Focused unit coverage for the manual chat-flow harness argument expansion and transcript action summaries |
 | `tests/test_concept_dedup_tools.py` | ~235 | Tool- and DB-level concept dedup guard coverage |
+| `tests/test_learn_turn.py` | ~55 | Interactive-turn mode-routing coverage for active-quiz reply-vs-command resolution |
 | `tests/test_tools_topics.py` | ~75 | Topic handler guard coverage (`delete_topic`) |
 | `tests/test_tools_relations.py` | ~40 | Relation handler coverage (`remove_relation`) |
 | `tests/test_quiz_views.py` | ~310 | Discord quiz view delivery, navigation metadata, and skip-button regression coverage |
@@ -209,16 +214,22 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │  returns tuple[str, dict|None, dict|None, dict|None]
          │  (response, pending_action, assess_meta, quiz_meta)
          ▼
-  pipeline.call_with_fetch_loop("command", text, author)     ← async
+      services/learn_turn.py:run_learn_turn(text, author, ...)
+        │
+        ├── resolve mode
+        │      ├── active quiz / pending reminder → "reply"
+        │      └── otherwise → "command"
+        ▼
+      pipeline.call_with_fetch_loop(mode, text, author)          ← async
          │
-         ├─── context.build_prompt_context(text, "command")  ← direct call
+        ├─── context.build_prompt_context(text, mode)        ← direct call
          │         │
          │         ├── db.get_hierarchical_topic_map()
          │         ├── db.get_due_concepts(limit=5)
          │         ├── db.get_review_stats()
          │         ├── _append_active_concept_detail()  (auto-includes if active_concept_id set)
-         │         ├── _append_chat_history()  (session-based continuation: skip entirely)
-         │         └── _append_active_quiz_context()  (auto-clears if stale > 15min)
+        │         ├── _append_chat_history()  (session-based continuation: skip entirely)
+        │         └── _append_active_quiz_context()  (auto-clears if stale > 15min; injects exact `last_quiz_question` when available)
          │
          ├─── If mode not MAINTENANCE/REVIEW-CHECK:
          │         └── _preload_mentioned_concept()  (exact title match → concept detail + relations)
@@ -253,7 +264,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          └─── Final non-fetch LLM response (string)
                     │
                     ▼
-  pipeline.execute_llm_response(text, llm_response, "command")  ← sync
+  pipeline.execute_llm_response(text, llm_response, mode)         ← sync
          │
          ├── pipeline.parse_llm_response(llm_response)
          │       → (prefix, message, action_data)

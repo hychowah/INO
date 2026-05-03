@@ -78,7 +78,9 @@ async def generate_review_quiz_from_payload(
             db.set_session("last_quiz_question", message)
 
         _prefix, _message, action_data = parse_llm_response(llm_response)
-        raw_choices = (p1_result or {}).get("choices", []) if isinstance(p1_result, dict) else []
+        raw_choices = []
+        if isinstance(p1_result, dict):
+            raw_choices = p1_result.get("choices") or []
         choices = [str(choice).strip() for choice in raw_choices if str(choice).strip()]
         return ReviewQuizResult(
             concept_id=concept_id,

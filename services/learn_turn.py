@@ -1,9 +1,12 @@
 from dataclasses import dataclass
+import logging
 from typing import Awaitable, Callable
 
 import db
 from services.chat_actions import is_intercepted_action
 from services.tools import set_action_source
+
+logger = logging.getLogger("learn_turn")
 
 
 @dataclass(frozen=True)
@@ -14,6 +17,20 @@ class LearnTurnResult:
     action_data: dict | None
     assess_meta: dict | None = None
     quiz_meta: dict | None = None
+
+
+def _resolve_turn_mode() -> str:
+    if db.get_session("active_concept_ids"):
+        return "reply"
+    if db.get_session("quiz_anchor_concept_id"):
+        return "reply"
+
+    from services.review_state import get_pending_review
+
+    if get_pending_review():
+        return "reply"
+
+    return "command"
 
 
 async def run_learn_turn(
@@ -28,7 +45,10 @@ async def run_learn_turn(
     on_pending_intercept: Callable[[str], None] | None = None,
 ) -> LearnTurnResult:
     set_action_source(source)
-    llm_response = await call_with_fetch_loop("command", text, author)
+    mode = _resolve_turn_mode()
+    logger.info("learn turn mode=%s active_quiz=%s", mode, mode == "reply")
+
+    llm_response = await call_with_fetch_loop(mode, text, author)
     _prefix, message, action_data = parse_response(llm_response)
 
     if action_data and is_intercepted_action(action_data) and not text.startswith("[BUTTON]"):
@@ -42,7 +62,7 @@ async def run_learn_turn(
             action_data=action_data,
         )
 
-    final_result = await execute_response(text, llm_response, "command")
+    final_result = await execute_response(text, llm_response, mode)
     msg_type, reply = process_output(final_result)
 
     assess_meta = None

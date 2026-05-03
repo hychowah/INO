@@ -79,6 +79,48 @@ async def test_scheduler_fallback_uses_review_check_mode(test_db):
 
 
 @pytest.mark.anyio
+async def test_generate_review_quiz_from_payload_tolerates_none_choices(test_db):
+    cid = db.add_concept("Open Response Review", "Desc")
+
+    with (
+        patch("services.review_flow.set_action_source"),
+        patch(
+            "services.review_flow.pipeline.generate_quiz_question",
+            new=AsyncMock(
+                return_value={
+                    "question": "Why does induced drag drop?",
+                    "choices": None,
+                }
+            ),
+        ),
+        patch(
+            "services.review_flow.pipeline.package_quiz_for_discord",
+            new=AsyncMock(return_value="QUIZ"),
+        ),
+        patch(
+            "services.review_flow.pipeline.execute_llm_response",
+            new=AsyncMock(return_value="REPLY: Why does induced drag drop?"),
+        ),
+        patch(
+            "services.review_flow.pipeline.process_output",
+            return_value=("reply", "Why does induced drag drop?"),
+        ),
+    ):
+        from services.review_flow import generate_review_quiz_from_payload
+
+        result = await generate_review_quiz_from_payload(
+            f"{cid}|context",
+            author="test-author",
+            source="discord",
+            track_in_progress=True,
+        )
+
+    assert result.concept_id == cid
+    assert result.message == "Why does induced drag drop?"
+    assert result.choices == []
+
+
+@pytest.mark.anyio
 async def test_chat_review_fallback_uses_review_check_mode(test_db):
     cid = db.add_concept("Fallback Chat", "Desc")
     db.update_concept(cid, review_count=2)

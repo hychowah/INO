@@ -6,10 +6,15 @@ Key changes, newest first.
 
 ## May 2026
 
+### Added
+
+- **Chat flow harness** — added `scripts/test_chat_flow.py` plus `docs/CHAT_FLOW_HARNESS.md` for sandboxed, transcript-backed multi-turn conversation testing against the real chat pipeline
+
 ### Changed
 
 - **Local-first runtime identity boundary** — Discord, API, browser, and scheduler flows now resolve through the canonical `LEARN_LOCAL_USER_ID`; FastAPI request scope may still override that alias with `X-Learning-User`
 - **Typed chat envelope contract** — FastAPI chat endpoints now return an explicit `ChatResponse` shape with unset optional fields omitted on the wire, reducing browser/API contract drift without adding a new DTO layer
+- **Active quiz follow-up routing** — interactive turns now switch to `REPLY` mode automatically when single-quiz, multi-quiz, or pending scheduled-review state is active, so follow-up quiz answers use the quiz-intent rules instead of the new-question path
 
 ### Refactored
 
@@ -23,6 +28,9 @@ Key changes, newest first.
 
 - **Scoped provider session leakage** — runtime provider conversation sessions are now keyed by current user instead of one process-global cache
 - **Browser/API skip user mismatch** — the shared `skip_quiz` action path now uses the current scoped user rather than the adapter display author
+- **Plain Discord message user-scope mismatch** — ordinary `on_message` replies now use the same `LEARN_LOCAL_USER_ID` scope as scheduler and slash-command review state, preventing live review answers from missing their active quiz context
+- **Immediate review-question prompt context** — active single-concept quiz context now includes the exact stored question from `last_quiz_question` before falling back to typed reminder state, making terse follow-up answers interpretable during the first response turn
+- **Open-response review choices normalization** — shared review generation now treats quiz-generator payloads with `choices: null` as no multiple-choice options instead of crashing the `/review` flow with `TypeError: 'NoneType' object is not iterable`
 - **Old-database bootstrap safety** — user-id-dependent indexes are now created after migrations in `db/core.py`, so copied or upgraded older databases can boot cleanly during migration rehearsal
 - **Proactive reminder self-healing** — scheduler review checks now clear malformed or deleted legacy `pending_review` state before importing it into `scheduled_review_reminders`, so one stale reminder blob no longer aborts proactive Discord review delivery while manual `/review` still works
 - **Legacy reminder bridge recovery** — when only the compatibility `pending_review` mirror exists, the next scheduler pass can re-import it into the typed reminder row after validating concept existence and normalizing timestamps

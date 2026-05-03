@@ -47,6 +47,7 @@ Do not edit these casually — every word affects bot behaviour.
 | Path | Purpose |
 |------|---------|
 | `docs/SETUP.md` | Step-by-step local development setup guide |
+| `docs/CHAT_FLOW_HARNESS.md` | Manual operator guide for the scripted real-pipeline conversation harness (`scripts/test_chat_flow.py`) |
 | `CHANGELOG.md` | Key changes, newest first |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds — preview vs apply, aggressive vs conservative, rollback, Windows/OneDrive troubleshooting |
 | `.github/workflows/tests.yml` | Python CI workflow — dependency install, pytest collection guard, full matrix run |
