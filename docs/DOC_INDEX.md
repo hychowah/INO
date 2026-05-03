@@ -52,7 +52,8 @@ Do not edit these casually — every word affects bot behaviour.
 | `.github/workflows/tests.yml` | Python CI workflow — dependency install, pytest collection guard, full matrix run |
 | `.github/workflows/lint.yml` | Ruff CI workflow |
 | `.github/workflows/frontend.yml` | Frontend CI workflow — typecheck, Vitest, Playwright |
-| `docs/plans/ci-test-suite-overhaul-2026-04-15.md` | Active CI and test-suite overhaul implementation plan |
+
+There are currently no active in-repo implementation plan files. Add a new `docs/plans/<feature>.md` entry here only while that plan is still active.
 
 ---
 

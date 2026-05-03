@@ -35,7 +35,8 @@
 | `.github/workflows/tests.yml` | Python CI matrix and pytest collection guard |
 | `.github/workflows/lint.yml` | Ruff lint/format CI workflow |
 | `.github/workflows/frontend.yml` | Frontend typecheck, Vitest, and Playwright CI workflow |
-| `docs/plans/ci-test-suite-overhaul-2026-04-15.md` | Active CI and test-suite overhaul plan |
+
+There are currently no active in-repo plan files. Create a new `docs/plans/<feature>.md` only when a new tracked implementation plan is actually active.
 
 ## Skill Sets by Mode
 
