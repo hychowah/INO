@@ -13,18 +13,14 @@ from bot.handler import (
     _handle_user_message,
     _pending_confirmations,
 )
-from bot.messages import send_long, send_long_with_view, send_review_question
+from bot.messages import send_discord_result, send_long, send_long_with_view
 from services import backup as backup_service
 from services import chat_session, pipeline, state
-from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
 from services.review_flow import generate_review_quiz_from_payload
-from services.review_state import register_interactive_review_delivery
 from services.views import (
     AddConceptConfirmView,
     PreferenceUpdateView,
-    QuizNavigationView,
-    QuizQuestionView,
     SuggestTopicConfirmView,
 )
 
@@ -132,35 +128,18 @@ async def learn_command(ctx, *, text: str = ""):
             sent = await send_long_with_view(send_fn, response, view=view)
             _pending_confirmations[sent.id] = (pending_action, view)
             view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
-        elif assess_meta:
-            view = QuizNavigationView(
-                concept_id=assess_meta["concept_id"],
-                quality=assess_meta["quality"],
-                message_handler=_handle_user_message,
-            )
-            if is_interaction:
-                send_fn = ctx.interaction.followup.send
-            else:
-                send_fn = ctx.send
-            await send_long_with_view(send_fn, response, view=view)
-        elif quiz_meta:
-            concept = db.get_concept(quiz_meta["concept_id"])
-            meta = format_quiz_metadata(concept)
-            meta_suffix = f"\n\n{meta}" if meta else ""
-            view = None
-            if quiz_meta.get("show_skip"):
-                view = QuizQuestionView(
-                    concept_id=quiz_meta["concept_id"],
-                    message_handler=_handle_user_message,
-                    show_skip=True,
-                )
-            if is_interaction:
-                send_fn = ctx.interaction.followup.send
-            else:
-                send_fn = ctx.send
-            await send_long_with_view(send_fn, response + meta_suffix, view=view)
         else:
-            await send_long(ctx, response)
+            if is_interaction:
+                send_fn = ctx.interaction.followup.send
+            else:
+                send_fn = ctx.send
+            await send_discord_result(
+                send_fn,
+                response,
+                _handle_user_message,
+                assess_meta=assess_meta,
+                quiz_meta=quiz_meta,
+            )
     except Exception as e:
         logger.error(f"learn_command error: {e}", exc_info=True)
         msg = f"Error: `{e}`"
@@ -336,9 +315,7 @@ async def review_command(ctx):
     _ensure_db()
 
     review_lines = None
-    cid = None
-    response = None
-    assess_meta = None
+    discord_result = None
     try:
         async with state.pipeline_serialized():
             review_lines = pipeline.handle_review_check()
@@ -350,9 +327,7 @@ async def review_command(ctx):
                         source="discord",
                         track_in_progress=True,
                     )
-                cid = quiz.concept_id
-                response = quiz.message
-                assess_meta = quiz.assess_meta()
+                discord_result = quiz.to_discord_result()
 
         if not review_lines:
             msg = "✅ No concepts to review — add some topics first!"
@@ -362,27 +337,18 @@ async def review_command(ctx):
                 await ctx.send(msg)
             return
 
-        if assess_meta:
-            response = f"📚 **Learning Review**\n{response}"
-            view = QuizNavigationView(
-                concept_id=assess_meta["concept_id"],
-                quality=assess_meta["quality"],
-                message_handler=_handle_user_message,
-            )
-            if is_interaction:
-                send_fn = ctx.interaction.followup.send
-            else:
-                send_fn = ctx.send
-            await send_long_with_view(send_fn, response, view=view)
-        elif cid:
-            if is_interaction:
-                send_fn = ctx.interaction.followup.send
-            else:
-                send_fn = ctx.send
-            await send_review_question(send_fn, response, cid, _handle_user_message)
-            register_interactive_review_delivery(cid, response.strip())
+        response, _pending_action, assess_meta, quiz_meta = discord_result
+        if is_interaction:
+            send_fn = ctx.interaction.followup.send
         else:
-            await send_long(ctx, response)
+            send_fn = ctx.send
+        await send_discord_result(
+            send_fn,
+            response,
+            _handle_user_message,
+            assess_meta=assess_meta,
+            quiz_meta=quiz_meta,
+        )
     except Exception as e:
         logger.error(f"review_command error: {e}", exc_info=True)
         msg = f"Error: `{e}`"

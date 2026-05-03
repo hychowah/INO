@@ -16,14 +16,12 @@ from bot.handler import (
     _is_negative,
     _pending_confirmations,
 )
-from bot.messages import send_long_with_view
+from bot.messages import send_discord_result, send_long_with_view
 from services import pipeline, scheduler, state
 from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
-from services.formatting import format_quiz_metadata, truncate_with_suffix
+from services.formatting import truncate_with_suffix
 from services.views import (
     AddConceptConfirmView,
-    QuizNavigationView,
-    QuizQuestionView,
     SuggestTopicConfirmView,
 )
 
@@ -171,27 +169,14 @@ async def on_message(message):
                 sent = await send_long_with_view(message.reply, response, view=view)
                 _pending_confirmations[sent.id] = (pending_action, view)
                 view.on_resolved = lambda mid=sent.id: _pending_confirmations.pop(mid, None)
-            elif assess_meta:
-                view = QuizNavigationView(
-                    concept_id=assess_meta["concept_id"],
-                    quality=assess_meta["quality"],
-                    message_handler=_handle_user_message,
-                )
-                await send_long_with_view(message.reply, response, view=view)
-            elif quiz_meta:
-                concept = db.get_concept(quiz_meta["concept_id"])
-                meta = format_quiz_metadata(concept)
-                meta_suffix = f"\n\n{meta}" if meta else ""
-                view = None
-                if quiz_meta.get("show_skip"):
-                    view = QuizQuestionView(
-                        concept_id=quiz_meta["concept_id"],
-                        message_handler=_handle_user_message,
-                        show_skip=True,
-                    )
-                await send_long_with_view(message.reply, response + meta_suffix, view=view)
             else:
-                await send_long_with_view(message.reply, response)
+                await send_discord_result(
+                    message.reply,
+                    response,
+                    _handle_user_message,
+                    assess_meta=assess_meta,
+                    quiz_meta=quiz_meta,
+                )
 
         except Exception as e:
             logger.error(f"Message handler error: {e}", exc_info=True)

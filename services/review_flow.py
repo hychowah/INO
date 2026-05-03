@@ -44,6 +44,19 @@ class ReviewQuizResult:
     ) -> dict:
         return build_chat_payload(self.message, actions=quiz_actions)
 
+    def to_discord_result(self) -> tuple[str, dict | None, dict | None, dict | None]:
+        assess_meta = self.assess_meta()
+        message = self.message
+        quiz_meta = None
+        if assess_meta is not None:
+            message = f"📚 **Learning Review**\n{message}"
+        elif self.concept_id is not None:
+            quiz_meta = {
+                "concept_id": self.concept_id,
+                "heading": "📚 **Learning Review**",
+            }
+        return message, None, assess_meta, quiz_meta
+
 
 def parse_review_payload_concept_id(payload: str) -> int | None:
     try:

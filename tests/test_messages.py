@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import db
-from bot.messages import send_long_with_view, send_review_question
+from bot.messages import send_discord_result, send_long_with_view, send_review_question
 from services.parser import CONTROLLED_FORMAT_FAILURE_MESSAGE
 from services.tools_assess import skip_quiz
-from services.views import QuizQuestionView
+from services.views import QuizNavigationView, QuizQuestionView
 
 
 @pytest.mark.anyio
@@ -85,3 +85,47 @@ async def test_send_review_question_clears_stale_quiz_answered_for_next_skip(tes
     assert db.get_session("quiz_answered") is None
     result = skip_quiz(cid)
     assert "error" not in result
+
+
+@pytest.mark.anyio
+async def test_send_discord_result_uses_navigation_view_for_assess():
+    send_fn = AsyncMock(return_value=MagicMock())
+
+    async def fake_handler(_text, _author):
+        return "ignored", None, None, None
+
+    await send_discord_result(
+        send_fn,
+        "Assessment complete",
+        fake_handler,
+        assess_meta={"concept_id": 7, "quality": 4},
+    )
+
+    send_fn.assert_awaited_once()
+    assert send_fn.await_args.args[0] == "Assessment complete"
+    assert isinstance(send_fn.await_args.kwargs["view"], QuizNavigationView)
+
+
+@pytest.mark.anyio
+async def test_send_discord_result_uses_quiz_meta_for_quiz_prompt(test_db):
+    cid = db.add_concept("Quiz Prompt", "Desc")
+    db.update_concept(cid, review_count=3)
+    send_fn = AsyncMock(return_value=MagicMock())
+    mock_send_long_with_view = AsyncMock(return_value=MagicMock())
+
+    async def fake_handler(_text, _author):
+        return "ignored", None, None, None
+
+    with patch("bot.messages.send_long_with_view", new=mock_send_long_with_view):
+        await send_discord_result(
+            send_fn,
+            "Prompt text",
+            fake_handler,
+            quiz_meta={"concept_id": cid, "show_skip": True, "heading": "Quiz"},
+        )
+
+    mock_send_long_with_view.assert_awaited_once()
+    call = mock_send_long_with_view.await_args
+    assert call.args[0] is send_fn
+    assert call.args[1] == "Quiz\nPrompt text\n\n📖 **Quiz Prompt** · Score: 0/100 · Review #4"
+    assert isinstance(call.kwargs["view"], QuizQuestionView)

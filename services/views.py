@@ -340,140 +340,99 @@ class RejectActionButton(discord.ui.Button):
         await self.parent_view._finalize(interaction)
 
 
-class AddConceptConfirmView(discord.ui.View):
+class _LightweightConfirmView(discord.ui.View):
+    def __init__(self, action_data: dict, on_resolved: Callable | None = None):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.action_data = action_data
+        self.decided = False
+        self.on_resolved = on_resolved
+
+    async def _accept_action(self, interaction: discord.Interaction):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+
+        with state.current_user_scope(_interaction_user_id(interaction)):
+            async with state.pipeline_serialized():
+                _success, display_note = execute_lightweight_confirm(
+                    self.action_data,
+                    source="discord",
+                )
+                note = f"\n\n{display_note}"
+
+        try:
+            original = interaction.message.content or ""
+            await interaction.response.edit_message(
+                content=truncate_with_suffix(original, note), view=self
+            )
+        except discord.errors.NotFound:
+            pass
+        self._finish_resolution()
+
+    async def _decline_action(self, interaction: discord.Interaction):
+        if self.decided:
+            return
+        self.decided = True
+        self._disable_all()
+
+        with state.current_user_scope(_interaction_user_id(interaction)):
+            async with state.pipeline_serialized():
+                execute_lightweight_decline(self.action_data)
+
+        try:
+            original = interaction.message.content or ""
+            await interaction.response.edit_message(
+                content=truncate_for_discord(original), view=self
+            )
+        except discord.errors.NotFound:
+            pass
+        self._finish_resolution()
+
+    def _finish_resolution(self):
+        if self.on_resolved:
+            self.on_resolved()
+        self.stop()
+
+    def _disable_all(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    async def on_timeout(self):
+        self._disable_all()
+        if self.on_resolved:
+            self.on_resolved()
+
+
+class AddConceptConfirmView(_LightweightConfirmView):
     """Accept or decline adding a concept."""
 
     def __init__(self, action_data: dict, on_resolved: Callable | None = None):
-        super().__init__(timeout=VIEW_TIMEOUT)
-        self.action_data = action_data
-        self.decided = False
-        self.on_resolved = on_resolved
+        super().__init__(action_data, on_resolved=on_resolved)
 
     @discord.ui.button(label="Add concept", style=discord.ButtonStyle.success, emoji="✅")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.decided:
-            return
-        self.decided = True
-        self._disable_all()
-
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                _success, display_note = execute_lightweight_confirm(
-                    self.action_data,
-                    source="discord",
-                )
-                note = f"\n\n{display_note}"
-
-        try:
-            original = interaction.message.content or ""
-            await interaction.response.edit_message(
-                content=truncate_with_suffix(original, note), view=self
-            )
-        except discord.errors.NotFound:
-            pass
-        if self.on_resolved:
-            self.on_resolved()
-        self.stop()
+        await self._accept_action(interaction)
 
     @discord.ui.button(label="No thanks", style=discord.ButtonStyle.secondary, emoji="❌")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.decided:
-            return
-        self.decided = True
-        self._disable_all()
-
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                execute_lightweight_decline(self.action_data)
-
-        try:
-            original = interaction.message.content or ""
-            await interaction.response.edit_message(
-                content=truncate_for_discord(original), view=self
-            )
-        except discord.errors.NotFound:
-            pass
-        if self.on_resolved:
-            self.on_resolved()
-        self.stop()
-
-    def _disable_all(self):
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
-
-    async def on_timeout(self):
-        self._disable_all()
-        if self.on_resolved:
-            self.on_resolved()
+        await self._decline_action(interaction)
 
 
-class SuggestTopicConfirmView(discord.ui.View):
+class SuggestTopicConfirmView(_LightweightConfirmView):
     """Accept or decline adding a suggested topic."""
 
     def __init__(self, action_data: dict, on_resolved: Callable | None = None):
-        super().__init__(timeout=VIEW_TIMEOUT)
-        self.action_data = action_data
-        self.decided = False
-        self.on_resolved = on_resolved
+        super().__init__(action_data, on_resolved=on_resolved)
 
     @discord.ui.button(label="Add topic", style=discord.ButtonStyle.success, emoji="✅")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.decided:
-            return
-        self.decided = True
-        self._disable_all()
-
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                _success, display_note = execute_lightweight_confirm(
-                    self.action_data,
-                    source="discord",
-                )
-                note = f"\n\n{display_note}"
-
-        try:
-            original = interaction.message.content or ""
-            await interaction.response.edit_message(
-                content=truncate_with_suffix(original, note), view=self
-            )
-        except discord.errors.NotFound:
-            pass
-        if self.on_resolved:
-            self.on_resolved()
-        self.stop()
+        await self._accept_action(interaction)
 
     @discord.ui.button(label="No thanks", style=discord.ButtonStyle.secondary, emoji="❌")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.decided:
-            return
-        self.decided = True
-        self._disable_all()
-
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                execute_lightweight_decline(self.action_data)
-
-        try:
-            original = interaction.message.content or ""
-            await interaction.response.edit_message(
-                content=truncate_for_discord(original), view=self
-            )
-        except discord.errors.NotFound:
-            pass
-        if self.on_resolved:
-            self.on_resolved()
-        self.stop()
-
-    def _disable_all(self):
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
-
-    async def on_timeout(self):
-        self._disable_all()
-        if self.on_resolved:
-            self.on_resolved()
+        await self._decline_action(interaction)
 
 
 class QuizNavigationView(discord.ui.View):

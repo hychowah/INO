@@ -206,16 +206,13 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
             "bot.commands.pipeline.process_output",
             return_value=("reply", "Slash fallback question"),
         ),
-        patch("bot.commands.send_review_question", new=AsyncMock(return_value=object())),
+        patch("bot.commands.send_discord_result", new=AsyncMock(return_value=object())),
     ):
         await bot_commands.review_command.callback(ctx)
 
     assert fallback.await_args.kwargs["mode"] == "review-check"
     assert db.get_session("pending_review", user_id=bot_commands.state.get_local_user_id()) is None
-    reminder = db.get_scheduled_review_reminder(user_id=bot_commands.state.get_local_user_id())
-    assert reminder is not None
-    assert reminder["concept_id"] == cid
-    assert reminder["question_text"] == "Slash fallback question"
+    assert db.get_scheduled_review_reminder(user_id=bot_commands.state.get_local_user_id()) is None
 
 
 @pytest.mark.anyio
@@ -244,7 +241,7 @@ async def test_bot_review_does_not_persist_pending_when_send_fails(test_db):
             return_value=("reply", "Question survives generation"),
         ),
         patch(
-            "bot.commands.send_review_question",
+            "bot.commands.send_discord_result",
             new=AsyncMock(side_effect=RuntimeError("send failed")),
         ),
     ):

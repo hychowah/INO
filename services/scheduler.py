@@ -268,15 +268,14 @@ async def _send_review_quiz(payload: str):
             if message and message.strip():
                 from bot.handler import _handle_user_message
 
-                await send_review_question(user.send, message, cid, _handle_user_message)
+                await send_review_question(
+                    user.send,
+                    message,
+                    cid,
+                    _handle_user_message,
+                    on_sent=register_scheduler_review_delivery,
+                )
                 logger.info("Sent review DM")
-
-                # Set pending review state AFTER DM is confirmed sent.
-                # This avoids the race condition where pending is set
-                # during the LLM await but the user answers a previous
-                # quiz in the meantime.
-                if cid:
-                    register_scheduler_review_delivery(cid, message)
             else:
                 logger.debug("Empty result for review quiz")
 
