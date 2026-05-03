@@ -1,6 +1,5 @@
 """Additional scheduler branch coverage beyond quiz-send behavior."""
 
-import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -11,17 +10,13 @@ from services import scheduler, state
 
 
 def _set_pending_review(concept_id: int, reminder_count: int = 0, *, hours_ago: int = 5):
-    db.set_session(
-        "pending_review",
-        json.dumps(
-            {
-                "concept_id": concept_id,
-                "concept_title": "Pending Concept",
-                "question": "What is it?",
-                "sent_at": (datetime.now() - timedelta(hours=hours_ago)).isoformat(),
-                "reminder_count": reminder_count,
-            }
-        ),
+    sent_at = (datetime.now() - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+    db.upsert_scheduled_review_reminder(
+        concept_id,
+        "What is it?",
+        first_sent_at=sent_at,
+        last_sent_at=sent_at,
+        reminder_count=reminder_count,
     )
 
 
@@ -29,12 +24,6 @@ def _set_pending_review(concept_id: int, reminder_count: int = 0, *, hours_ago: 
 async def test_check_reviews_sends_reminder_before_fetching_new_review(test_db):
     concept_id = db.add_concept("Pending Concept", "Desc")
     _set_pending_review(concept_id)
-    db.upsert_scheduled_review_reminder(
-        concept_id,
-        "What is it?",
-        first_sent_at=(datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),
-        last_sent_at=(datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),
-    )
     original_last_activity = state.last_activity_at
     state.last_activity_at = None
 
@@ -77,7 +66,7 @@ async def test_check_reviews_resends_after_two_hours_when_unanswered(test_db):
 
 
 @pytest.mark.anyio
-async def test_check_reviews_clears_deleted_pending_review_before_fetching_due_review(test_db):
+async def test_check_reviews_clears_deleted_typed_reminder_before_fetching_due_review(test_db):
     stale_concept_id = db.add_concept("Deleted Pending Concept", "Desc")
     fresh_concept_id = db.add_concept("Fresh Due Concept", "Desc")
     _set_pending_review(stale_concept_id)
@@ -101,7 +90,6 @@ async def test_check_reviews_clears_deleted_pending_review_before_fetching_due_r
 
         payload_mock.assert_called_once_with()
         quiz_mock.assert_awaited_once_with(f"{fresh_concept_id}|context")
-        assert db.get_session("pending_review") is None
         assert db.get_scheduled_review_reminder() is None
     finally:
         state.last_activity_at = original_last_activity

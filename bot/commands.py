@@ -15,7 +15,7 @@ from bot.handler import (
 )
 from bot.messages import send_long, send_long_with_view, send_review_question
 from services import backup as backup_service
-from services import pipeline, state
+from services import chat_session, pipeline, state
 from services.formatting import format_quiz_metadata
 from services.parser import parse_llm_response
 from services.review_flow import generate_review_quiz_from_payload
@@ -29,6 +29,62 @@ from services.views import (
 )
 
 logger = logging.getLogger("bot")
+
+
+def _iter_action_buttons(action_block: dict) -> list[dict]:
+    buttons = []
+    for item in action_block.get("items", []):
+        buttons.extend(item.get("buttons", []))
+    buttons.extend(action_block.get("bulk_buttons", []))
+    return buttons
+
+
+def _proposal_view_from_action_block(action_block: dict):
+    from services.views import DedupConfirmView, ProposedActionsView
+
+    proposal_id = None
+    source = "maintenance"
+    for button in _iter_action_buttons(action_block):
+        action = button.get("action", {})
+        if proposal_id is None and action.get("proposal_id") is not None:
+            proposal_id = int(action["proposal_id"])
+        kind = str(action.get("kind", "")).lower().strip()
+        if kind == "apply_dedup_groups":
+            source = "dedup"
+        elif kind in {"apply_maintenance_actions", "reject_proposals"}:
+            source = str(action.get("source", source)).lower().strip() or source
+
+    if proposal_id is None:
+        raise ValueError("Proposal review block is missing proposal_id")
+
+    proposal = db.get_proposal(proposal_id)
+    if proposal is None:
+        raise ValueError(f"Proposal #{proposal_id} is no longer available")
+
+    payload = proposal.get("payload", [])
+    if source == "dedup":
+        return source, DedupConfirmView(proposal_id, payload)
+    return source, ProposedActionsView(proposal_id, payload, source=source)
+
+
+async def _send_discord_proposal_blocks(ctx, actions: list[dict] | None) -> None:
+    if not actions:
+        return
+
+    is_interaction = ctx.interaction is not None
+    for block in actions:
+        if block.get("type") != "proposal_review":
+            continue
+        source, view = _proposal_view_from_action_block(block)
+        title = block.get("title", f"{source.title()} proposals")
+        description = block.get("description")
+        content = f"⏳ **{title}**"
+        if description:
+            content += f"\n\n{description}"
+        if is_interaction:
+            await ctx.interaction.followup.send(content=content, view=view)
+        else:
+            await ctx.send(content=content, view=view)
 
 
 def with_ctx_user_scope(func):
@@ -254,85 +310,13 @@ async def maintain_command(ctx):
         )
         return
 
-    from services.dedup import format_dedup_suggestions
-    from services.views import DedupConfirmView, ProposedActionsView
-
     is_interaction = ctx.interaction is not None
     if is_interaction:
         await ctx.interaction.response.defer(ephemeral=False)
 
-    _ensure_db()
-    parts = []
-
-    proposed_actions = []
-    groups = None
-    async with state.pipeline_serialized():
-        try:
-            maint_context = pipeline.handle_maintenance()
-            if maint_context:
-                async with ctx.channel.typing():
-                    result, proposed_actions = await pipeline.call_maintenance_loop(maint_context)
-                    msg = result
-                    for pfx in ("REPLY: ", "REPLY:"):
-                        if msg.startswith(pfx):
-                            msg = msg[len(pfx) :]
-                    if msg.strip():
-                        parts.append(f"🔧 **Maintenance**\n{msg.strip()}")
-            else:
-                parts.append("🔧 **Maintenance** — no issues found ✅")
-        except Exception as e:
-            logger.error(f"maintain_command maint error: {e}", exc_info=True)
-            parts.append(f"🔧 **Maintenance** — error: `{e}`")
-
-        try:
-            existing = db.get_pending_proposal("dedup")
-            if existing:
-                parts.append("🔄 **Dedup** — pending proposal already exists, check your DMs")
-            else:
-                async with ctx.channel.typing():
-                    groups = await pipeline.handle_dedup_check()
-                if groups:
-                    proposal_id = db.save_proposal("dedup", groups)
-                    suggestion_text = format_dedup_suggestions(groups)
-                    view = DedupConfirmView(proposal_id, groups)
-                    parts.append(suggestion_text)
-                else:
-                    parts.append("🔄 **Dedup** — no duplicates found ✅")
-        except Exception as e:
-            logger.error(f"maintain_command dedup error: {e}", exc_info=True)
-            parts.append(f"🔄 **Dedup** — error: `{e}`")
-            groups = None
-
-    main_text = "\n\n".join(parts)
-
-    views_to_send = []
-    if groups:
-        views_to_send.append(("dedup", view))
-    if proposed_actions:
-        maint_proposal_id = db.save_proposal("maintenance", proposed_actions)
-        maint_view = ProposedActionsView(
-            maint_proposal_id,
-            proposed_actions,
-            pipeline.execute_maintenance_actions,
-            source="maintenance",
-        )
-        views_to_send.append(("maintenance", maint_view))
-
-    if views_to_send:
-        await send_long(ctx, main_text)
-        for label, v in views_to_send:
-            if is_interaction:
-                await ctx.interaction.followup.send(
-                    content=f"👆 **Approve/reject {label} actions above:**",
-                    view=v,
-                )
-            else:
-                await ctx.send(
-                    content=f"👆 **Approve/reject {label} actions above:**",
-                    view=v,
-                )
-    else:
-        await send_long(ctx, main_text)
+    payload = await chat_session.handle_chat_message("/maintain", author=str(ctx.author), source="discord")
+    await send_long(ctx, payload.get("message", ""))
+    await _send_discord_proposal_blocks(ctx, payload.get("actions"))
 
 
 @bot.hybrid_command(
@@ -445,57 +429,18 @@ async def backup_command(ctx):
 @with_ctx_user_scope
 async def reorganize_command(ctx):
     """Manually trigger the taxonomy reorganization agent."""
-    from services.views import ProposedActionsView
-
     is_interaction = ctx.interaction is not None
     if is_interaction:
         await ctx.interaction.response.defer(ephemeral=False)
 
-    _ensure_db()
-
     try:
-        async with state.pipeline_serialized():
-            async with ctx.channel.typing():
-                taxonomy_context = pipeline.handle_taxonomy()
-                if not taxonomy_context:
-                    msg = "🌿 **Taxonomy** — no topics found yet ✅"
-                    if is_interaction:
-                        await ctx.interaction.followup.send(msg)
-                    else:
-                        await ctx.send(msg)
-                    return
-
-                final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
-
-        msg = final_result
-        for pfx in ("REPLY: ", "REPLY:"):
-            if msg.startswith(pfx):
-                msg = msg[len(pfx) :]
-        main_text = (
-            f"🌿 **Taxonomy Reorganization**\n\n{msg.strip()}"
-            if msg.strip()
-            else "🌿 **Taxonomy Reorganization** — complete ✅"
+        payload = await chat_session.handle_chat_message(
+            "/reorganize",
+            author=str(ctx.author),
+            source="discord",
         )
-
-        if proposed_actions:
-            proposal_id = db.save_proposal("taxonomy", proposed_actions)
-            view = ProposedActionsView(
-                proposal_id,
-                proposed_actions,
-                lambda approved_actions: pipeline.execute_approved_actions(
-                    approved_actions,
-                    source="taxonomy",
-                ),
-                source="taxonomy",
-            )
-            await send_long(ctx, main_text)
-            approve_text = "⏳ **Proposed taxonomy changes — approve or reject:**"
-            if is_interaction:
-                await ctx.interaction.followup.send(content=approve_text, view=view)
-            else:
-                await ctx.send(content=approve_text, view=view)
-        else:
-            await send_long(ctx, main_text)
+        await send_long(ctx, payload.get("message", ""))
+        await _send_discord_proposal_blocks(ctx, payload.get("actions"))
 
     except Exception as e:
         logger.error(f"reorganize_command error: {e}", exc_info=True)

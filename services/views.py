@@ -9,9 +9,9 @@ import discord
 import db
 from services import state
 from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
-from services.dedup import execute_dedup_merges
+from services.chat_session import handle_chat_action
 from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
-from services.review_state import register_interactive_review_delivery
+from services.review_state import get_pending_review, register_interactive_review_delivery
 
 logger = logging.getLogger("views")
 
@@ -47,21 +47,34 @@ class DedupConfirmView(discord.ui.View):
         if pending:
             return
 
-        approved_groups = [self.groups[i] for i, d in self.decisions.items() if d]
-        rejected_count = sum(1 for d in self.decisions.values() if not d)
+        approved_ids = [f"dedup-{i}" for i, decision in self.decisions.items() if decision is True]
+        rejected_ids = [f"dedup-{i}" for i, decision in self.decisions.items() if decision is False]
         result_parts = []
 
         with state.current_user_scope(self.proposal_user_id):
-            if approved_groups:
-                summaries = await execute_dedup_merges(approved_groups)
-                if summaries:
-                    result_parts.append(
-                        f"✅ **Merged {len(summaries)} group(s):**\n"
-                        + "\n".join(f"• {summary}" for summary in summaries)
-                    )
-            if rejected_count:
-                result_parts.append(f"❌ Rejected {rejected_count} group(s) — no changes made.")
-            db.delete_proposal(self.proposal_id, user_id=self.proposal_user_id)
+            if approved_ids:
+                payload = await handle_chat_action(
+                    {
+                        "kind": "apply_dedup_groups",
+                        "proposal_id": self.proposal_id,
+                        "proposal_item_ids": approved_ids,
+                    },
+                    source="discord",
+                )
+                if payload.get("message"):
+                    result_parts.append(payload["message"])
+            if rejected_ids:
+                payload = await handle_chat_action(
+                    {
+                        "kind": "reject_proposals",
+                        "proposal_id": self.proposal_id,
+                        "proposal_item_ids": rejected_ids,
+                        "source": "dedup",
+                    },
+                    source="discord",
+                )
+                if payload.get("message"):
+                    result_parts.append(payload["message"])
 
         self._disable_all()
         result_text = "\n\n".join(result_parts) if result_parts else "No merges executed."
@@ -182,14 +195,12 @@ class ProposedActionsView(discord.ui.View):
         self,
         proposal_id: int,
         actions: list[dict],
-        execute_fn: Callable[[list[dict]], Awaitable[list[str]]],
         *,
         source: str = "maintenance",
     ):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.proposal_id = proposal_id
         self.actions = actions
-        self.execute_fn = execute_fn
         self.source = source
         self.proposal_user_id = state.get_current_user()
         self.decisions: dict[int, bool | None] = {i: None for i in range(len(actions))}
@@ -210,32 +221,36 @@ class ProposedActionsView(discord.ui.View):
             return
         self._finalizing = True
 
-        approved = [self.actions[i] for i, d in self.decisions.items() if d]
-        rejected = [self.actions[i] for i, d in self.decisions.items() if d is False]
+        approved_ids = [f"{self.source}-{i}" for i, decision in self.decisions.items() if decision is True]
+        rejected_ids = [f"{self.source}-{i}" for i, decision in self.decisions.items() if decision is False]
         result_parts = []
 
         with state.current_user_scope(self.proposal_user_id):
-            async with state.pipeline_serialized():
-                if approved:
-                    summaries = await self.execute_fn(approved)
-                    if summaries:
-                        result_parts.append(
-                            f"✅ **Executed {len(summaries)} action(s):**\n"
-                            + "\n".join(f"• {summary}" for summary in summaries)
-                        )
-                for action in rejected:
-                    if action.get("action") in ("update_topic", "update_concept"):
-                        db.log_action(
-                            action=action["action"],
-                            params=action.get("params", {}),
-                            result_type="rejected",
-                            result="",
-                            source=self.source,
-                        )
-                if rejected:
-                    result_parts.append(f"❌ Rejected {len(rejected)} action(s).")
-                db.delete_proposal(self.proposal_id, user_id=self.proposal_user_id)
-                self._disable_all()
+            if approved_ids:
+                payload = await handle_chat_action(
+                    {
+                        "kind": "apply_maintenance_actions",
+                        "proposal_id": self.proposal_id,
+                        "proposal_item_ids": approved_ids,
+                        "source": self.source,
+                    },
+                    source="discord",
+                )
+                if payload.get("message"):
+                    result_parts.append(payload["message"])
+            if rejected_ids:
+                payload = await handle_chat_action(
+                    {
+                        "kind": "reject_proposals",
+                        "proposal_id": self.proposal_id,
+                        "proposal_item_ids": rejected_ids,
+                        "source": self.source,
+                    },
+                    source="discord",
+                )
+                if payload.get("message"):
+                    result_parts.append(payload["message"])
+            self._disable_all()
 
         result_text = "\n\n".join(result_parts) if result_parts else "No actions executed."
         try:
@@ -537,7 +552,7 @@ class _QuizNextDueButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        if db.get_session("pending_review"):
+        if get_pending_review():
             await interaction.followup.send("⏳ A scheduled review was just sent — reply to that one first.")
             self.parent_view.stop()
             return

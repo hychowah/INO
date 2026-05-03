@@ -15,7 +15,7 @@ Current shipped behavior is still single-user at the interface layer. Internally
 | Command | Description |
 |---------|-------------|
 | `/learn [text]` | Start or continue a learning session. Optionally pass a topic or question as `text`. |
-| `/review` | Trigger a spaced-repetition quiz session. Manual `/review` still uses the shared review selector and may fall back to the next upcoming concept when nothing is overdue. Scheduler-triggered review DMs now use a separate overdue-only path, persist a typed scheduled reminder plus a `pending_review` recovery mirror after successful delivery, re-import legacy reminder state when needed, and can still recover a later single-concept answer even if the transient quiz anchor has expired. |
+| `/review` | Trigger a spaced-repetition quiz session. Manual `/review` still uses the shared review selector and may fall back to the next upcoming concept when nothing is overdue. Scheduler-triggered review DMs use a separate overdue-only path, persist one typed scheduled reminder row after successful delivery, and can still recover a later single-concept answer even if the transient quiz anchor has expired. |
 | `/due` | Show concepts currently due for review. |
 | `/topics` | Display your full knowledge map (topic hierarchy). |
 | `/persona [name]` | Get or set the active persona (`mentor`, `coach`, `buddy`). Omit `name` to show current. |
@@ -33,8 +33,8 @@ The command remains registered so operators can re-enable maintenance without re
 
 - The Discord bot owns scheduled review DMs; `api.py` hosts only the shared non-DM background jobs.
 - Scheduler-triggered reviews select overdue concepts only and do not use the manual `/review` fallback to the next upcoming concept.
-- Unanswered scheduled reminders persist in `scheduled_review_reminders`, mirror compatibility state into `pending_review`, and can re-import legacy-only `pending_review` state into the typed reminder row on a later scheduler pass.
-- Invalid legacy reminder state is self-healed before delivery: malformed `pending_review` concept ids are cleared, deleted reminder concepts are cancelled, and the scheduler continues to the next eligible overdue concept instead of aborting the review check.
+- Unanswered scheduled reminders persist in `scheduled_review_reminders` as the sole active-review state used by scheduler resend logic, prompt context injection, and late-answer recovery.
+- Deleted reminder concepts are cancelled before delivery, and the scheduler continues to the next eligible overdue concept instead of aborting the review check.
 - Unanswered scheduled reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX` reminders.
 - Scheduled review sends are suppressed while the user has recent activity, while `review_in_progress` is active, and during the UTC+8 quiet-hours window defined by `LEARN_REVIEW_QUIET_HOURS_START_HOUR` and `LEARN_REVIEW_QUIET_HOURS_END_HOUR`.
 - Assess and skip flows resolve the persisted scheduled reminder so the scheduler stops treating it as unanswered.

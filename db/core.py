@@ -63,6 +63,7 @@ def init_databases():
     _init_knowledge_db()
     _init_chat_db()
     _run_migrations()
+    _ensure_post_migration_indexes()
     _init_vector_store()
 
 
@@ -153,11 +154,6 @@ def _init_knowledge_db():
         CREATE INDEX IF NOT EXISTS idx_remarks_concept ON concept_remarks(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_concept ON review_log(concept_id);
         CREATE INDEX IF NOT EXISTS idx_review_log_reviewed ON review_log(reviewed_at);
-        CREATE INDEX IF NOT EXISTS idx_topics_user_id ON topics(user_id);
-        CREATE INDEX IF NOT EXISTS idx_concepts_user_id ON concepts(user_id);
-        CREATE INDEX IF NOT EXISTS idx_review_log_user_id ON review_log(user_id);
-        CREATE INDEX IF NOT EXISTS idx_concept_remarks_user_id ON concept_remarks(user_id);
-
         CREATE TABLE IF NOT EXISTS pending_proposals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL DEFAULT 'default',
@@ -167,8 +163,6 @@ def _init_knowledge_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             expires_at DATETIME NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_pending_proposals_user_type
-            ON pending_proposals(user_id, proposal_type, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_pending_proposals_expires
             ON pending_proposals(expires_at);
 
@@ -237,8 +231,6 @@ def _init_chat_db():
         CREATE INDEX IF NOT EXISTS idx_conversations_lookup
         ON conversations(session_id, timestamp DESC);
 
-        CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
-
         CREATE TABLE IF NOT EXISTS session_state (
             user_id TEXT NOT NULL DEFAULT 'default',
             key TEXT NOT NULL,
@@ -297,6 +289,48 @@ def _run_migrations():
     from db.migrations import _run_migrations as _do_migrations
 
     _do_migrations()
+
+
+def _ensure_post_migration_indexes() -> None:
+    """Create indexes that depend on columns added by migrations.
+
+    Fresh databases already have the needed columns in the base schema, but
+    older databases may not until the migration pass completes. Creating these
+    indexes after migrations keeps bootstrap safe for both cases.
+    """
+    knowledge_indexes = (
+        ("topics", "user_id", "CREATE INDEX IF NOT EXISTS idx_topics_user_id ON topics(user_id)"),
+        ("concepts", "user_id", "CREATE INDEX IF NOT EXISTS idx_concepts_user_id ON concepts(user_id)"),
+        ("review_log", "user_id", "CREATE INDEX IF NOT EXISTS idx_review_log_user_id ON review_log(user_id)"),
+        (
+            "concept_remarks",
+            "user_id",
+            "CREATE INDEX IF NOT EXISTS idx_concept_remarks_user_id ON concept_remarks(user_id)",
+        ),
+        (
+            "pending_proposals",
+            "user_id",
+            "CREATE INDEX IF NOT EXISTS idx_pending_proposals_user_type "
+            "ON pending_proposals(user_id, proposal_type, created_at DESC)",
+        ),
+    )
+
+    with _connection() as conn:
+        for table, column, statement in knowledge_indexes:
+            if _has_table(table) and _has_column(table, column):
+                conn.execute(statement)
+
+    if _has_table("conversations", db_path=CHAT_DB) and _has_column(
+        "conversations", "user_id", db_path=CHAT_DB
+    ):
+        chat_conn = sqlite3.connect(CHAT_DB)
+        try:
+            chat_conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)"
+            )
+            chat_conn.commit()
+        finally:
+            chat_conn.close()
 
 
 # ============================================================================

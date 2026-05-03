@@ -3,11 +3,8 @@ Learning review scheduler — background task that checks for due reviews
 every N minutes and sends Discord DMs with quiz questions.
 
 Pending review tracking (DB-backed, survives restarts):
-  session_state key 'pending_review' stores a JSON blob:
-  {"concept_id": 12, "concept_title": "...", "question": "...",
-   "sent_at": "ISO-datetime", "reminder_count": 0}
-  Set AFTER a review DM is confirmed sent; cleared only by _handle_assess
-  or when max reminders are exhausted.
+    scheduled_review_reminders stores the active question text, timestamps,
+    reminder count, and terminal resolution for one active review per user.
 """
 
 import asyncio
@@ -334,7 +331,6 @@ async def _send_mode_report(
             view = ProposedActionsView(
                 proposal_id,
                 proposed_actions,
-                execute_fn,
                 source=proposal_type,
             )
             action_lines = []

@@ -10,11 +10,9 @@ import config
 import db
 from services.review_state import (
     bind_single_quiz_context,
-    get_pending_review,
     resolve_assess_concept,
     resolve_scheduler_reminder,
     restore_pending_review_context,
-    set_pending_review,
 )
 from services.tools import execute_action
 
@@ -25,7 +23,6 @@ _QUIZ_STATE_KEYS = (
     "active_concept_id",
     "active_concept_ids",
     "quiz_anchor_concept_id",
-    "pending_review",
     "last_quiz_question",
     "p1_question_type",
     "p1_target_facet",

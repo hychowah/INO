@@ -1,5 +1,7 @@
 """Pydantic request/response models for the Learning Agent API."""
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
@@ -12,11 +14,13 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     type: str
     message: str
-    pending_action: dict | None = None
+    pending_action: dict[str, Any] | None = None
+    actions: list[dict[str, Any]] | None = None
+    clear_history: bool | None = None
 
 
 class ConfirmRequest(BaseModel):

@@ -42,7 +42,7 @@ frontend/ (React)  ─┘  ← browser client, proxied to api.py in dev
 
 The runtime LLM (Grok/DeepSeek/OpenAI-compatible providers) is the brain — it decides what to teach, when to quiz, and how to adapt. The code is a thin executor: parse LLM JSON → call DB → return result.
 
-Reminder-state rule: scheduled reminder behavior now spans both `db/review_reminders.py` and the `pending_review` session mirror coordinated by `services/review_state.py`. Do not treat raw `pending_review` writes as the whole reminder system.
+Reminder-state rule: scheduled reminder behavior now lives in `db/review_reminders.py` and `services/review_state.py`, with `scheduled_review_reminders` as the sole durable active-review state. Do not add new `pending_review` session writes.
 
 ---
 
@@ -90,7 +90,7 @@ ROOT
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── action_contracts.py # Lightweight action validation metadata for LLM output contract checks
 │   ├── llm.py             # LLM provider abstraction (OpenAI-compatible chat completions + reasoning provider)
-│   ├── review_state.py    # Shared bridge for scheduled reminders and pending_review recovery state
+│   ├── review_state.py    # Shared typed reminder-state owner for recovery, resend cadence, and resolution
 │   ├── scheduler.py       # Background review scheduler + shared background jobs (bot or API host)
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
 │   ├── state.py           # Shared mutable state (avoids circular imports)

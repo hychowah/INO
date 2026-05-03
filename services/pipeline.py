@@ -330,7 +330,7 @@ async def execute_action(action_data: dict) -> str:
     if action in ("assess", "multi_assess") and not is_quiz_active():
         recovered_pending = None
         if action == "assess":
-            from services.tools_assess import restore_pending_review_context
+            from services.review_state import restore_pending_review_context
 
             recovered_pending = restore_pending_review_context()
 

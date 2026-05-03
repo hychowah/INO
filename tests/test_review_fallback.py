@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
-import pytest
 import json
+import pytest
 
 from bot import commands as bot_commands
 import db
@@ -107,7 +107,7 @@ async def test_chat_review_fallback_uses_review_check_mode(test_db):
 
 
 @pytest.mark.anyio
-async def test_chat_review_registers_pending_review(test_db):
+async def test_chat_review_registers_typed_review_reminder(test_db):
     cid = db.add_concept("Review Pending", "Desc")
     db.update_concept(cid, review_count=2)
 
@@ -134,9 +134,11 @@ async def test_chat_review_registers_pending_review(test_db):
 
     assert result["message"] == "Why is Fabric smoother?"
 
-    pending = json.loads(db.get_session("pending_review"))
-    assert pending["concept_id"] == cid
-    assert pending["question"] == "Why is Fabric smoother?"
+    assert db.get_session("pending_review") is None
+    reminder = db.get_scheduled_review_reminder()
+    assert reminder is not None
+    assert reminder["concept_id"] == cid
+    assert reminder["question_text"] == "Why is Fabric smoother?"
 
 
 @pytest.mark.anyio
@@ -167,9 +169,11 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
         await bot_commands.review_command.callback(ctx)
 
     assert fallback.await_args.kwargs["mode"] == "review-check"
-    pending = json.loads(db.get_session("pending_review", user_id=bot_commands.state.get_local_user_id()))
-    assert pending["concept_id"] == cid
-    assert pending["question"] == "Slash fallback question"
+    assert db.get_session("pending_review", user_id=bot_commands.state.get_local_user_id()) is None
+    reminder = db.get_scheduled_review_reminder(user_id=bot_commands.state.get_local_user_id())
+    assert reminder is not None
+    assert reminder["concept_id"] == cid
+    assert reminder["question_text"] == "Slash fallback question"
 
 
 @pytest.mark.anyio

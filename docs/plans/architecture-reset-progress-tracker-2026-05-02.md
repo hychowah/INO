@@ -7,9 +7,9 @@ Use this document as the session handoff ledger for the architecture reset work.
 - Branch: `refactor/architecture-reset`
 - Strategy: single-user modular monolith with a few shared boundaries, not a microservice split
 - Refactor style: small validated slices, checkpoint frequently, do not widen scope before a focused check passes
-- Latest completed direction: Milestone 4 is complete in code after user-scoped runtime sessions, shared interactive-turn setup, lightweight approval parity, and scheduler review-policy narrowing
-- Immediate next milestone: Milestone 5
-- Immediate next slice: harden adapter contracts, retire the reminder compatibility bridge deliberately, and preserve a clean next-session handoff
+- Latest completed direction: Milestone 5 is complete after explicit chat-envelope hardening, typed-only reminder state cutover, shared Discord proposal execution, slash-command delegation onto the shared chat controller, final acceptance, and shadow-data rehearsal
+- Immediate next milestone: none required for the reset
+- Immediate next slice: monitor for regressions or start post-reset work on a new plan
 
 ## Completed Planning Baseline
 
@@ -147,6 +147,41 @@ Use this document as the session handoff ledger for the architecture reset work.
 - Rebased the architecture reset docs to mark Milestone 5 as the active workstream
 - Result: Milestone 4 is complete in code and documented as such for the next session
 
+### Slice 18: Explicit Chat Envelope Contract
+
+- Tightened `api/schemas.py` so the chat envelope is explicit instead of open-ended
+- Added route-level response filtering so optional fields remain omitted on the wire unless set
+- Preserved the existing browser/API payload shape while removing backend contract drift
+- Result: the HTTP chat surface now has one concrete envelope boundary instead of ad hoc permissiveness
+
+### Slice 19: Typed-Only Review Reminder State
+
+- Moved active-review reads onto `scheduled_review_reminders` as the sole durable source of truth
+- Stopped writing new `pending_review` session blobs for interactive or scheduler delivery
+- Removed the final legacy import bridge so delayed-answer recovery, prompt context injection, scheduler resend, and reminder resolution all operate on the typed reminder row only
+- Result: review recovery and reminder cadence now share one state model instead of a mirrored bridge
+
+### Slice 20: Discord Proposal Execution Delegation
+
+- Routed Discord proposal views through the shared chat-action dispatcher instead of duplicating proposal application, rejection logging, and remaining-item persistence in `services/views.py`
+- Kept Discord button UI state at the edge while moving proposal outcomes onto the same domain path already used by browser/API
+- Result: proposal execution now has one owner across browser/API, Discord buttons, and scheduler-delivered proposals
+
+### Slice 21: Slash Command Workflow Cutover
+
+- Moved Discord `/maintain` and `/reorganize` onto the shared chat controller rather than keeping transport-local workflow orchestration in `bot/commands.py`
+- Added a thin Discord-only proposal-block renderer that reconstructs Discord views from durable proposal rows returned by the shared controller
+- Preserved the richer Discord `/review` transport flow because replacing it would not have delivered proportional simplification
+- Result: the remaining high-value slash-command workflow duplication is removed without introducing a new adapter framework
+
+### Slice 22: Milestone 5 Closeout Validation And Rehearsal
+
+- Re-ran the broad Python acceptance checkpoint after the final reminder-state, proposal, slash-command, and migration-init fixes
+- Re-ran the targeted frontend chat/API tests for the explicit chat envelope and durable proposal UI behavior
+- Performed a safe shadow-data rehearsal by copying `data/knowledge.db`, `data/chat_history.db`, and `data/vectors` into a temp directory, booting the repo against those copies via env overrides, and verifying schema migration plus representative table counts on the copied data
+- Fixed one real migration-init defect exposed by that rehearsal: user-id-dependent indexes were being created before migrations had added the needed columns on older databases
+- Result: Milestone 5 now has a validation record and a shadow-data rehearsal record, so the reset can be considered complete
+
 ## Verified State
 
 Historical validated results preserved from earlier slices:
@@ -203,6 +238,28 @@ Latest working-tree validation recorded for the current slice set:
 - `python -m pytest tests/test_user_context_entrypoints.py tests/test_pipeline_sessions.py tests/test_api.py tests/test_concept_confirm.py tests/test_suggest_topic_confirm.py tests/test_messages.py tests/test_quiz_views.py tests/test_scheduler.py tests/test_scheduler_full.py tests/test_review_fallback.py tests/test_quiz_anchor.py tests/test_output_contract.py tests/test_proposals.py -q -o "addopts="`
 - Result: `192 passed`
 
+Latest Milestone 5 slice validation:
+
+- `python -m pytest tests/test_api.py -q -o "addopts="`
+- Result: `89 passed`
+
+- `python -m pytest tests/test_review_fallback.py tests/test_quiz_anchor.py tests/test_assess_no_quiz_guard.py tests/test_scheduler.py tests/test_scheduler_full.py tests/test_quiz_views.py -q -o "addopts="`
+- Result: `56 passed`
+
+- `python -m pytest tests/test_proposals.py tests/test_scheduler.py tests/test_review_fallback.py -q -o "addopts="`
+- Result: `21 passed`
+
+- `python -m pytest tests/test_api.py tests/test_review_fallback.py tests/test_quiz_anchor.py tests/test_assess_no_quiz_guard.py tests/test_scheduler.py tests/test_scheduler_full.py tests/test_quiz_views.py -q -o "addopts="`
+- Result: `147 passed`
+
+- `python -m pytest c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_api.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_review_fallback.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_quiz_anchor.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_assess_no_quiz_guard.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_scheduler_full.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_quiz_views.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_proposals.py c:/Users/user/OneDrive/Documents/PA/learning_agent/tests/test_messages.py -q -o "addopts="`
+- Result: `159 passed`
+
+- `npm test -- --run src/api.test.ts src/App.test.tsx` from [frontend](c:/Users/user/OneDrive/Documents/PA/learning_agent/frontend)
+- Result: `12 passed`
+
+- Shadow-data rehearsal: copied local `data/knowledge.db`, `data/chat_history.db`, and `data/vectors` to a temp directory, set `LEARN_DB_PATH`, `LEARN_CHAT_DB_PATH`, and `LEARN_VECTOR_STORE_PATH` to those copies, ran `db.init_databases()`, and verified schema version `18` plus representative counts (`topics=45`, `concepts=117`, `review_log=668`, `scheduled_review_reminders=1`, `pending_proposals=0`, `conversations=105`, `session_state=13`)
+
 ## Intentional Simplifications
 
 - Scheduler user binding is handled once in [services/scheduler.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/scheduler.py), not spread across each job helper
@@ -212,6 +269,8 @@ Latest working-tree validation recorded for the current slice set:
 - Durable proposals are reserved for destructive or long-running flows; lightweight same-turn confirmations remain intentionally lightweight
 - Browser/API proposal-review blocks keep the same outer action envelope; only the server-side payload changed from raw executable actions to durable proposal references
 - The existing `call_action_loop()` plus `execute_approved_actions()` pair is already the automation-runner pattern; no extra maintenance/taxonomy service layer was introduced
+- Review reminders are now typed-only; `pending_review` no longer participates in new writes or late-answer recovery
+- Discord proposal views and slash maintenance/taxonomy commands now reuse the shared chat controller or shared chat-action dispatcher instead of owning duplicate proposal workflow
 
 ## Current Code Areas Touched In The Latest Validated Slice
 
@@ -247,17 +306,17 @@ Latest working-tree validation recorded for the current slice set:
 
 ## Next Session Starting Point
 
-Milestone 4 is complete in code. The next major task is Milestone 5: surface hardening, bridge retirement, and migration rehearsal.
+Milestone 5 is complete. The next session should start from a new plan rather than reopening the reset.
 
 ### New Session Bootstrap
 
 Start the next session from this exact posture:
 
-1. Treat Milestones 0 through 4 as done unless a focused regression falsifies them.
-2. Do not reopen the local alias decision, turn-entry preamble, lightweight approval seam, or scheduler reminder-policy extraction.
-3. Start from the adapter edges, not the runtime core. The first Milestone 5 candidates are [api/routes/chat.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/api/routes/chat.py), [services/chat_session.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/chat_session.py), and the remaining Discord view/callback surfaces in [services/views.py](c:/Users/user/OneDrive/Documents/PA/learning_agent/services/views.py).
-4. Keep `api/auth.py` as the fixed request-scope identity boundary and `services/chat_actions.py` as the fixed lightweight approval executor.
-5. Do not delete compatibility bridges before a focused parity or migration check says it is safe.
+1. Treat the explicit chat contract, typed-only reminder state, shared Discord proposal execution, slash maintenance/taxonomy cutover, and migration-init fix as done unless a focused regression falsifies them.
+2. Do not reopen the local alias decision, turn-entry preamble, lightweight approval seam, or the decision to keep `/review` as a richer Discord transport flow.
+3. Start any new work from user-visible product needs or concrete bugs, not from more architecture cleanup.
+4. Keep `api/auth.py` as the fixed request-scope identity boundary, `services/chat_actions.py` as the lightweight approval executor, and `services/review_state.py` as the sole active-review state owner.
+5. If a real-data issue appears, repair only that local slice instead of reopening the reset target.
 
 ### First Milestone 5 Question
 

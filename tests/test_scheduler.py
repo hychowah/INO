@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -58,9 +57,7 @@ async def test_send_review_quiz_attaches_skip_button_for_eligible_concept(test_d
     assert call.kwargs["view"].concept_id == cid
     assert db.get_session("last_quiz_question") == "What is eligible?"
 
-    pending = json.loads(db.get_session("pending_review"))
-    assert pending["concept_id"] == cid
-    assert pending["concept_title"] == "Eligible Review"
+    assert db.get_session("pending_review") is None
 
     reminder = db.get_scheduled_review_reminder()
     assert reminder is not None

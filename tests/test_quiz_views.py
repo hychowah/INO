@@ -246,7 +246,10 @@ class TestSkipQuizButtonRegression:
         )
         assert isinstance(sent["view"], quiz_views.QuizQuestionView)
         assert sent["view"].concept_id == cid
-        assert db.get_session("pending_review") is not None
+        reminder = db.get_scheduled_review_reminder()
+        assert reminder is not None
+        assert reminder["concept_id"] == cid
+        assert reminder["question_text"] == "Fresh quiz after skip"
 
     def test_skip_button_callback_updates_session_and_navigation(self, test_db):
         """Clicking the skip button uses skip_quiz and returns navigation controls."""

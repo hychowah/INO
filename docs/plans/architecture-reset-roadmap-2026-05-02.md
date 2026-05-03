@@ -11,7 +11,7 @@ This roadmap turns the master plan in [architecture-reset-master-plan-2026-05-02
 - Product posture: shared conversation across Discord and browser/API, single-user core.
 - Concurrency target: one active learning turn enforced durably rather than process-locally.
 - Rewrite rule: preserve invariants first, then simplify structure.
-- Current status on 2026-05-02: Milestones 0 through 4 are complete in code. Milestone 5 is now the active cleanup and cutover milestone.
+- Current status on 2026-05-03: Milestones 0 through 5 are complete in code, validation, and shadow-data rehearsal.
 
 ## Milestone 0: Freeze Rewrite Boundaries
 
@@ -173,10 +173,10 @@ Parallel guidance:
 
 ## Next Execution Slice
 
-Implementation now continues at Milestone 5.
+Implementation has completed Milestone 5.
 
-1. Re-baseline the reset docs to match the implemented Milestone 4 slices.
-2. Retire the reminder dual-write bridge and remaining transport-specific workflow branches behind focused parity tests.
-3. Run migration rehearsal and acceptance coverage before closing Milestone 5.
+1. Preserve the Milestone 5 validation and rehearsal record as the new baseline.
+2. Treat further architecture work as post-reset follow-up, not as unfinished Milestone 5 debt.
+3. Reopen only if a focused regression or real-data issue falsifies the current checkpoint.
 
 Only after those three are stable should the branch be considered ready for final cutover or commit.

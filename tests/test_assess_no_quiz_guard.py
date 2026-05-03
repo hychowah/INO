@@ -263,26 +263,14 @@ class TestAssessAllowedWithQuiz:
         )
         assert db.get_concept(cid)["review_count"] == 1, "Only one review should be recorded"
 
-    def test_assess_recovers_from_pending_review_when_anchor_missing(self, test_db):
-        """A fresh pending review can restore the quiz anchor for one late assess."""
+    def test_assess_recovers_from_typed_pending_review_when_anchor_missing(self, test_db):
+        """A fresh typed reminder can restore the quiz anchor for one late assess."""
         cid = db.add_concept("Fabric Rendering", "Concurrent rendering in RN")
         db.update_concept(cid, mastery_level=38)
 
         db.set_session("active_concept_id", None)
         db.set_session("quiz_anchor_concept_id", None)
         db.set_session("active_concept_ids", None)
-        db.set_session(
-            "pending_review",
-            json.dumps(
-                {
-                    "concept_id": cid,
-                    "concept_title": "Fabric Rendering",
-                    "question": "How does Fabric keep a heavy list smooth?",
-                    "sent_at": datetime.now().isoformat(),
-                    "reminder_count": 0,
-                }
-            ),
-        )
         db.upsert_scheduled_review_reminder(
             cid,
             "How does Fabric keep a heavy list smooth?",
@@ -312,7 +300,6 @@ class TestAssessAllowedWithQuiz:
         concept = db.get_concept(cid)
         assert concept["mastery_level"] > 38
         assert concept["review_count"] == 1
-        assert db.get_session("pending_review") is None
         reminder = db.get_scheduled_review_reminder(include_resolved=True)
         assert reminder is not None
         assert reminder["status"] == "answered"

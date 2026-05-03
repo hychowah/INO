@@ -283,7 +283,7 @@ def _append_active_quiz_context(parts: list) -> None:
     active_cid = anchor_cid or db.get_session("active_concept_id")
     pending_review = None
     if not active_cid:
-        from services.tools_assess import get_pending_review
+        from services.review_state import get_pending_review
 
         pending_review = get_pending_review()
         if pending_review and pending_review.get("concept_id") is not None:

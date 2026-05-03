@@ -103,7 +103,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
-| `services/review_state.py` | ~140 | Shared bridge between typed scheduled reminders and the compatibility `pending_review` session mirror |
+| `services/review_state.py` | ~120 | Shared typed reminder-state owner for delayed-answer recovery, resend cadence, and reminder resolution |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
 | `services/chat_session.py` | ~460 | Shared chat-session controller used by FastAPI chat routes and the React browser flow; owns chat/confirm/decline/action serialization for those surfaces |
@@ -296,9 +296,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
     │
     ├── review_state.get_active_scheduled_review_reminder()
     │      │
-    │      ├── read typed `scheduled_review_reminders` row if present
-    │      ├── otherwise import legacy `pending_review` compatibility state
-    │      └── clear invalid or deleted legacy reminder state before import
+    │      └── read the active typed `scheduled_review_reminders` row if present
     │
     ├── pending reminder?
     │      ├── deleted concept → cancel reminder and continue
@@ -625,7 +623,7 @@ The core brain of the system. Coordinates everything:
 7. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
 8. **Parsing utilities** — `validate_llm_output()`, `parse_llm_response()`, `extract_llm_action()`, `process_output()`, `guard_user_message()`.
 9. **`is_quiz_active()`** — Authoritative volatile quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as the first guard in `execute_action`.
-10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, `assess` first attempts `restore_pending_review_context()` from the DB-backed `pending_review` blob written after review-question delivery. Only when no active quiz exists and no pending review can be restored does the action short-circuit, leaving scores/logs untouched and returning `REPLY: (assessment skipped -- no active quiz)`. `multi_assess` remains strict because multi-quiz recovery is not implemented. The CLI helper in `scripts/agent.py` mirrors the same single-quiz recovery logic.
+10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, `assess` first attempts `restore_pending_review_context()` from the typed scheduled reminder row written after successful review delivery. Only when no active quiz exists and no reminder row can be restored does the action short-circuit, leaving scores/logs untouched and returning `REPLY: (assessment skipped -- no active quiz)`. `multi_assess` remains strict because multi-quiz recovery is not implemented. The CLI helper in `scripts/agent.py` mirrors the same single-quiz recovery logic.
 11. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
 12. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
 13. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
@@ -642,15 +640,14 @@ The core brain of the system. Coordinates everything:
 - `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the shared turn gateway is busy rather than interleave with active chat work
 - `services/chat_actions.py` centralizes confirmation whitelists, history-entry formatting, and lightweight `add_concept` / `suggest_topic` confirm-decline execution shared by browser/API and Discord surfaces
 
-### services/review_state.py — Reminder State Bridge
-- Centralizes the shared reminder lifecycle helpers that keep scheduler-owned reminder rows and the compatibility `pending_review` session blob in sync
+### services/review_state.py — Typed Reminder State
+- Centralizes the shared reminder lifecycle helpers on top of `scheduled_review_reminders` as the only active-review reminder state
 - Exposes `restore_pending_review_context()` for late-answer recovery and scheduler helpers such as `set_scheduler_reminder()`, `update_pending_review_delivery()`, and `resolve_scheduler_reminder()`
-- Validates legacy `pending_review` before importing it into `scheduled_review_reminders`; malformed concept ids, missing concepts, and invalid timestamps are cleared or normalized instead of poisoning the scheduler path
 - Lets assess/skip flows resolve scheduler reminders without duplicating reminder-state rules across `services/scheduler.py` and `services/tools_assess.py`
 
 ### services/scheduler.py — Background Tasks
 - Starts from both `bot.py` and `api.py`; review delivery remains bot-owned while shared jobs coordinate through a DB-backed owner heartbeat row
-- Review check: every 15 minutes (configurable), selects overdue concepts only, repairs or cancels invalid reminder state, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
+- Review check: every 15 minutes (configurable), selects overdue concepts only, cancels deleted reminder concepts, resends unanswered reminders after cooldown, sends review DMs, and persists one active reminder row per user in `scheduled_review_reminders`
 - **Suppresses reviews** when the user has recent durable activity, when `review_in_progress` is active, during configured quiet hours, or when the shared turn gateway is busy
 - Unanswered reminders resend after `LEARN_REVIEW_NAG_COOLDOWN_HOURS` and stop after `LEARN_REVIEW_REMINDER_MAX`; answered/skipped reminders are resolved by the assess and skip flows
 - Review and any enabled shared jobs skip their current cycle when the shared turn gateway is busy, so background work yields to active interactive traffic

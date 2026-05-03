@@ -263,24 +263,18 @@ class TestContextInjection:
         assert f"#{cid}" in parts[0]
         assert "Active Concept" in parts[0]
 
-    def test_context_falls_back_to_pending_review(self, test_db):
-        """When volatile quiz state is gone, pending_review still restores quiz context."""
+    def test_context_falls_back_to_typed_review_reminder(self, test_db):
+        """When volatile quiz state is gone, typed reminder state still restores quiz context."""
         import services.context as ctx
 
         cid = db.add_concept("Pending Quiz", "Desc")
         db.set_session("active_concept_id", None)
         db.set_session("quiz_anchor_concept_id", None)
-        db.set_session(
-            "pending_review",
-            json.dumps(
-                {
-                    "concept_id": cid,
-                    "concept_title": "Pending Quiz",
-                    "question": "What does Fabric remove from the old bridge model?",
-                    "sent_at": datetime.now().isoformat(),
-                    "reminder_count": 0,
-                }
-            ),
+        db.upsert_scheduled_review_reminder(
+            cid,
+            "What does Fabric remove from the old bridge model?",
+            first_sent_at="2026-05-03 09:00:00",
+            last_sent_at="2026-05-03 09:00:00",
         )
 
         parts = []

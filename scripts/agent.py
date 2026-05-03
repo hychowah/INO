@@ -57,7 +57,7 @@ def execute_action(action_data: dict) -> str:
             "active_concept_ids"
         ):
             if action == "assess":
-                from services.tools_assess import restore_pending_review_context
+                from services.review_state import restore_pending_review_context
 
                 if restore_pending_review_context():
                     pass

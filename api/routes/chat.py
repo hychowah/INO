@@ -47,7 +47,12 @@ async def chat_bootstrap():
     }
 
 
-@router.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+@router.post(
+    "/api/chat",
+    response_model=ChatResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(verify_token)],
+)
 async def chat(req: ChatRequest):
     """Send a message to the learning agent using the shared chat controller."""
     if not req.message.strip():
@@ -87,7 +92,12 @@ async def chat_stream(req: ChatRequest):
     )
 
 
-@router.post("/api/chat/confirm", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+@router.post(
+    "/api/chat/confirm",
+    response_model=ChatResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(verify_token)],
+)
 async def confirm_action(req: ConfirmRequest):
     """Confirm a pending action from /api/chat using the shared chat controller."""
 
@@ -101,7 +111,12 @@ async def confirm_action(req: ConfirmRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/chat/decline", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+@router.post(
+    "/api/chat/decline",
+    response_model=ChatResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(verify_token)],
+)
 async def decline_action(req: ConfirmRequest):
     """Decline a pending action from /api/chat using the shared chat controller."""
     try:
@@ -114,7 +129,12 @@ async def decline_action(req: ConfirmRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/chat/action", response_model=ChatResponse, dependencies=[Depends(verify_token)])
+@router.post(
+    "/api/chat/action",
+    response_model=ChatResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(verify_token)],
+)
 async def run_chat_action(req: ChatActionRequest):
     """Run a structured chat UI action such as quiz navigation or skip."""
     try:
