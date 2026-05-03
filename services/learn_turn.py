@@ -4,6 +4,7 @@ from typing import Awaitable, Callable
 
 import db
 from services.chat_actions import is_intercepted_action
+from services.chat_payload import build_chat_payload
 from services.tools import set_action_source
 
 logger = logging.getLogger("learn_turn")
@@ -17,6 +18,21 @@ class LearnTurnResult:
     action_data: dict | None
     assess_meta: dict | None = None
     quiz_meta: dict | None = None
+
+    def to_discord_result(self) -> tuple[str, dict | None, dict | None, dict | None]:
+        return self.message, self.pending_action, self.assess_meta, self.quiz_meta
+
+    def to_chat_payload(
+        self,
+        *,
+        actions: list[dict] | None = None,
+    ) -> dict:
+        return build_chat_payload(
+            self.message,
+            msg_type=self.msg_type,
+            pending_action=self.pending_action,
+            actions=actions if not self.pending_action else None,
+        )
 
 
 def _resolve_turn_mode() -> str:

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import db
 from services import pipeline
+from services.chat_payload import build_chat_payload
 from services.llm import LLMError
 from services.parser import parse_llm_response
 from services.review_state import bind_single_quiz_context
@@ -21,6 +22,27 @@ class ReviewQuizResult:
     message: str
     action_data: dict | None
     choices: list[str]
+
+    def assess_meta(self) -> dict | None:
+        if not self.action_data:
+            return None
+        if self.action_data.get("action", "").lower().strip() != "assess":
+            return None
+        params = self.action_data.get("params", {})
+        quality = params.get("quality")
+        if quality is None:
+            return None
+        return {
+            "concept_id": params.get("concept_id", self.concept_id),
+            "quality": quality,
+        }
+
+    def to_chat_payload(
+        self,
+        *,
+        quiz_actions: list[dict] | None = None,
+    ) -> dict:
+        return build_chat_payload(self.message, actions=quiz_actions)
 
 
 def parse_review_payload_concept_id(payload: str) -> int | None:

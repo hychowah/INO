@@ -207,16 +207,6 @@ Canonical browser routes inside the SPA are:
 | `/concept/{concept_id}` | Standalone concept detail compatibility route |
 | `/actions` | Standalone Activity compatibility route |
 
-Legacy browser paths remain available as compatibility redirects inside the SPA:
-
-| Legacy path | Redirect target |
-|-------------|-----------------|
-| `/topics` | `/knowledge` |
-| `/concepts` | `/knowledge/concepts` |
-| `/graph` | `/knowledge/graph` |
-| `/reviews` | `/progress` |
-| `/forecast` | `/progress/forecast` |
-
 Activity is normally opened as a shell-owned drawer over the current surface. The `/actions` route remains available for compatibility and direct entry.
 
 ---

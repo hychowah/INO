@@ -23,16 +23,16 @@ export function resolveBackendHref(path: string, locationLike: LocationLike = wi
 
 export function resolvePreferredNavHref(activePath: string, itemHref: string) {
   if (itemHref === '/knowledge') {
-    if (activePath === '/concepts' || activePath === '/knowledge/concepts') {
+    if (activePath === '/knowledge/concepts') {
       return '/knowledge/concepts';
     }
-    if (activePath === '/graph' || activePath === '/knowledge/graph') {
+    if (activePath === '/knowledge/graph') {
       return '/knowledge/graph';
     }
     return '/knowledge';
   }
 
-  if (itemHref === '/progress' && (activePath === '/forecast' || activePath === '/progress/forecast')) {
+  if (itemHref === '/progress' && activePath === '/progress/forecast') {
     return '/progress/forecast';
   }
 
@@ -59,14 +59,14 @@ export const primaryNavItems: readonly AppNavItem[] = [
     href: '/knowledge',
     icon: BookMarked,
     description: 'Topics, concepts, and graph exploration.',
-    matches: ['/knowledge', '/topics', '/topic', '/concepts', '/concept', '/graph'],
+    matches: ['/knowledge', '/topic', '/concept'],
   },
   {
     label: 'Progress',
     href: '/progress',
     icon: TrendingUp,
     description: 'Review history, forecast load, and performance trends.',
-    matches: ['/reviews', '/forecast', '/progress'],
+    matches: ['/progress'],
   },
 ] as const;
 

@@ -43,10 +43,11 @@ async def test_run_due_jobs_persists_success_and_error(test_db):
 
 
 @pytest.mark.anyio
-async def test_run_job_binds_scheduler_user_scope(test_db):
+async def test_run_job_binds_local_scheduler_user_scope(test_db, monkeypatch):
     del test_db
 
     seen = {}
+    monkeypatch.setattr(scheduler.state.config, "LOCAL_USER_ID", "local-runtime-user")
 
     async def runner():
         seen["user"] = state.get_current_user()
@@ -56,7 +57,7 @@ async def test_run_job_binds_scheduler_user_scope(test_db):
     with patch.object(scheduler, "_authorized_user_id", 123456):
         await scheduler._run_job(job, db._parse_datetime("2026-04-22 10:00:00"), owner_label="bot")
 
-    assert seen == {"user": "123456"}
+    assert seen == {"user": "local-runtime-user"}
 
 
 @pytest.mark.anyio

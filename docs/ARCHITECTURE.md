@@ -164,7 +164,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `tests/test_topic_parent_heuristics.py` | ~165 | Topic auto-parenting and candidate-parent heuristic coverage |
 | `tests/test_taxonomy_shadow_rebuild.py` | ~150 | Focused coverage for taxonomy shadow rebuild helpers, replay validation, and structure snapshot exports |
 | **frontend/** | | |
-| `frontend/src/routes.tsx` | — | React Router entry point — owns nested shell routes for `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/actions`, detail routes, and legacy redirects; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |
+| `frontend/src/routes.tsx` | — | React Router entry point — owns nested shell routes for `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/actions`, and detail routes; `GraphPage` is lazy-loaded via `React.lazy` + `Suspense` |
 | `frontend/src/App.tsx` | — | Compatibility re-export for the chat page plus `resolveBackendHref()` |
 | `frontend/src/components/AppShell.tsx` | — | Router-owned shell wrapper — hosts the Activity drawer, Command palette, and routed content outlet |
 | `frontend/src/components/AppLayout.tsx` | — | Presentational desktop shell — sidebar, header, badges, and bounded content regions |
@@ -443,9 +443,6 @@ FastAPI serves the built React SPA for any HTML request outside the reserved pre
    ├── /topic/{id}              → Standalone topic detail compatibility route
    ├── /concept/{id}            → Standalone concept detail compatibility route
    ├── /actions                 → Standalone Activity compatibility route
-   ├── /topics, /concepts,
-   │   /graph, /reviews,
-   │   /forecast                → SPA compatibility redirects
       ├── /api/chat                → JSON chat endpoint
       ├── /api/chat/stream         → SSE chat endpoint
       ├── /api/chat/confirm        → Confirm pending action

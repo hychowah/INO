@@ -352,15 +352,7 @@ async def review_command(ctx):
                     )
                 cid = quiz.concept_id
                 response = quiz.message
-                assess_meta = None
-
-                if quiz.action_data and quiz.action_data.get("action", "").lower().strip() == "assess":
-                    params = quiz.action_data.get("params", {})
-                    if params.get("quality") is not None:
-                        assess_meta = {
-                            "concept_id": params.get("concept_id", cid),
-                            "quality": params["quality"],
-                        }
+                assess_meta = quiz.assess_meta()
 
         if not review_lines:
             msg = "✅ No concepts to review — add some topics first!"

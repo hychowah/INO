@@ -17,8 +17,6 @@ CHAT_CONFIRMABLE_ACTIONS = frozenset(
     }
 )
 
-WEBUI_CONFIRMABLE_ACTIONS = CHAT_CONFIRMABLE_ACTIONS
-
 
 def execute_lightweight_confirm(action_data: dict, *, source: str) -> tuple[bool, str]:
     action = require_confirmable_action(

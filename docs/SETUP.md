@@ -244,8 +244,6 @@ make build-ui
 # equivalent to: cd frontend && npm run build
 ```
 
-Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain available as SPA compatibility redirects after the build is served by FastAPI.
-
 These same frontend commands are also exercised in `.github/workflows/frontend.yml`, which typechecks the frontend, runs Vitest, installs the Chromium Playwright browser, and runs the browser smoke suite so local validation matches CI.
 
 ### Run Everything at Once

@@ -42,32 +42,17 @@ def _concept_detail_path():
     return f"/concept/{concept_id}"
 
 
-def _topics_path():
-    db.add_topic("Systems")
-    return "/topics"
-
-
-def _concepts_path():
-    db.add_concept("Sorting Networks")
-    return "/concepts"
-
-
-def _graph_path():
-    db.add_concept("Graph Node")
-    return "/graph"
-
-
 PAGE_CASES = [
     ("/", "react dashboard", "dashboard"),
     ("/chat", "react chat", "chat"),
-    ("/reviews", "react reviews", "reviews"),
     (_topic_detail_path, "react topic detail", "topic-detail"),
     (_concept_detail_path, "react concept detail", "concept-detail"),
-    (_topics_path, "react topics", "topics"),
-    (_concepts_path, "react concepts", "concepts"),
-    (_graph_path, "react graph", "graph"),
     ("/actions", "react actions", "actions"),
-    ("/forecast", "react forecast", "forecast"),
+    ("/knowledge", "react knowledge", "knowledge"),
+    ("/knowledge/concepts", "react concepts", "knowledge-concepts"),
+    ("/knowledge/graph", "react graph", "knowledge-graph"),
+    ("/progress", "react reviews", "progress"),
+    ("/progress/forecast", "react forecast", "progress-forecast"),
 ]
 
 
@@ -142,14 +127,3 @@ async def test_forecast_json_endpoint_served_by_fastapi(client):
     data = resp.json()
     assert "overdue_count" in data
     assert "buckets" in data
-
-
-@pytest.mark.anyio
-async def test_legacy_concept_delete_endpoint_served_by_fastapi(client):
-    concept_id = db.add_concept("Delete Me")
-
-    resp = await client.post(f"/api/concept/{concept_id}/delete")
-
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
-    assert db.get_concept(concept_id) is None

@@ -73,7 +73,7 @@ describe('App', () => {
     const devLocation = { protocol: 'http:', hostname: '127.0.0.1', port: '5173' } as Location;
 
     expect(resolveBackendHref('/', devLocation)).toBe('http://127.0.0.1:8080/');
-    expect(resolveBackendHref('/topics', devLocation)).toBe('http://127.0.0.1:8080/topics');
+    expect(resolveBackendHref('/knowledge', devLocation)).toBe('http://127.0.0.1:8080/knowledge');
     expect(resolveBackendHref('/concept/7', devLocation)).toBe('http://127.0.0.1:8080/concept/7');
     expect(resolveBackendHref('/chat', devLocation)).toBe('http://127.0.0.1:8080/chat');
   });
@@ -82,7 +82,7 @@ describe('App', () => {
     const appLocation = { protocol: 'http:', hostname: '127.0.0.1', port: '8080' } as Location;
 
     expect(resolveBackendHref('/', appLocation)).toBe('/');
-    expect(resolveBackendHref('/topics', appLocation)).toBe('/topics');
+    expect(resolveBackendHref('/knowledge', appLocation)).toBe('/knowledge');
   });
 
   it('persists a pending confirmation and blocks normal messages until resolved', async () => {

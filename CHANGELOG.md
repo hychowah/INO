@@ -18,6 +18,7 @@ Key changes, newest first.
 
 ### Refactored
 
+- **Canonical SPA routes only** — retired the legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` browser aliases so the React router, nav matching, and route docs now align on one canonical browser route set
 - **Shared chat entry ownership** — FastAPI chat, confirm, decline, and structured chat-action flows now serialize inside `services/chat_session.py`; interactive turn setup is centralized in `services/state.begin_interactive_turn()` instead of duplicated across adapters
 - **Lightweight approval parity** — `add_concept` and `suggest_topic` confirmation/decline side effects are now shared in `services/chat_actions.py` across browser/API chat, Discord views, and reply-based Discord confirms
 - **Scheduler review-policy narrowing** — canonical single-concept review payload construction now lives in `services/pipeline.py`, while reminder cooldown/expiry decisions moved into `services/review_state.py`
@@ -74,7 +75,7 @@ Key changes, newest first.
 - **Stable isolated taxonomy sessions** in `services/pipeline.py` — taxonomy-mode reuses one isolated LLM session across the action loop
 - **`call_action_loop()`** in `services/pipeline.py` — generic LLM action loop shared by maintenance and taxonomy
 - **`[quiz_anchor]` debug logs** — trace lines in `context.py`, `tools_assess.py`, and `pipeline.py`; visible at `LOG_LEVEL=DEBUG`
-- **Web UI chat interface** (`webui/chat_backend.py`, `webui/pages/chat.py`, `/chat` route) — in-process chat backend that runs alongside the Web UI without requiring a separate FastAPI server; parallels the REST `/api/chat`, `/api/chat/confirm`, and `/api/chat/decline` flows via `handle_webui_message`, `confirm_webui_action`, and `decline_webui_action` (uses a distinct `WEBUI_CONFIRMABLE_ACTIONS` whitelist)
+- **Web UI chat interface** (`webui/chat_backend.py`, `webui/pages/chat.py`, `/chat` route) — historical in-process browser chat flow that previously paralleled the REST `/api/chat`, `/api/chat/confirm`, and `/api/chat/decline` surface; the runtime has since been retired and the temporary compatibility aliases/whitelist were removed during the architecture simplification reset
 - Parallel pytest: `pytest-xdist[psutil]>=3.0`, `-n 4 --dist loadfile` default, `make test-fast` target
 
 ### Fixed

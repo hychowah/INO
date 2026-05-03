@@ -79,10 +79,10 @@ async def _handle_user_message(
             if result.pending_action:
                 action_name = result.pending_action.get("action", "").lower().strip()
                 logger.info(f"Intercepted {action_name} — pending user confirmation")
-                return result.message, result.pending_action, None, None
+                return result.to_discord_result()
 
             logger.info(f"Completed: '{text[:50]}' → {result.msg_type}")
-            return result.message, None, result.assess_meta, result.quiz_meta
+            return result.to_discord_result()
 
 
 def _record_pending_confirmation(text: str, display_msg: str) -> None:

@@ -39,7 +39,7 @@ describe('AppRouter', () => {
     window.sessionStorage.clear();
   });
 
-  it('redirects legacy knowledge and progress aliases to the canonical consolidated routes', async () => {
+  it('renders canonical consolidated routes for knowledge and progress surfaces', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       switch (String(input)) {
         case '/api/reviews?limit=50':
@@ -75,7 +75,7 @@ describe('AppRouter', () => {
       }
     });
 
-    window.history.replaceState({}, '', '/graph');
+    window.history.replaceState({}, '', '/knowledge/graph');
     const { unmount } = render(<AppRouter />);
 
     expect(await screen.findByRole('heading', { name: 'Knowledge explorer' })).toBeInTheDocument();
@@ -84,12 +84,42 @@ describe('AppRouter', () => {
     });
     unmount();
 
-    window.history.replaceState({}, '', '/reviews');
+    window.history.replaceState({}, '', '/progress');
     render(<AppRouter />);
 
     expect(await screen.findByRole('heading', { name: 'Review performance' })).toBeInTheDocument();
     await waitFor(() => {
       expect(window.location.pathname).toBe('/progress');
+    });
+  });
+
+  it('drops unsupported legacy aliases onto the dashboard route', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      switch (String(input)) {
+        case '/api/stats':
+          return jsonResponse({
+            due_count: 0,
+            due_today: 0,
+            reviews_last_7d: 0,
+            avg_mastery: 0,
+            total_concepts: 0,
+            total_reviews: 0,
+          });
+        case '/api/due?limit=10':
+          return jsonResponse([]);
+        case '/api/activity?limit=10':
+          return jsonResponse([]);
+        default:
+          throw new Error(`Unexpected fetch: ${String(input)}`);
+      }
+    });
+
+    window.history.replaceState({}, '', '/graph');
+    render(<AppRouter />);
+
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/');
     });
   });
 });

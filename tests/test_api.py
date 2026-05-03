@@ -274,7 +274,7 @@ class TestChat:
             return ["✅ `link_topics` — moved node"]
 
         with patch(
-            "services.chat_session.pipeline.execute_approved_actions",
+            "services.chat_admin.pipeline.execute_approved_actions",
             new=AsyncMock(side_effect=fake_execute),
         ):
             resp = await client.post(
