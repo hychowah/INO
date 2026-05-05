@@ -66,8 +66,13 @@ async def _heartbeat():
 
 @bot.event
 async def on_disconnect():
-    scheduler.stop()
-    logger.info("[SCHEDULER] Background loops stopped")
+    logger.warning("[SCHEDULER] Gateway disconnected; keeping background loops intact")
+
+
+@bot.event
+async def on_resumed():
+    scheduler.start(bot, config.AUTHORIZED_USER_ID, owner_label="bot")
+    logger.info("[SCHEDULER] Gateway resumed; background loops ensured")
 
 
 @bot.event

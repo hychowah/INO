@@ -7,6 +7,7 @@ import pytest
 
 import db
 from services import scheduler, state
+from services.review_state import register_interactive_review_delivery
 
 
 def _set_pending_review(concept_id: int, reminder_count: int = 0, *, hours_ago: int = 5):
@@ -60,6 +61,40 @@ async def test_check_reviews_resends_after_two_hours_when_unanswered(test_db):
             await scheduler._check_reviews()
 
         reminder_mock.assert_awaited_once()
+        payload_mock.assert_not_called()
+    finally:
+        state.last_activity_at = original_last_activity
+
+
+@pytest.mark.anyio
+async def test_check_reviews_reminds_after_unanswered_interactive_delivery(test_db):
+    concept_id = db.add_concept("Interactive Pending Concept", "Desc")
+    question = "What advantages does LCEL have here?"
+    register_interactive_review_delivery(concept_id, question)
+
+    sent_at = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    db.upsert_scheduled_review_reminder(
+        concept_id,
+        question,
+        first_sent_at=sent_at,
+        last_sent_at=sent_at,
+        reminder_count=0,
+    )
+
+    original_last_activity = state.last_activity_at
+    state.last_activity_at = None
+
+    try:
+        with (
+            patch("services.scheduler._send_review_reminder", new=AsyncMock()) as reminder_mock,
+            patch("services.scheduler._get_scheduled_review_payload") as payload_mock,
+        ):
+            await scheduler._check_reviews()
+
+        reminder_mock.assert_awaited_once()
+        reminder = reminder_mock.await_args.args[0]
+        assert reminder["concept_id"] == concept_id
+        assert reminder["question"] == question
         payload_mock.assert_not_called()
     finally:
         state.last_activity_at = original_last_activity

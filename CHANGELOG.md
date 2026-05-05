@@ -27,6 +27,7 @@ Key changes, newest first.
 
 ### Fixed
 
+- **Discord reconnect-safe scheduler lifecycle** — transient Discord gateway disconnects no longer stop the bot-owned scheduler; `on_resumed` now defensively re-ensures scheduler startup so scheduled review delivery survives websocket resumes
 - **Scoped provider session leakage** — runtime provider conversation sessions are now keyed by current user instead of one process-global cache
 - **Browser/API skip user mismatch** — the shared `skip_quiz` action path now uses the current scoped user rather than the adapter display author
 - **Plain Discord message user-scope mismatch** — ordinary `on_message` replies now use the same `LEARN_LOCAL_USER_ID` scope as scheduler and slash-command review state, preventing live review answers from missing their active quiz context

@@ -504,7 +504,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 - Maintenance, taxonomy, dedup, backup, and proposal cleanup run through the shared owner lock and can be hosted by either `bot.py` or `api.py`.
 - Scheduled review resend policy is durable: unresolved reminders survive restarts, resend after `REVIEW_NAG_COOLDOWN_HOURS`, respect UTC+8 quiet hours, and resolve explicitly on answer/skip/expiry instead of relying on transient process memory.
 - Recent user activity is now durable enough for scheduler suppression because the reminder check reads the session heartbeat maintained by `services.state.mark_user_activity()`.
-- `scheduler.stop()` releases the owner row before cancelling tasks so FastAPI lifespan shutdown and Discord reconnects do not strand ownership.
+- `scheduler.stop()` still releases the owner row before cancelling tasks for true process shutdown paths, but Discord gateway reconnects no longer call it; the bot keeps scheduler tasks intact on `on_disconnect` and idempotently re-ensures them on `on_resumed`.
 - Backup is no longer piggybacked on maintenance cadence; it runs independently on its own interval.
 
 **Affected files:** `services/scheduler.py`, `services/state.py`, `services/review_state.py`, `db/review_reminders.py`, `db/core.py`, `db/migrations.py`.

@@ -50,3 +50,25 @@ async def test_on_ready_initializes_databases_before_scheduler_start(tmp_path):
 
     assert calls[:2] == ["init", "start"]
     fake_tree.sync.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_on_disconnect_keeps_scheduler_running():
+    with patch.object(bot_events.scheduler, "stop") as stop_mock:
+        await bot_events.on_disconnect()
+
+    stop_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_on_resumed_ensures_scheduler_running():
+    fake_bot = MagicMock()
+
+    with (
+        patch.object(bot_events, "bot", fake_bot),
+        patch.object(bot_events.config, "AUTHORIZED_USER_ID", 999),
+        patch.object(bot_events.scheduler, "start") as start_mock,
+    ):
+        await bot_events.on_resumed()
+
+    start_mock.assert_called_once_with(fake_bot, 999, owner_label="bot")
