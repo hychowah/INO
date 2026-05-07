@@ -128,7 +128,7 @@ export function AppLayout({ active, children, activityDrawerOpen = false, onOpen
               ) : null}
               <div className="hidden items-center gap-2 lg:flex">
               <Badge variant="outline">FastAPI + Vite</Badge>
-              <Badge variant="muted">Legacy routes preserved</Badge>
+              <Badge variant="muted">Canonical routes only</Badge>
               </div>
             </div>
           </header>

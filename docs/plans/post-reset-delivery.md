@@ -18,7 +18,7 @@ Turn the completed architecture simplification reset into a stable, documented, 
 | ID | Outcome |
 |---|---|
 | S1 | The post-reset ownership seams are fully reflected in the docs that own those facts |
-| S2 | One repeatable post-reset validation matrix exists for backend, frontend, and shared chat flows |
+| S2 | One repeatable post-reset validation matrix exists for backend, frontend, and shared chat flows, with deterministic gates separated from advisory live smoke |
 | S3 | Remaining dead residue and compatibility bridges are either removed or explicitly documented as intentional |
 | S4 | The simplify branch has a merge-ready checklist with no ambiguity about what still blocks integration |
 
@@ -36,8 +36,8 @@ Turn the completed architecture simplification reset into a stable, documented, 
 | Stream | Scope | Deliverables | Exit signal |
 |---|---|---|---|
 | W1. Documentation Reconciliation | Align docs with the shipped post-reset ownership seams | Updates to `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/index.md`, `docs/DOC_INDEX.md`, `CODING.md`, and `CHANGELOG.md` only where the reset changed ownership or operator behavior | No stale docs still describe pre-reset owners, aliases, or duplicate adapter logic |
-| W2. Validation Matrix | Turn the reset's focused regressions into a repeatable post-reset check suite | A documented narrow command matrix for backend, frontend, and chat-flow coverage; optional harness transcript guidance where it adds signal | A contributor can run the matrix without reconstructing the reset history |
-| W3. Residue Retirement | Remove or formally classify remaining dead paths and compatibility bridges | Targeted cleanup of obsolete code or docs, plus DEVNOTES entries for intentional carry-forward debt | No high-confidence dead residue remains in the shared chat, review, scheduler, or approval paths |
+| W2. Validation Matrix | Turn the reset's focused regressions into a repeatable post-reset check suite | A documented narrow command matrix for backend and frontend deterministic gates, plus advisory harness guidance for real chat-flow smoke | A contributor can run the matrix without reconstructing the reset history or confusing advisory smoke with merge gates |
+| W3. Residue Retirement | Remove or formally classify remaining dead paths and compatibility bridges | Targeted cleanup of obsolete code or docs, including the contradictory frontend route-alias residue, plus DEVNOTES entries for intentional carry-forward debt | No high-confidence dead residue remains in the shared chat, review, scheduler, approval, or post-reset browser route surfaces |
 | W4. Merge Readiness | Close the loop from refactor branch to safe integration | A blocker list, explicit merge criteria, and final verification notes | The branch can be evaluated for merge on current evidence rather than on tribal knowledge |
 
 ## Milestone Order

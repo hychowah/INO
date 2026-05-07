@@ -7,7 +7,7 @@ function json(body: unknown) {
   };
 }
 
-test('legacy concepts alias renders the consolidated concepts view and filters by topic', async ({ page }) => {
+test('canonical concepts route renders the consolidated concepts view and filters by topic', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -74,7 +74,7 @@ test('legacy concepts alias renders the consolidated concepts view and filters b
     }
   });
 
-  await page.goto('/concepts');
+  await page.goto('/knowledge/concepts');
 
   await expect(page).toHaveURL(/\/knowledge\/concepts$/);
   await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();
@@ -89,7 +89,7 @@ test('legacy concepts alias renders the consolidated concepts view and filters b
   await expect(page.getByRole('button', { name: 'Type Inference' })).toHaveCount(0);
 });
 
-test('legacy graph alias renders the consolidated graph view and refetches when topic filter changes', async ({ page }) => {
+test('canonical graph route renders the consolidated graph view and refetches when topic filter changes', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -138,7 +138,7 @@ test('legacy graph alias renders the consolidated graph view and refetches when 
     }
   });
 
-  await page.goto('/graph');
+  await page.goto('/knowledge/graph');
 
   await expect(page).toHaveURL(/\/knowledge\/graph$/);
   await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();

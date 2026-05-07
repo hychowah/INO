@@ -125,7 +125,7 @@ function TopicDetailContent({ topic, topicMap, embedded = false, onSelectTopic }
             {embedded ? (
               <span className="text-slate-300">Topics</span>
             ) : (
-              <Link className="transition-colors hover:text-slate-200" to="/topics">Topics</Link>
+              <Link className="transition-colors hover:text-slate-200" to="/knowledge">Topics</Link>
             )}
             {trail.map((ancestor) => (
               <span key={ancestor.id} className="flex items-center gap-2">

@@ -7,7 +7,7 @@ function json(body: unknown) {
   };
 }
 
-test('legacy reviews alias renders progress and links through to concept detail', async ({ page }) => {
+test('progress route renders review history and links through to concept detail', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -72,7 +72,7 @@ test('legacy reviews alias renders progress and links through to concept detail'
     }
   });
 
-  await page.goto('/reviews');
+  await page.goto('/progress');
 
   await expect(page).toHaveURL(/\/progress$/);
   await expect(page.getByRole('heading', { name: 'Review performance' })).toBeVisible();
@@ -86,7 +86,7 @@ test('legacy reviews alias renders progress and links through to concept detail'
   await expect(page.getByRole('link', { name: 'Ownership' })).toBeVisible();
 });
 
-test('legacy topics alias renders the consolidated topic explorer and navigates into topic detail', async ({ page }) => {
+test('knowledge route renders the consolidated topic explorer and navigates into topic detail', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
 
@@ -155,7 +155,7 @@ test('legacy topics alias renders the consolidated topic explorer and navigates 
     }
   });
 
-  await page.goto('/topics');
+  await page.goto('/knowledge');
 
   await expect(page).toHaveURL(/\/knowledge$/);
   await expect(page.getByRole('heading', { name: 'Knowledge explorer' })).toBeVisible();

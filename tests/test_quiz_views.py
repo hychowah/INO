@@ -130,6 +130,33 @@ class TestQuizResponseViewDelivery:
         assert sent["content"] == "No skip quiz\n\n📖 **No Skip Quiz** · Score: 0/100 · Review #4"
         assert sent["view"] is None
 
+    def test_send_quiz_response_clears_stale_quiz_answered_for_next_skip(self, test_db):
+        """Delegated follow-up quiz delivery must clear stale answered state before reattaching skip."""
+        from services.tools_assess import skip_quiz
+
+        cid = db.add_concept("Fresh Skip Quiz", "Desc")
+        db.update_concept(cid, review_count=3)
+        db.set_session("quiz_answered", "1")
+        db.set_session("active_concept_id", str(cid))
+        db.set_session("quiz_anchor_concept_id", str(cid))
+        db.set_session("last_quiz_question", "What do you remember?")
+
+        interaction = _MockInteraction()
+
+        async def _send():
+            await quiz_views._send_quiz_response(
+                interaction,
+                "Fresh skip quiz",
+                lambda *_args: None,
+                quiz_meta={"concept_id": cid, "show_skip": True},
+            )
+
+        asyncio.run(_send())
+
+        assert db.get_session("quiz_answered") is None
+        result = skip_quiz(cid)
+        assert "error" not in result
+
 
 class TestQuizNavigationButtonMetadata:
     """Test that navigation buttons pass quiz_meta through to the sender helper."""

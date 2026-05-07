@@ -19,10 +19,10 @@ const GraphExplorerView = lazy(async () => {
 type KnowledgeTab = 'topics' | 'concepts' | 'graph';
 
 function resolveKnowledgeTab(pathname: string): KnowledgeTab {
-  if (pathname === '/knowledge/concepts' || pathname === '/concepts') {
+  if (pathname === '/knowledge/concepts') {
     return 'concepts';
   }
-  if (pathname === '/knowledge/graph' || pathname === '/graph') {
+  if (pathname === '/knowledge/graph') {
     return 'graph';
   }
   return 'topics';
@@ -119,7 +119,7 @@ export function KnowledgePage() {
         aside={
           <>
             <Badge variant="outline">Topics + concepts + graph</Badge>
-            <Badge variant="muted">Legacy routes still supported</Badge>
+            <Badge variant="muted">Canonical routes only</Badge>
           </>
         }
       />

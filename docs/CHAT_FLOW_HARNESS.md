@@ -36,6 +36,12 @@ python scripts/test_chat_flow.py \
   --answer "for Company X inside that sector, use local search on the relevant nodes"
 ```
 
+Post-reset delivery usage:
+- Treat the harness as advisory operator smoke for the post-reset delivery plan, not as a deterministic merge gate.
+- Prefer sandbox mode for normal validation runs; only use `--live-db` when you explicitly need to observe live persistence effects.
+- Pair one harness transcript with the deterministic pytest or frontend matrix when you want extra confidence that the real provider still produces acceptable follow-up behavior through `services.chat_session`.
+- Add `--show-history` for post-reset verification runs so the quiz or reminder state is visible alongside the transcript.
+
 That gives you a turn-by-turn trace showing:
 - the generated review question
 - the assistant's response to each synthetic answer

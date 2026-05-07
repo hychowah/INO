@@ -671,54 +671,26 @@ async def _send_quiz_response(
     if not response or not response.strip():
         response = "✅ No concepts due right now!"
 
-    if quiz_meta is not None:
-        quiz_cid = quiz_meta.get("concept_id")
-        if quiz_cid is not None and quiz_meta.get("show_skip"):
-            concept = db.get_concept(int(quiz_cid))
-            if should_show_quiz_skip_button(concept):
-                meta = format_quiz_metadata(concept)
-                meta_suffix = f"\n\n{meta}" if meta else ""
-                view = QuizQuestionView(
-                    concept_id=int(quiz_cid),
-                    message_handler=message_handler,
-                    show_skip=True,
-                )
-                await interaction.followup.send(truncate_for_discord(response + meta_suffix), view=view)
-                register_interactive_review_delivery(int(quiz_cid), response)
-                return
-            meta = format_quiz_metadata(concept)
-            meta_suffix = f"\n\n{meta}" if meta else ""
-            await interaction.followup.send(truncate_for_discord(response + meta_suffix))
-            register_interactive_review_delivery(int(quiz_cid), response)
-            return
+    from bot.messages import _send_quiz_prompt
 
+    normalized_meta = dict(quiz_meta) if quiz_meta is not None else {}
+    quiz_cid = normalized_meta.get("concept_id")
+    if quiz_cid is None:
+        fallback_quiz_cid = db.get_session("quiz_anchor_concept_id")
+        if fallback_quiz_cid is not None:
+            quiz_cid = int(fallback_quiz_cid)
+
+    if quiz_meta is not None or quiz_cid is not None:
+        await _send_quiz_prompt(
+            interaction.followup.send,
+            response,
+            int(quiz_cid) if quiz_cid is not None else None,
+            message_handler,
+            heading=normalized_meta.get("heading"),
+            show_skip=normalized_meta.get("show_skip"),
+        )
         if quiz_cid is not None:
-            concept = db.get_concept(int(quiz_cid))
-            meta = format_quiz_metadata(concept)
-            meta_suffix = f"\n\n{meta}" if meta else ""
-        else:
-            meta_suffix = ""
-        await interaction.followup.send(truncate_for_discord(response + meta_suffix))
-        return
-
-    quiz_cid = db.get_session("quiz_anchor_concept_id")
-    if quiz_cid:
-        concept = db.get_concept(int(quiz_cid))
-        if should_show_quiz_skip_button(concept):
-            meta = format_quiz_metadata(concept)
-            meta_suffix = f"\n\n{meta}" if meta else ""
-            view = QuizQuestionView(
-                concept_id=int(quiz_cid),
-                message_handler=message_handler,
-                show_skip=True,
-            )
-            await interaction.followup.send(truncate_for_discord(response + meta_suffix), view=view)
-            register_interactive_review_delivery(int(quiz_cid), response)
-            return
-        meta = format_quiz_metadata(concept)
-        meta_suffix = f"\n\n{meta}" if meta else ""
-        await interaction.followup.send(truncate_for_discord(response + meta_suffix))
-        register_interactive_review_delivery(int(quiz_cid), response)
+            register_interactive_review_delivery(int(quiz_cid), response.strip())
         return
 
     await interaction.followup.send(truncate_for_discord(response))

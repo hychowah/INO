@@ -209,7 +209,7 @@ describe('KnowledgePage', () => {
     expect(await screen.findByRole('heading', { name: 'Rust Ownership' })).toBeInTheDocument();
   });
 
-  it('renders the graph tab on the legacy /graph alias', async () => {
+  it('renders the graph tab on the canonical /knowledge/graph route', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       switch (String(input)) {
         case '/api/graph?max_nodes=500':
@@ -232,7 +232,7 @@ describe('KnowledgePage', () => {
       }
     });
 
-    renderKnowledgePage('/graph');
+    renderKnowledgePage('/knowledge/graph');
 
     expect(await screen.findByRole('heading', { name: 'Filters' })).toBeInTheDocument();
     await waitFor(() => {

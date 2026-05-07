@@ -51,7 +51,7 @@ function masteryTone(avgMastery: number) {
 export function ProgressPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const currentTab = location.pathname === '/forecast' || location.pathname === '/progress/forecast' ? 'forecast' : 'reviews';
+  const currentTab = location.pathname === '/progress/forecast' ? 'forecast' : 'reviews';
   const [range, setRange] = useState<'days' | 'weeks' | 'months'>('weeks');
   const [selectedBucket, setSelectedBucket] = useState<string>('overdue');
 
@@ -97,7 +97,7 @@ export function ProgressPage() {
           aside={
             <>
               <Badge variant="outline">Reviews + forecast</Badge>
-              <Badge variant="muted">Legacy routes still supported</Badge>
+              <Badge variant="muted">Canonical routes only</Badge>
             </>
           }
         />
