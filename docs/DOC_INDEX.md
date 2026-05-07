@@ -49,12 +49,17 @@ Do not edit these casually — every word affects bot behaviour.
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `docs/CHAT_FLOW_HARNESS.md` | Manual operator guide for the scripted real-pipeline conversation harness (`scripts/test_chat_flow.py`) |
 | `CHANGELOG.md` | Key changes, newest first |
+| `docs/plans/post-reset-delivery.md` | Active master plan for post-reset stabilization and merge readiness |
+| `docs/plans/post-reset-delivery-progress.md` | Active tracker for the post-reset delivery plan |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds — preview vs apply, aggressive vs conservative, rollback, Windows/OneDrive troubleshooting |
 | `.github/workflows/tests.yml` | Python CI workflow — dependency install, pytest collection guard, full matrix run |
 | `.github/workflows/lint.yml` | Ruff CI workflow |
 | `.github/workflows/frontend.yml` | Frontend CI workflow — typecheck, Vitest, Playwright |
 
-There are currently no active in-repo implementation plan files. Add a new `docs/plans/<feature>.md` entry here only while that plan is still active.
+Active in-repo implementation plan files:
+
+- `docs/plans/post-reset-delivery.md`
+- `docs/plans/post-reset-delivery-progress.md`
 
 ---
 

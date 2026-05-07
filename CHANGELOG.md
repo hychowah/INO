@@ -20,6 +20,7 @@ Key changes, newest first.
 
 - **Canonical SPA routes only** — retired the legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` browser aliases so the React router, nav matching, and route docs now align on one canonical browser route set
 - **Shared chat entry ownership** — FastAPI chat, confirm, decline, and structured chat-action flows now serialize inside `services/chat_session.py`; interactive turn setup is centralized in `services/state.begin_interactive_turn()` instead of duplicated across adapters
+- **Shared adapter delivery seams** — browser/API chat envelopes now originate in `services/chat_payload.py`, maintenance/taxonomy/proposal review packaging now lives in `services/chat_admin.py`, and Discord non-pending sends now funnel through `bot/messages.py`
 - **Lightweight approval parity** — `add_concept` and `suggest_topic` confirmation/decline side effects are now shared in `services/chat_actions.py` across browser/API chat, Discord views, and reply-based Discord confirms
 - **Scheduler review-policy narrowing** — canonical single-concept review payload construction now lives in `services/pipeline.py`, while reminder cooldown/expiry decisions moved into `services/review_state.py`
 - **Typed-only reminder state** — `scheduled_review_reminders` is now the only durable active-review state; the legacy `pending_review` compatibility bridge is retired from delivery, prompt-context, resend, and late-answer recovery paths

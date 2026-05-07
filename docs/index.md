@@ -32,12 +32,17 @@
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **see §7 for pending review tracking and §26 for persisted scheduler/reminder state** |
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |
 | `docs/DOC_STANDARD.md` | Documentation writing and maintenance conventions |
+| `docs/plans/post-reset-delivery.md` | Active master plan for post-reset stabilization, residue cleanup, and merge readiness |
+| `docs/plans/post-reset-delivery-progress.md` | Active progress tracker for the post-reset delivery plan |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds |
 | `.github/workflows/tests.yml` | Python CI matrix and pytest collection guard |
 | `.github/workflows/lint.yml` | Ruff lint/format CI workflow |
 | `.github/workflows/frontend.yml` | Frontend typecheck, Vitest, and Playwright CI workflow |
 
-There are currently no active in-repo plan files. Create a new `docs/plans/<feature>.md` only when a new tracked implementation plan is actually active.
+Active in-repo plan files:
+
+- `docs/plans/post-reset-delivery.md`
+- `docs/plans/post-reset-delivery-progress.md`
 
 ## Skill Sets by Mode
 

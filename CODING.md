@@ -42,6 +42,8 @@ frontend/ (React)  ─┘  ← browser client, proxied to api.py in dev
 
 The runtime LLM (Grok/DeepSeek/OpenAI-compatible providers) is the brain — it decides what to teach, when to quiz, and how to adapt. The code is a thin executor: parse LLM JSON → call DB → return result.
 
+Shared adapter seams introduced by the reset are intentional: `services/learn_turn.py` and `services/review_flow.py` own result DTO shaping, `services/chat_payload.py` owns browser/API chat envelopes, `services/chat_admin.py` owns browser/API maintenance and proposal review packaging, and `bot/messages.py` owns shared Discord non-pending delivery.
+
 Reminder-state rule: scheduled reminder behavior now lives in `db/review_reminders.py` and `services/review_state.py`, with `scheduled_review_reminders` as the sole durable active-review state. Do not add new `pending_review` session writes.
 
 ---
@@ -90,15 +92,20 @@ ROOT
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── action_contracts.py # Lightweight action validation metadata for LLM output contract checks
 │   ├── llm.py             # LLM provider abstraction (OpenAI-compatible chat completions + reasoning provider)
+│   ├── learn_turn.py      # Interactive-turn DTO seam for Discord/browser adapters
+│   ├── review_flow.py     # Shared review-quiz generation + adapter projection helpers
 │   ├── review_state.py    # Shared typed reminder-state owner for recovery, resend cadence, and resolution
 │   ├── scheduler.py       # Background review scheduler + shared background jobs (bot or API host)
 │   ├── backup.py          # Backup service: SQLite + vector store snapshots, retention pruning
 │   ├── state.py           # Shared mutable state (avoids circular imports)
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
+│   ├── chat_payload.py    # Browser/API chat envelope owner (`ChatResponse` payload shaping)
+│   ├── chat_admin.py      # Browser/API maintenance/taxonomy/proposal orchestration helpers
+│   ├── chat_actions.py    # Shared confirm/decline helpers and action whitelists
 │   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
-│   └── chat_session.py    # Shared chat-session controller for FastAPI browser/API routes
+│   └── chat_session.py    # Shared browser/API chat controller; delegates payload shaping/admin review blocks to the seams above
 │
 ├── db/                    # Database layer (SQLite)
 │   ├── core.py            # Connections, init, datetime utils

@@ -1,6 +1,6 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-05-03
+> Last updated: 2026-05-07
 
 ## Overview
 
@@ -92,10 +92,10 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `bot.py` | ~62 | Thin Discord bot entry point wrapper |
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
 | `bot/auth.py` | ~20 | Authorization decorator that gates Discord commands to the configured user |
-| `bot/handler.py` | ~110 | Core message handler — orchestrates pipeline calls and returns `(response, pending_action, assess_meta, quiz_meta)` |
+| `bot/handler.py` | ~110 | Core Discord message handler — delegates interactive turns to `services/learn_turn.py` and returns adapter-ready `(response, pending_action, assess_meta, quiz_meta)` tuples |
 | `bot/commands.py` | ~545 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors); plain-message turns now bind the same local user alias scope as slash commands and scheduler review state |
-| `bot/messages.py` | ~40 | Message splitting and view attachment helpers |
+| `bot/messages.py` | ~120 | Shared Discord delivery helpers — message splitting, review-question delivery, quiz/navigation view attachment, and the unified non-pending sender |
 | `api/app.py` | ~55 | FastAPI app assembly and route registration |
 | `api/auth.py` | ~25 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; optional `X-Learning-User` request scoping falls back to `LEARN_LOCAL_USER_ID`; `/api/health` is always public |
 | `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
@@ -106,9 +106,11 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/review_state.py` | ~120 | Shared typed reminder-state owner for delayed-answer recovery, resend cadence, and reminder resolution |
 | `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
 | `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
-| `services/chat_session.py` | ~460 | Shared chat-session controller used by FastAPI chat routes and the React browser flow; owns chat/confirm/decline/action serialization for those surfaces |
-| `services/learn_turn.py` | ~70 | Interactive-turn adapter that resolves `command` vs `reply` mode before calling the shared pipeline and packages quiz/navigation metadata for adapters |
-| `services/review_flow.py` | ~90 | Shared review-quiz generation helper used by scheduler, Discord `/review`, and shared chat review flows |
+| `services/chat_payload.py` | ~20 | Single owner of browser/API chat envelope shaping and message guarding for `ChatResponse` payloads |
+| `services/chat_admin.py` | ~300 | Shared maintenance, taxonomy, and proposal-review orchestration for browser/API chat actions and review blocks |
+| `services/chat_session.py` | ~430 | Shared browser/API chat controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; delegates payload shaping to `chat_payload` and admin/proposal flows to `chat_admin` |
+| `services/learn_turn.py` | ~95 | Interactive-turn DTO seam — resolves `command` vs `reply`, captures quiz/navigation metadata, and projects one result into Discord or browser/API adapters |
+| `services/review_flow.py` | ~125 | Shared review-quiz generation seam used by scheduler, Discord `/review`, and shared chat review; projects quiz results into browser/API payloads or Discord delivery tuples |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `db/` | ~2715 | Database package — see submodules below |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
@@ -286,12 +288,12 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          └── return "PREFIX: message"
                     │
                     ▼
-  pipeline.process_output(final_result)
-         → (msg_type, message)
-                    │
-                    ▼
-  bot.send_long(ctx, message)
-         → Discord reply to user
+    LearnTurnResult.to_discord_result()
+      → (response, pending_action, assess_meta, quiz_meta)
+            │
+            ▼
+    bot.messages.send_discord_result(...)
+      → Discord reply with chunking, quiz views, or navigation buttons as needed
 ```
 
 ### Flow 2: Scheduled review check (every 15 minutes, bot-owned)
@@ -347,10 +349,11 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   └────────────────────────────────────────────────────────────┘
          │
          ▼
-    bot.messages.send_review_question(...)
+    bot.messages.send_review_question(..., on_sent=...)
       │
       ├── clears stale `quiz_answered` before a fresh review delivery
       ├── attaches `QuizQuestionView` when skip is eligible
+      ├── registers successful delivery only after the message send boundary
       └── DM user: "📚 Learning Review\n<quiz question>"
 ```
 
@@ -459,9 +462,11 @@ FastAPI serves the built React SPA for any HTML request outside the reserved pre
          └── Most non-chat routes read directly from the db/ package
            (no pipeline, no LLM — pure DB ➜ JSON, plus explicit SPA entry serving)
            Chat and chat-confirmation routes go through
-           services/chat_session.py → pipeline → LLM / action execution,
-           with request-scope identity bound in api/auth.py and outer
-           serialization owned by the shared chat controller rather than the routes
+           services/chat_session.py → pipeline / chat_admin helpers,
+           with request-scope identity bound in api/auth.py,
+           browser/API envelope shaping owned by services/chat_payload.py,
+           and maintenance/taxonomy/proposal review blocks owned by
+           services/chat_admin.py rather than the routes
 ```
 
 ---
@@ -576,7 +581,7 @@ Current product posture is still single-user-first, but the shipped local-first 
 - `bot/auth.py` provides the `@authorized_only()` decorator used to gate commands to the configured Discord user
 - Fast-path commands such as `/due`, `/topics`, `/clear`, `/persona`, `/backup`, and `/ping` avoid the LLM and read config or DB state directly
 - `bot/events.py` routes authorized plain messages through the learning pipeline, tracks durable recent activity, copies the runtime preferences file on startup if needed, starts the scheduler on `on_ready`, and reuses the shared lightweight confirmation helpers for reply-based confirms
-- `bot/messages.py` and `services/views.py` handle Discord-safe chunking plus persistent button views for confirmations, quiz navigation, and preference edits
+- `bot/messages.py` owns the shared non-pending Discord sender and review-question delivery seam, while `services/views.py` owns the persistent button views those sends attach
 - Interactive bot entry points serialize through the shared lease-backed turn gateway in `services/state.py`; the same-process lock remains as a local mutex while cross-process exclusivity is enforced durably
 
 ### context.py — Prompt Construction
@@ -647,6 +652,15 @@ The core brain of the system. Coordinates everything:
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
 - `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the shared turn gateway is busy rather than interleave with active chat work
 - `services/chat_actions.py` centralizes confirmation whitelists, history-entry formatting, and lightweight `add_concept` / `suggest_topic` confirm-decline execution shared by browser/API and Discord surfaces
+
+### services/chat_session.py + services/chat_payload.py + services/chat_admin.py — Shared Browser/API Chat
+- `services/chat_session.py` is the single browser/API entry controller for `/api/chat`, `/api/chat/stream`, `/api/chat/confirm`, `/api/chat/decline`, and `/api/chat/action`
+- `services/chat_payload.py` is the single owner of browser/API `ChatResponse` envelope construction, including guarded message text, pending actions, structured action blocks, and `clear_history`
+- `services/chat_admin.py` owns maintenance/taxonomy review-block assembly, proposal-action execution, dedup proposal packaging, and the browser/API-side admin response helpers that used to bloat `chat_session.py`
+
+### services/learn_turn.py + services/review_flow.py — Shared Result DTO Seams
+- `services/learn_turn.py` packages one interactive turn into a `LearnTurnResult` that can project into either Discord delivery tuples or browser/API chat payloads without duplicating adapter formatting logic
+- `services/review_flow.py` packages one review quiz into a `ReviewQuizResult` that can project into either browser/API chat payloads or Discord delivery tuples, while leaving actual delivery and reminder registration to the caller-side transport seam
 
 ### services/review_state.py — Typed Reminder State
 - Centralizes the shared reminder lifecycle helpers on top of `scheduled_review_reminders` as the only active-review reminder state

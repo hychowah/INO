@@ -44,7 +44,7 @@ The command remains registered so operators can re-enable maintenance without re
 Any non-command message in an authorised channel is routed through `_handle_user_message()`, which invokes the full LLM pipeline:
 
 ```
-on_message → _handle_user_message → services/pipeline.py → LLM → tools/actions → response
+on_message → _handle_user_message → services/learn_turn.py → services/pipeline.py → bot.messages.send_discord_result(...)
 ```
 
 ### Quiz UI Behavior
@@ -104,7 +104,7 @@ Only a fixed chat-layer whitelist may be confirmed via this endpoint:
 | `maintenance_review` | Apply maintenance changes from a review block |
 | `taxonomy_review` | Apply taxonomy changes from a review block |
 
-In the normal `/api/chat` flow, the API currently emits `pending_confirm` only for the intercepted actions `add_concept` and `suggest_topic`. The same confirm endpoint also accepts review-style chat payloads for `preference_update`, `maintenance_review`, and `taxonomy_review` because it delegates to the shared chat controller in `services/chat_session.py`.
+In the normal `/api/chat` flow, the API currently emits `pending_confirm` only for the intercepted actions `add_concept` and `suggest_topic`. The same confirm endpoint also accepts review-style chat payloads for `preference_update`, `maintenance_review`, and `taxonomy_review` because it delegates to the shared chat controller in `services/chat_session.py`; browser/API envelope shaping is owned centrally by `services/chat_payload.py`.
 
 Any other action returns HTTP **400**:
 ```json
@@ -213,7 +213,7 @@ Activity is normally opened as a shell-owned drawer over the current surface. Th
 
 ## 4. Chat Routes
 
-The browser UI and other local clients now use the FastAPI routes below on port `8080`. They all delegate to the shared controller in `services/chat_session.py`.
+The browser UI and other local clients now use the FastAPI routes below on port `8080`. They all delegate to the shared controller in `services/chat_session.py`, which in turn uses `services/chat_payload.py` for envelope shaping and `services/chat_admin.py` for maintenance, taxonomy, and proposal review packaging.
 
 | Method | Path | Description |
 |--------|------|-------------|
