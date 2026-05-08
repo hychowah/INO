@@ -54,7 +54,7 @@ on_message → _handle_user_message → services/learn_turn.py → services/pipe
 - The button emphasis adapts to the score: stronger answers promote `Next due`, while weaker answers promote `Explain`.
 - For concepts with `review_count >= 2`, eligible quiz questions can also show an `I know this` button that scores the review as confident recall without requiring a typed answer.
 - Each newly delivered review question clears the previous `quiz_answered` guard before the message is sent, so the next eligible skip button works for the new question while duplicate submit/skip protection still applies to that active quiz.
-- The skip button is a Discord-only UI affordance. It is not a public REST action and is not emitted by the LLM.
+- The skip button is still user-triggered only and is not emitted by the LLM, but it is no longer Discord-only business logic. Browser/API and Discord both dispatch the shared `skip_quiz` chat action, and Discord reconstructs the same quiz UI from returned `actions` blocks.
 
 ### Authentication
 
@@ -91,6 +91,16 @@ Interactive docs are available at `http://localhost:8080/docs` (Swagger UI) and 
 | `POST` | `/api/chat/confirm` | Confirm a chat-layer pending action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted `add_concept` and `suggest_topic` confirmations. |
 | `POST` | `/api/chat/decline` | Decline a chat-layer pending action payload. In the normal conversational flow, `/api/chat` currently emits only intercepted `add_concept` and `suggest_topic` confirmations. |
 | `POST` | `/api/chat/action` | Execute a structured UI action emitted by the chat frontend (button groups, proposal review items, multiple-choice actions). |
+
+Current shared quiz-related action kinds include:
+
+| Action kind | Payload shape | Meaning |
+|---|---|---|
+| `skip_quiz` | `{"kind":"skip_quiz","concept_id":123}` | User-triggered confident recall shortcut for an eligible quiz question |
+| `quiz_followup` | `{"kind":"quiz_followup","followup":"next_due"}` | Move to the next due quiz |
+| `quiz_followup` | `{"kind":"quiz_followup","followup":"quiz_again","concept_id":123}` | Re-quiz the same concept |
+| `quiz_followup` | `{"kind":"quiz_followup","followup":"explain","concept_id":123}` | Ask for an explanation after a weak assessment |
+| `dismiss` | `{"kind":"dismiss"}` | Remove a UI button group without running a backend action |
 
 #### `POST /api/chat/confirm` — confirmable actions
 

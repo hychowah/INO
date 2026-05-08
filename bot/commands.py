@@ -421,16 +421,18 @@ async def preference_command(ctx, *, text: str = ""):
         await ctx.interaction.response.defer(ephemeral=False)
 
     try:
-        async with state.pipeline_serialized():
-            async with ctx.channel.typing():
-                preview_text, proposed_content = await pipeline.call_preference_edit(text)
+        async with ctx.channel.typing():
+            payload = await chat_session.handle_chat_message(
+                f"/preference {text}",
+                author=str(ctx.author),
+                source="discord",
+            )
 
-        view = PreferenceUpdateView(proposed_content, pipeline.execute_preference_update)
-        msg = (
-            "📝 **Proposed preference update**\n\n"
-            f"{preview_text}\n\n"
-            "*Review the change and confirm below.*"
-        )
+        msg = payload.get("message", "")
+        pending_action = payload.get("pending_action")
+        view = None
+        if payload.get("type") == "pending_confirm" and pending_action:
+            view = PreferenceUpdateView(pending_action)
         if is_interaction:
             await ctx.interaction.followup.send(content=msg, view=view)
         else:

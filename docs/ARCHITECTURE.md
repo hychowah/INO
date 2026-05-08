@@ -108,8 +108,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
 | `services/chat_payload.py` | ~20 | Single owner of browser/API chat envelope shaping and message guarding for `ChatResponse` payloads |
 | `services/chat_admin.py` | ~300 | Shared maintenance, taxonomy, and proposal-review orchestration for browser/API chat actions and review blocks |
-| `services/chat_quiz.py` | ~120 | Shared browser/API quiz button derivation for question actions, assess follow-up actions, and chat-side skip navigation |
-| `services/chat_session.py` | ~325 | Shared browser/API chat controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; delegates payload shaping to `chat_payload`, quiz follow-up blocks to `chat_quiz`, and admin/proposal flows to `chat_admin` |
+| `services/chat_quiz.py` | ~120 | Shared quiz action owner for browser/API and Discord: question actions, assess follow-up actions, typed quiz-followup dispatch, skip execution payloads, and Discord quiz-view derivation |
+| `services/chat_session.py` | ~325 | Shared chat/action controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; also reused by thin Discord adapters for confirms and typed quiz follow-up actions |
 | `services/learn_turn.py` | ~95 | Interactive-turn DTO seam — resolves `command` vs `reply`, captures quiz/navigation metadata, and projects one result into Discord or browser/API adapters |
 | `services/review_flow.py` | ~125 | Shared review-quiz generation seam used by scheduler, Discord `/review`, and shared chat review; projects quiz results into browser/API payloads or Discord delivery tuples |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
@@ -652,12 +652,13 @@ The core brain of the system. Coordinates everything:
 - `services/state.py` owns the lease-backed turn gateway, the same-process `PIPELINE_LOCK` mutex, the canonical local-user helper, the shared `begin_interactive_turn()` preamble, recent-activity heartbeat helpers backed by `session_state`, and the ContextVar-backed current-user identity
 - Bot message handling, API chat routes, Discord button/reply confirmation paths, and direct maintenance/taxonomy approval callbacks all serialize through this shared boundary
 - `services/scheduler.py` uses the non-blocking helper so review and any enabled shared jobs skip a cycle when the shared turn gateway is busy rather than interleave with active chat work
-- `services/chat_actions.py` centralizes confirmation whitelists, history-entry formatting, and lightweight `add_concept` / `suggest_topic` confirm-decline execution shared by browser/API and Discord surfaces
+- `services/chat_actions.py` centralizes confirmation whitelists, history-entry formatting, and lightweight `add_concept` / `suggest_topic` confirm-decline execution shared by browser/API and thin Discord adapters
 
-### services/chat_session.py + services/chat_payload.py + services/chat_admin.py — Shared Browser/API Chat
-- `services/chat_session.py` is the single browser/API entry controller for `/api/chat`, `/api/chat/stream`, `/api/chat/confirm`, `/api/chat/decline`, and `/api/chat/action`
+### services/chat_session.py + services/chat_payload.py + services/chat_admin.py — Shared Chat/Action Ownership
+- `services/chat_session.py` is the single shared owner for `/api/chat`, `/api/chat/stream`, `/api/chat/confirm`, `/api/chat/decline`, and `/api/chat/action`, and Discord now reuses the same confirm and typed quiz-action flows through thin adapters
 - `services/chat_payload.py` is the single owner of browser/API `ChatResponse` envelope construction, including guarded message text, pending actions, structured action blocks, and `clear_history`
 - `services/chat_admin.py` owns maintenance/taxonomy review-block assembly, proposal-action execution, dedup proposal packaging, and the browser/API-side admin response helpers that used to bloat `chat_session.py`
+- `bot/messages.py` reconstructs Discord quiz-question and quiz-navigation views from shared `payload.actions`, keeping Discord rendering thin while preserving the existing Discord UI surface
 
 ### services/learn_turn.py + services/review_flow.py — Shared Result DTO Seams
 - `services/learn_turn.py` packages one interactive turn into a `LearnTurnResult` that can project into either Discord delivery tuples or browser/API chat payloads without duplicating adapter formatting logic

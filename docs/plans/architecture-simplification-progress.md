@@ -5,9 +5,9 @@
 | Field | Value |
 |---|---|
 | Overall status | In progress |
-| Active phase | Phase 4 pipeline split, with earlier Phase 3 and Phase 5 slices complete |
-| Current objective | Move prompt-loading and prompt-cache responsibilities out of `services/pipeline.py` while preserving the existing public pipeline surface |
-| Next implementation target | Choose the next coherent `services/pipeline.py` responsibility slice after prompt ownership, likely LLM-call helpers or preference-edit flow |
+| Active phase | Phase 4 pipeline split, after Phase 5 Discord interaction ownership landed in code |
+| Current objective | Choose and execute the next coherent `services/pipeline.py` responsibility extraction without reopening the completed Discord adapter cleanup |
+| Next implementation target | Choose the next coherent `services/pipeline.py` responsibility slice, with LLM-call helpers favored over preference-edit flow |
 
 ## Baseline Metrics
 
@@ -88,7 +88,7 @@
 | 2. Baseline metrics | Completed | Tracker contains area LOC, hotspot LOC, duplication counts, and validation targets | Completed with filtered source-only baseline |
 | 3. Transport flattening | In progress | Confirmed synthetic routes reduced and shared services own command logic | `/maintain`, `/reorganize`, and review request orchestration now use shared direct request entrypoints |
 | 4. Pipeline split | In progress | `services/pipeline.py` responsibilities reduced without behavior drift | Prompt-loading and prompt-cache ownership moved into `services/context.py` |
-| 5. Review and proposal ownership | In progress | Fewer modules participate in the same review and proposal-confirm flows | Confirmed maintenance and taxonomy review execution moved into `services/chat_admin.py` |
+| 5. Review and proposal ownership | In progress | Fewer modules participate in the same review and proposal-confirm flows | Confirmed maintenance and taxonomy review execution moved into `services/chat_admin.py`; Discord lightweight confirms, preference approval, and quiz follow-up dispatch now delegate through shared confirm/chat-action surfaces |
 | 6. Optional subsystem boundaries | Not started | Operator-only and optional concerns are more explicit | |
 | 7. UI hotspot cleanup | Not started | Discord and frontend hotspot files shrink with stable behavior | |
 | 8. Framework fit review | Not started | Keep-both-equal decision revisited using post-refactor metrics | |
@@ -103,6 +103,9 @@
 | Shared proposal-confirm execution | Moved confirmed `maintenance_review` and `taxonomy_review` execution out of `services/chat_session.py` and into `services/chat_admin.py`, with new API regression coverage for both confirm flows |
 | Shared chat quiz-action seam | Extracted browser/API quiz follow-up button derivation from `services/chat_session.py` into `services/chat_quiz.py`, reducing the chat controller hotspot while preserving behavior |
 | Prompt ownership move | Moved skill loading, prompt caching, and system-prompt composition out of `services/pipeline.py` and into `services/context.py`, while preserving the pipeline public surface through compatibility aliases |
+| Shared Discord confirm delegation | Moved Discord button-confirm and reply-confirm execution onto one shared lightweight confirm resolver, and rewired Discord `/preference` approval to use the same pending-confirm contract as chat/API |
+| Shared Discord quiz helper ownership | Moved quiz follow-up prompt construction and skip execution into `services/chat_quiz.py`, with `services/views.py` and `services/chat_session.py` consuming the shared helpers instead of synthesizing prompts or calling `skip_quiz()` directly |
+| Typed quiz follow-up actions | Replaced quiz follow-up pseudo-message dispatch with explicit `quiz_followup` actions, routed Discord quiz buttons through `handle_chat_action()`, and taught `bot/messages.py` to reconstruct Discord quiz views from shared `payload.actions` |
 
 ## Validation Log
 
@@ -114,9 +117,12 @@
 | Shared proposal-confirm execution | `python -m pytest tests/test_api.py -k "confirm_maintenance_review_uses_shared_admin_executor or confirm_taxonomy_review_uses_shared_admin_executor or chat_action_taxonomy_uses_taxonomy_source" -q` passed: 3 passed |
 | Shared chat quiz-action seam | `python -m pytest tests/test_user_context_entrypoints.py -k "chat_action_skip_uses_current_scoped_user" -q` passed: 1 passed; `python -m pytest tests/test_review_fallback.py -k "chat_review_registers_typed_review_reminder" -q` passed: 1 passed |
 | Prompt ownership move | `python -m pytest tests/test_skill_loading.py tests/test_pipeline_sessions.py tests/test_persona.py -q` passed: 33 passed |
+| Shared Discord confirm delegation | `python -m pytest tests/test_user_context_entrypoints.py tests/test_concept_confirm.py tests/test_suggest_topic_confirm.py -q` passed: 40 passed; `python -m pytest tests/test_user_context_entrypoints.py -q` passed: 14 passed |
+| Shared Discord quiz helper ownership | `python -m pytest tests/test_quiz_views.py tests/test_user_context_entrypoints.py -q` passed: 26 passed; `python -m pytest tests/test_messages.py tests/test_review_fallback.py -q` passed: 13 passed |
+| Typed quiz follow-up actions | `python -m pytest tests/test_quiz_views.py tests/test_messages.py tests/test_user_context_entrypoints.py -q` passed: 35 passed; `python -m pytest tests/test_api.py tests/test_review_fallback.py tests/test_proposals.py -q` passed: 106 passed |
 
 ## Next Actions
 
-1. Choose the next `services/pipeline.py` responsibility slice, likely LLM-call helpers or preference-edit flow, using the same narrow extraction approach.
-2. Repay the current +28 runtime LOC increase by consolidating nearby seams instead of only extracting more files.
-3. Reassess whether `services/chat_quiz.py` should remain a stable owner or be merged later once the browser/API chat seams settle.
+1. Resume Phase 4 by choosing the next `services/pipeline.py` responsibility slice, with LLM-call helpers favored now that confirm, preference, and quiz follow-up ownership sit behind shared helpers.
+2. Repay the current +28 runtime LOC increase by deleting obsolete Discord-owned branches or merging temporary seams before the next major slice.
+3. Rebaseline hotspot LOC after the next pipeline slice to verify this Phase 5 cleanup actually reduced adapter-owned behavior rather than only moving code sideways.

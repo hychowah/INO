@@ -590,8 +590,8 @@ class TestChat:
                 "/api/chat/action",
                 json={
                     "action": {
-                        "kind": "send_message",
-                        "message": "[BUTTON] Quiz me on the next due concept",
+                        "kind": "quiz_followup",
+                        "followup": "next_due",
                     }
                 },
             )

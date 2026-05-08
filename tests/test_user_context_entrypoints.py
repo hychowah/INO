@@ -194,6 +194,170 @@ async def test_discord_on_message_uses_local_user_alias():
     }
 
 
+@pytest.mark.anyio
+async def test_discord_reply_confirm_delegates_to_shared_resolver():
+    class _Typing:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    original = SimpleNamespace(content="Pending concept", edit=AsyncMock())
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=events.config.AUTHORIZED_USER_ID, bot=False),
+        content="yes",
+        reference=SimpleNamespace(message_id=321),
+        channel=SimpleNamespace(fetch_message=AsyncMock(return_value=original), typing=lambda: _Typing()),
+        reply=AsyncMock(),
+        add_reaction=AsyncMock(),
+    )
+    view = views.AddConceptConfirmView({"action": "add_concept", "params": {"title": "GIL"}})
+    events._pending_confirmations.clear()
+    events._pending_confirmations[321] = (view.action_data, view)
+
+    with (
+        patch("bot.events.bot.process_commands", new=AsyncMock()),
+        patch("bot.events.resolve_lightweight_confirmation", new=AsyncMock(return_value="✅ Added")) as resolver,
+        patch("bot.events._handle_user_message", new=AsyncMock()),
+    ):
+        await events.on_message(message)
+
+    resolver.assert_awaited_once_with(
+        view.action_data,
+        approve=True,
+        user_id=state.get_local_user_id(),
+    )
+    original.edit.assert_awaited_once()
+    assert original.edit.await_args.kwargs["view"] is view
+    assert original.edit.await_args.kwargs["content"].endswith("✅ Added")
+    message.add_reaction.assert_awaited_once_with("✅")
+    assert view.decided is True
+    assert 321 not in events._pending_confirmations
+
+
+@pytest.mark.anyio
+async def test_discord_reply_decline_delegates_to_shared_resolver():
+    class _Typing:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    original = SimpleNamespace(content="Pending topic", edit=AsyncMock())
+    message = SimpleNamespace(
+        author=SimpleNamespace(id=events.config.AUTHORIZED_USER_ID, bot=False),
+        content="no",
+        reference=SimpleNamespace(message_id=654),
+        channel=SimpleNamespace(fetch_message=AsyncMock(return_value=original), typing=lambda: _Typing()),
+        reply=AsyncMock(),
+        add_reaction=AsyncMock(),
+    )
+    view = views.SuggestTopicConfirmView({"action": "suggest_topic", "params": {"title": "ML"}})
+    events._pending_confirmations.clear()
+    events._pending_confirmations[654] = (view.action_data, view)
+
+    with (
+        patch("bot.events.bot.process_commands", new=AsyncMock()),
+        patch("bot.events.resolve_lightweight_confirmation", new=AsyncMock(return_value=None)) as resolver,
+        patch("bot.events._handle_user_message", new=AsyncMock()),
+    ):
+        await events.on_message(message)
+
+    resolver.assert_awaited_once_with(
+        view.action_data,
+        approve=False,
+        user_id=state.get_local_user_id(),
+    )
+    original.edit.assert_awaited_once_with(view=view)
+    message.add_reaction.assert_awaited_once_with("👍")
+    assert view.decided is True
+    assert 654 not in events._pending_confirmations
+
+
+@pytest.mark.anyio
+async def test_discord_preference_command_uses_shared_pending_confirm():
+    class _Typing:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    author = SimpleNamespace(__str__=lambda self: "test-author")
+    ctx = SimpleNamespace(
+        interaction=None,
+        channel=SimpleNamespace(typing=lambda: _Typing()),
+        author=author,
+        send=AsyncMock(),
+    )
+    pending_action = {
+        "action": "preference_update",
+        "message": "Proposed preference update",
+        "params": {"content": "- Keep replies short."},
+    }
+    payload = {
+        "type": "pending_confirm",
+        "message": "Proposed preference update",
+        "pending_action": pending_action,
+    }
+
+    with patch("bot.commands.chat_session.handle_chat_message", new=AsyncMock(return_value=payload)) as handle_mock:
+        await commands.preference_command.callback(ctx, text="keep replies short")
+
+    handle_mock.assert_awaited_once_with(
+        "/preference keep replies short",
+        author=str(author),
+        source="discord",
+    )
+    ctx.send.assert_awaited_once()
+    assert ctx.send.await_args.kwargs["content"] == "Proposed preference update"
+    view = ctx.send.await_args.kwargs["view"]
+    assert isinstance(view, views.PreferenceUpdateView)
+    assert view.action_data == pending_action
+
+
+@pytest.mark.anyio
+async def test_preference_view_apply_and_reject_delegate_to_shared_chat_confirm():
+    class _Response:
+        def __init__(self):
+            self.edit_message = AsyncMock()
+
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=42),
+        response=_Response(),
+    )
+    action_data = {
+        "action": "preference_update",
+        "message": "Proposed preference update",
+        "params": {"content": "- Keep replies short."},
+    }
+
+    apply_view = views.PreferenceUpdateView(action_data)
+    apply_button = next(child for child in apply_view.children if getattr(child, "label", None) == "Apply")
+    with patch("services.views.confirm_chat_action", new=AsyncMock(return_value={"message": "Preferences updated."})) as confirm_mock:
+        await apply_button.callback(interaction)
+
+    confirm_mock.assert_awaited_once_with(action_data, source="discord")
+    interaction.response.edit_message.assert_awaited_once_with(
+        content="Preferences updated.",
+        view=apply_view,
+    )
+
+    interaction.response.edit_message.reset_mock()
+    reject_view = views.PreferenceUpdateView(action_data)
+    reject_button = next(child for child in reject_view.children if getattr(child, "label", None) == "Reject")
+    with patch("services.views.decline_chat_action", new=AsyncMock(return_value={"message": "Declined."})) as decline_mock:
+        await reject_button.callback(interaction)
+
+    decline_mock.assert_awaited_once_with(action_data, source="discord")
+    interaction.response.edit_message.assert_awaited_once_with(
+        content="Declined.",
+        view=reject_view,
+    )
+
+
 def test_discord_interaction_views_use_local_user_alias():
     interaction = SimpleNamespace(user=SimpleNamespace(id=42))
     assert views._interaction_user_id(interaction) == state.get_local_user_id()
@@ -203,20 +367,20 @@ def test_discord_interaction_views_use_local_user_alias():
 async def test_chat_action_skip_uses_current_scoped_user(test_db):
     captured = {}
 
-    def fake_skip_quiz(concept_id, *, user_id, source):
+    def fake_skip_action(concept_id, *, user_id, source):
         captured["concept_id"] = concept_id
         captured["user_id"] = user_id
         captured["source"] = source
         return {
-            "old_score": 10,
-            "new_score": 20,
-            "interval_days": 3,
+            "message": "⏭️ Skipped — score: 10→20, next review in 3d",
             "concept_id": concept_id,
+            "quality": 5,
+            "actions": [{"type": "button_group", "buttons": []}],
         }
 
     with (
         state.current_user_scope("browser-user-7"),
-        patch("services.chat_session.skip_quiz", side_effect=fake_skip_quiz),
+        patch("services.chat_session.execute_skip_quiz_action", side_effect=fake_skip_action),
     ):
         payload = await chat_session.handle_chat_action(
             {"kind": "skip_quiz", "concept_id": 12},

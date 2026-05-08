@@ -18,7 +18,7 @@ from bot.handler import (
 )
 from bot.messages import send_discord_result, send_long_with_view
 from services import pipeline, scheduler, state
-from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
+from services.chat_actions import resolve_lightweight_confirmation
 from services.formatting import truncate_with_suffix
 from services.views import (
     AddConceptConfirmView,
@@ -125,12 +125,12 @@ async def on_message(message):
                 if _is_affirmative(reply_text):
                     view.decided = True
                     view._disable_all()
-                    async with state.pipeline_serialized():
-                        _success, display_note = execute_lightweight_confirm(
-                            action_data,
-                            source="discord",
-                        )
-                        note = f"\n\n{display_note}"
+                    display_note = await resolve_lightweight_confirmation(
+                        action_data,
+                        approve=True,
+                        user_id=state.get_local_user_id(),
+                    )
+                    note = f"\n\n{display_note}"
                     try:
                         orig = await message.channel.fetch_message(message.reference.message_id)
                         await orig.edit(
@@ -144,8 +144,11 @@ async def on_message(message):
                 elif _is_negative(reply_text):
                     view.decided = True
                     view._disable_all()
-                    async with state.pipeline_serialized():
-                        execute_lightweight_decline(action_data)
+                    await resolve_lightweight_confirmation(
+                        action_data,
+                        approve=False,
+                        user_id=state.get_local_user_id(),
+                    )
                     try:
                         orig = await message.channel.fetch_message(message.reference.message_id)
                         await orig.edit(view=view)

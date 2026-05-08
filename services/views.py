@@ -8,8 +8,9 @@ import discord
 
 import db
 from services import state
-from services.chat_actions import execute_lightweight_confirm, execute_lightweight_decline
-from services.chat_session import handle_chat_action
+from services.chat_actions import resolve_lightweight_confirmation
+from services.chat_quiz import build_quiz_followup_prompt, execute_skip_quiz_action
+from services.chat_session import confirm_chat_action, decline_chat_action, handle_chat_action
 from services.formatting import format_quiz_metadata, truncate_for_discord, truncate_with_suffix
 from services.review_state import get_pending_review, register_interactive_review_delivery
 
@@ -353,13 +354,12 @@ class _LightweightConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                _success, display_note = execute_lightweight_confirm(
-                    self.action_data,
-                    source="discord",
-                )
-                note = f"\n\n{display_note}"
+        display_note = await resolve_lightweight_confirmation(
+            self.action_data,
+            approve=True,
+            user_id=_interaction_user_id(interaction),
+        )
+        note = f"\n\n{display_note}"
 
         try:
             original = interaction.message.content or ""
@@ -376,9 +376,11 @@ class _LightweightConfirmView(discord.ui.View):
         self.decided = True
         self._disable_all()
 
-        with state.current_user_scope(_interaction_user_id(interaction)):
-            async with state.pipeline_serialized():
-                execute_lightweight_decline(self.action_data)
+        await resolve_lightweight_confirmation(
+            self.action_data,
+            approve=False,
+            user_id=_interaction_user_id(interaction),
+        )
 
         try:
             original = interaction.message.content or ""
@@ -475,20 +477,25 @@ class _QuizAgainButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        concept = db.get_concept(self.parent_view.concept_id)
-        title = concept["title"] if concept else f"#{self.parent_view.concept_id}"
-        text = f"[BUTTON] Quiz me again on concept #{self.parent_view.concept_id} ({title})"
-
         try:
-            async with interaction.channel.typing():
-                response, _, _, quiz_meta = await self.parent_view.message_handler(
-                    text, str(interaction.user), user_id=_interaction_user_id(interaction)
-                )
-            await _send_quiz_response(
-                interaction,
-                response,
+            from bot.messages import send_discord_result
+
+            with state.current_user_scope(_interaction_user_id(interaction)):
+                async with interaction.channel.typing():
+                    payload = await handle_chat_action(
+                        {
+                            "kind": "quiz_followup",
+                            "followup": "quiz_again",
+                            "concept_id": self.parent_view.concept_id,
+                        },
+                        author=str(interaction.user),
+                        source="discord",
+                    )
+            await send_discord_result(
+                interaction.followup.send,
+                payload.get("message", ""),
                 self.parent_view.message_handler,
-                quiz_meta=quiz_meta,
+                actions=payload.get("actions"),
             )
         except Exception as e:
             logger.error(f"QuizAgain callback error: {e}", exc_info=True)
@@ -511,22 +518,24 @@ class _QuizNextDueButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        if get_pending_review():
-            await interaction.followup.send("⏳ A scheduled review was just sent — reply to that one first.")
-            self.parent_view.stop()
-            return
-
-        text = "[BUTTON] Quiz me on the next due concept"
         try:
-            async with interaction.channel.typing():
-                response, _, _, quiz_meta = await self.parent_view.message_handler(
-                    text, str(interaction.user), user_id=_interaction_user_id(interaction)
-                )
-            await _send_quiz_response(
-                interaction,
-                response,
+            from bot.messages import send_discord_result
+
+            with state.current_user_scope(_interaction_user_id(interaction)):
+                async with interaction.channel.typing():
+                    payload = await handle_chat_action(
+                        {
+                            "kind": "quiz_followup",
+                            "followup": "next_due",
+                        },
+                        author=str(interaction.user),
+                        source="discord",
+                    )
+            await send_discord_result(
+                interaction.followup.send,
+                payload.get("message", ""),
                 self.parent_view.message_handler,
-                quiz_meta=quiz_meta,
+                actions=payload.get("actions"),
             )
         except Exception as e:
             logger.error(f"QuizNextDue callback error: {e}", exc_info=True)
@@ -549,19 +558,26 @@ class _QuizExplainButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        concept = db.get_concept(self.parent_view.concept_id)
-        title = concept["title"] if concept else f"#{self.parent_view.concept_id}"
-        text = (
-            f"[BUTTON] Explain concept #{self.parent_view.concept_id} ({title}) "
-            f"in detail — I got the quiz wrong and need help understanding it"
-        )
-
         try:
-            async with interaction.channel.typing():
-                response, _, _, _ = await self.parent_view.message_handler(
-                    text, str(interaction.user), user_id=_interaction_user_id(interaction)
-                )
-            await interaction.followup.send(truncate_for_discord(response or "(no explanation generated)"))
+            from bot.messages import send_discord_result
+
+            with state.current_user_scope(_interaction_user_id(interaction)):
+                async with interaction.channel.typing():
+                    payload = await handle_chat_action(
+                        {
+                            "kind": "quiz_followup",
+                            "followup": "explain",
+                            "concept_id": self.parent_view.concept_id,
+                        },
+                        author=str(interaction.user),
+                        source="discord",
+                    )
+            await send_discord_result(
+                interaction.followup.send,
+                payload.get("message", ""),
+                self.parent_view.message_handler,
+                actions=payload.get("actions"),
+            )
         except Exception as e:
             logger.error(f"QuizExplain callback error: {e}", exc_info=True)
             try:
@@ -628,30 +644,25 @@ class _QuizSkipButton(discord.ui.Button):
         self.parent_view._disable_all()
         await interaction.response.edit_message(view=self.parent_view)
 
-        from services.tools_assess import skip_quiz
-
         try:
             with state.current_user_scope(_interaction_user_id(interaction)):
                 async with state.pipeline_serialized():
-                    result = skip_quiz(
+                    result = execute_skip_quiz_action(
                         self.parent_view.concept_id,
                         user_id=_interaction_user_id(interaction),
+                        source="discord",
                     )
                     if "error" in result:
                         await interaction.followup.send(f"⚠️ {result['error']}")
                         self.parent_view.stop()
                         return
                     state.mark_user_activity()
-                    confirmation = (
-                        f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
-                        f"next review in {result['interval_days']}d"
-                    )
                     nav_view = QuizNavigationView(
                         concept_id=result["concept_id"],
-                        quality=5,
+                        quality=result["quality"],
                         message_handler=self.parent_view.message_handler,
                     )
-            await interaction.followup.send(confirmation, view=nav_view)
+            await interaction.followup.send(result["message"], view=nav_view)
         except Exception as e:
             logger.error(f"QuizSkip callback error: {e}", exc_info=True)
             try:
@@ -699,10 +710,9 @@ async def _send_quiz_response(
 class PreferenceUpdateView(discord.ui.View):
     """Apply or reject a preference edit proposal."""
 
-    def __init__(self, proposed_content: str, execute_callback: Callable[..., Awaitable[str]]):
+    def __init__(self, action_data: dict):
         super().__init__(timeout=VIEW_TIMEOUT)
-        self.proposed_content = proposed_content
-        self.execute_callback = execute_callback
+        self.action_data = action_data
         self.decided = False
 
     @discord.ui.button(label="Apply", style=discord.ButtonStyle.success, emoji="✅")
@@ -713,7 +723,8 @@ class PreferenceUpdateView(discord.ui.View):
         self._disable_all()
         try:
             with state.current_user_scope(_interaction_user_id(interaction)):
-                result = await self.execute_callback(self.proposed_content)
+                payload = await confirm_chat_action(self.action_data, source="discord")
+                result = payload.get("message") or "Preferences updated."
         except Exception as e:
             logger.error(f"PreferenceUpdateView apply error: {e}", exc_info=True)
             result = f"⚠️ Failed to update preferences: {e}"
@@ -730,7 +741,10 @@ class PreferenceUpdateView(discord.ui.View):
         self.decided = True
         self._disable_all()
         try:
-            await interaction.response.edit_message(content="Update discarded.", view=self)
+            with state.current_user_scope(_interaction_user_id(interaction)):
+                payload = await decline_chat_action(self.action_data, source="discord")
+                result = payload.get("message") or "Update discarded."
+            await interaction.response.edit_message(content=result, view=self)
         except discord.errors.NotFound:
             pass
         self.stop()

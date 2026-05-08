@@ -6,6 +6,7 @@ import discord
 
 import config
 import db
+from services.chat_quiz import derive_discord_quiz_delivery
 from services.formatting import format_quiz_metadata
 from services.parser import guard_user_message
 from services.review_state import register_interactive_review_delivery
@@ -128,7 +129,11 @@ async def send_discord_result(
     *,
     assess_meta: dict | None = None,
     quiz_meta: dict | None = None,
+    actions: list[dict] | None = None,
 ) -> "discord.Message":
+    if actions and assess_meta is None and quiz_meta is None:
+        assess_meta, quiz_meta = derive_discord_quiz_delivery(actions)
+
     if assess_meta:
         view = QuizNavigationView(
             concept_id=assess_meta["concept_id"],
@@ -145,7 +150,7 @@ async def send_discord_result(
                 quiz_meta.get("concept_id"),
                 message_handler,
             )
-        return await _send_quiz_prompt(
+        sent = await _send_quiz_prompt(
             send_fn,
             response,
             quiz_meta.get("concept_id"),
@@ -153,5 +158,8 @@ async def send_discord_result(
             heading=quiz_meta.get("heading"),
             show_skip=quiz_meta.get("show_skip"),
         )
+        if quiz_meta.get("concept_id") is not None:
+            register_interactive_review_delivery(int(quiz_meta["concept_id"]), response.strip())
+        return sent
 
     return await send_long_with_view(send_fn, response)

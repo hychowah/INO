@@ -6,6 +6,7 @@ import pytest
 
 import db
 from bot.messages import send_discord_result, send_long_with_view, send_review_question
+from services.chat_quiz import build_quiz_navigation_actions
 from services.parser import CONTROLLED_FORMAT_FAILURE_MESSAGE
 from services.tools_assess import skip_quiz
 from services.views import QuizNavigationView, QuizQuestionView
@@ -129,3 +130,56 @@ async def test_send_discord_result_uses_quiz_meta_for_quiz_prompt(test_db):
     assert call.args[0] is send_fn
     assert call.args[1] == "Quiz\nPrompt text\n\n📖 **Quiz Prompt** · Score: 0/100 · Review #4"
     assert isinstance(call.kwargs["view"], QuizQuestionView)
+
+
+@pytest.mark.anyio
+async def test_send_discord_result_derives_navigation_view_from_actions(test_db):
+    cid = db.add_concept("Action Nav", "Desc")
+    send_fn = AsyncMock(return_value=MagicMock())
+
+    async def fake_handler(_text, _author):
+        return "ignored", None, None, None
+
+    await send_discord_result(
+        send_fn,
+        "Assessment complete",
+        fake_handler,
+        actions=build_quiz_navigation_actions(cid, 5),
+    )
+
+    send_fn.assert_awaited_once()
+    assert isinstance(send_fn.await_args.kwargs["view"], QuizNavigationView)
+    assert send_fn.await_args.kwargs["view"].concept_id == cid
+
+
+@pytest.mark.anyio
+async def test_send_discord_result_derives_quiz_prompt_from_skip_action(test_db):
+    cid = db.add_concept("Action Prompt", "Desc")
+    db.update_concept(cid, review_count=3)
+    send_fn = AsyncMock(return_value=MagicMock())
+    mock_send_long_with_view = AsyncMock(return_value=MagicMock())
+
+    async def fake_handler(_text, _author):
+        return "ignored", None, None, None
+
+    with patch("bot.messages.send_long_with_view", new=mock_send_long_with_view):
+        await send_discord_result(
+            send_fn,
+            "Prompt text",
+            fake_handler,
+            actions=[
+                {
+                    "type": "button_group",
+                    "title": "Quiz actions",
+                    "buttons": [
+                        {
+                            "label": "I know this",
+                            "style": "secondary",
+                            "action": {"kind": "skip_quiz", "concept_id": cid},
+                        }
+                    ],
+                }
+            ],
+        )
+
+    assert isinstance(mock_send_long_with_view.await_args.kwargs["view"], QuizQuestionView)

@@ -2,6 +2,7 @@
 
 import db
 
+from services import state
 from services.tools import execute_action, set_action_source
 
 INTERCEPTED_ACTIONS = frozenset({"add_concept", "suggest_topic"})
@@ -52,6 +53,23 @@ def execute_lightweight_decline(action_data: dict) -> None:
         "declined here",
     )
     db.add_chat_message("user", decline_history_entry(action_data))
+
+
+async def resolve_lightweight_confirmation(
+    action_data: dict,
+    *,
+    approve: bool,
+    user_id: str,
+    source: str = "discord",
+) -> str | None:
+    """Execute a Discord lightweight confirm or decline inside the canonical user scope."""
+    with state.current_user_scope(user_id):
+        async with state.pipeline_serialized():
+            if approve:
+                _success, display_note = execute_lightweight_confirm(action_data, source=source)
+                return display_note
+            execute_lightweight_decline(action_data)
+            return None
 
 
 def normalize_action(action_data: dict | str | None) -> str:

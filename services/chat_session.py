@@ -18,18 +18,18 @@ from services.chat_actions import (
 )
 from services.chat_payload import build_chat_payload
 from services.chat_quiz import (
+    build_quiz_followup_prompt,
     build_quiz_navigation_actions,
     build_quiz_question_actions,
     derive_quiz_actions,
+    execute_skip_quiz_action,
 )
 from services.dedup import execute_dedup_merges
 from services.learn_turn import run_learn_turn
 from services.parser import parse_llm_response, process_output
 from services.review_flow import generate_review_quiz_from_payload
-from services.review_state import register_interactive_review_delivery
+from services.review_state import get_pending_review, register_interactive_review_delivery
 from services.tools import execute_action, set_action_source
-from services.tools_assess import skip_quiz
-
 _db_initialized = False
 
 
@@ -375,22 +375,33 @@ async def _handle_chat_action(action: dict, author: str = "chat", source: str = 
             raise ValueError("Action message cannot be empty")
         return await _handle_chat_message(message, author=author, source=source)
 
+    if kind == "quiz_followup":
+        followup = str(action.get("followup", "")).lower().strip()
+        concept_id = action.get("concept_id")
+        if followup == "next_due" and get_pending_review():
+            return build_chat_payload(
+                "⏳ A scheduled review was just sent — reply to that one first."
+            )
+
+        prompt = build_quiz_followup_prompt(followup, int(concept_id) if concept_id is not None else None)
+        return await _handle_chat_message(prompt, author=author, source=source)
+
     if kind == "skip_quiz":
         concept_id = action.get("concept_id")
         if concept_id is None:
             raise ValueError("skip_quiz action requires concept_id")
 
-        result = skip_quiz(int(concept_id), user_id=state.get_current_user(), source=source)
+        result = execute_skip_quiz_action(
+            int(concept_id),
+            user_id=state.get_current_user(),
+            source=source,
+        )
         if "error" in result:
             return build_chat_payload(result["error"], msg_type="error")
 
-        message = (
-            f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
-            f"next review in {result['interval_days']}d"
-        )
         return build_chat_payload(
-            message,
-            actions=build_quiz_navigation_actions(result["concept_id"], 5),
+            result["message"],
+            actions=result["actions"],
         )
 
     admin_result = await chat_admin.handle_proposal_action(action)

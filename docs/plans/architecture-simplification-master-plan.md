@@ -99,8 +99,8 @@ operator workflow, or optional enhancement.
 | 1 | Lock the canonical core boundary | Core path and protected seams are documented and accepted | Not started |
 | 2 | Capture the baseline | Tracker records area LOC, hotspot LOC, duplication counts, and validation targets | Completed |
 | 3 | Flatten transport orchestration | Discord and browser call shared command services directly for the targeted flows | In progress |
-| 4 | Split `services/pipeline.py` by responsibility | Public behavior preserved while internal ownership is cleaner | Not started |
-| 5 | Consolidate review, quiz, and proposal ownership | Shared services own the behavior; transports only render it | Not started |
+| 4 | Split `services/pipeline.py` by responsibility | Public behavior preserved while internal ownership is cleaner | In progress |
+| 5 | Consolidate review, quiz, and proposal ownership | Shared services own the behavior; transports only render it | In progress |
 | 6 | Right-size optional runtime subsystems | Operator-only and optional boundaries are clearer | Not started |
 | 7 | Reduce UI boilerplate and page hotspots | Discord view and browser chat hotspots shrink without behavior loss | Not started |
 | 8 | Reassess framework fit | Keep-both-equal decision is re-evaluated using post-refactor facts | Not started |
@@ -112,6 +112,8 @@ operator workflow, or optional enhancement.
 | Synthetic chat command routes in `bot/commands.py` | First target completed: `/maintain` and `/reorganize` now use direct shared request entrypoints |
 | Duplicate review entry orchestration | Second target completed: shared review request orchestration now lives in `services/chat_session.py`, with the bot projecting the shared result |
 | Confirmed review and proposal execution ownership | Third target completed: confirmed `maintenance_review` and `taxonomy_review` execution now lives in `services/chat_admin.py` instead of `services/chat_session.py` |
+| Discord confirm and preference ownership | Later Phase 5 slices moved reply confirms, button confirms, and `/preference` approval onto shared confirm and pending-action surfaces instead of adapter-owned callbacks |
+| Discord quiz follow-up ownership | Later Phase 5 slices moved skip execution and quiz follow-up dispatch onto shared `chat_quiz` / `chat_session` action owners, with Discord rebuilding quiz views from shared action payloads |
 | Oversized gateway behavior in `services/pipeline.py` | LLM orchestration, fetch loop, contract retry, admin loops, and preference edit all live in one module |
 
 ## Validation Policy

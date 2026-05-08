@@ -307,7 +307,7 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── handler.py          # Core message handler (returns response, pending_action, assess_meta, quiz_meta)
 │   ├── commands.py         # Slash command implementations
 │   ├── events.py           # Discord event handlers
-│   ├── messages.py         # Message splitting and view helpers
+│   ├── messages.py         # Message splitting, Discord quiz-view projection, and shared delivery helpers
 │   └── auth.py             # Authorization helpers
 ├── api.py                  # Thin FastAPI launcher for local development
 ├── api/                    # FastAPI app package
@@ -332,7 +332,8 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 │   ├── embeddings.py       # Sentence-transformers singleton
 │   ├── dedup.py            # Duplicate detection (vector + fuzzy)
 │   ├── backup.py           # Snapshot backup service (DB + vectors)
-│   ├── chat_session.py     # Shared chat-session controller used by FastAPI browser/API routes
+│   ├── chat_session.py     # Shared chat/action controller used by FastAPI browser/API routes and thin Discord adapters
+│   ├── chat_quiz.py        # Shared quiz action owner for browser/API and Discord follow-up/skip flows
 │   └── ...
 ├── db/                     # Database package (SQLite + Qdrant)
 │   ├── core.py             # Connections, schema init

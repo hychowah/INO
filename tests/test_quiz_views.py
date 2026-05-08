@@ -1,7 +1,7 @@
 """Tests for quiz-related Discord views in services.views."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import db
 from services import views as quiz_views
@@ -159,73 +159,94 @@ class TestQuizResponseViewDelivery:
 
 
 class TestQuizNavigationButtonMetadata:
-    """Test that navigation buttons pass quiz_meta through to the sender helper."""
+    """Test that navigation buttons dispatch typed shared actions."""
 
-    def test_quiz_again_button_passes_quiz_meta(self, test_db):
-        """Quiz again must forward fresh quiz metadata to the sender helper."""
+    def test_quiz_again_button_dispatches_shared_action(self, test_db):
         cid = db.add_concept("Quiz Again Concept", "Desc")
         interaction = _MockInteraction()
-        captured = {}
 
         async def message_handler(text, author, user_id=None):
-            captured["handler_text"] = text
-            captured["handler_author"] = author
-            return "Fresh quiz", None, None, {"concept_id": cid, "show_skip": True}
-
-        async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
-            captured["interaction"] = interaction_arg
-            captured["response"] = response
-            captured["message_handler"] = message_handler_arg
-            captured["quiz_meta"] = quiz_meta
+            return "unused", None, None, None
 
         view = quiz_views.QuizNavigationView(cid, 5, message_handler)
         button = _get_button(view, "Quiz again")
 
         async def _click():
-            with patch.object(quiz_views, "_send_quiz_response", new=fake_send):
+            with (
+                patch.object(
+                    quiz_views,
+                    "handle_chat_action",
+                    new=AsyncMock(return_value={"message": "Fresh quiz", "actions": []}),
+                ) as action_mock,
+                patch("bot.messages.send_discord_result", new=AsyncMock()) as send_mock,
+            ):
                 await button.callback(interaction)
+                action_mock.assert_awaited_once_with(
+                    {"kind": "quiz_followup", "followup": "quiz_again", "concept_id": cid},
+                    author="test-user",
+                    source="discord",
+                )
+                send_mock.assert_awaited_once()
 
         asyncio.run(_click())
 
-        assert captured["handler_text"].startswith("[BUTTON] Quiz me again")
-        assert captured["handler_author"] == "test-user"
-        assert captured["interaction"] is interaction
-        assert captured["response"] == "Fresh quiz"
-        assert captured["message_handler"] is message_handler
-        assert captured["quiz_meta"] == {"concept_id": cid, "show_skip": True}
-
-    def test_quiz_next_due_button_passes_quiz_meta(self, test_db):
-        """Next due must forward fresh quiz metadata to the sender helper."""
+    def test_quiz_next_due_button_dispatches_shared_action(self, test_db):
         cid = db.add_concept("Next Due Concept", "Desc")
         interaction = _MockInteraction()
-        captured = {}
 
         async def message_handler(text, author, user_id=None):
-            captured["handler_text"] = text
-            captured["handler_author"] = author
-            return "Due quiz", None, None, {"concept_id": cid, "show_skip": True}
-
-        async def fake_send(interaction_arg, response, message_handler_arg, *, quiz_meta=None):
-            captured["interaction"] = interaction_arg
-            captured["response"] = response
-            captured["message_handler"] = message_handler_arg
-            captured["quiz_meta"] = quiz_meta
+            return "unused", None, None, None
 
         view = quiz_views.QuizNavigationView(cid, 5, message_handler)
         button = _get_button(view, "Next due")
 
         async def _click():
-            with patch.object(quiz_views, "_send_quiz_response", new=fake_send):
+            with (
+                patch.object(
+                    quiz_views,
+                    "handle_chat_action",
+                    new=AsyncMock(return_value={"message": "Due quiz", "actions": []}),
+                ) as action_mock,
+                patch("bot.messages.send_discord_result", new=AsyncMock()) as send_mock,
+            ):
                 await button.callback(interaction)
+                action_mock.assert_awaited_once_with(
+                    {"kind": "quiz_followup", "followup": "next_due"},
+                    author="test-user",
+                    source="discord",
+                )
+                send_mock.assert_awaited_once()
 
         asyncio.run(_click())
 
-        assert captured["handler_text"] == "[BUTTON] Quiz me on the next due concept"
-        assert captured["handler_author"] == "test-user"
-        assert captured["interaction"] is interaction
-        assert captured["response"] == "Due quiz"
-        assert captured["message_handler"] is message_handler
-        assert captured["quiz_meta"] == {"concept_id": cid, "show_skip": True}
+    def test_quiz_explain_button_dispatches_shared_action(self, test_db):
+        cid = db.add_concept("Explain Concept", "Desc")
+        interaction = _MockInteraction()
+
+        async def message_handler(text, author, user_id=None):
+            return "unused", None, None, None
+
+        view = quiz_views.QuizNavigationView(cid, 2, message_handler)
+        button = _get_button(view, "Explain")
+
+        async def _click():
+            with (
+                patch.object(
+                    quiz_views,
+                    "handle_chat_action",
+                    new=AsyncMock(return_value={"message": "Explanation", "actions": []}),
+                ) as action_mock,
+                patch("bot.messages.send_discord_result", new=AsyncMock()) as send_mock,
+            ):
+                await button.callback(interaction)
+                action_mock.assert_awaited_once_with(
+                    {"kind": "quiz_followup", "followup": "explain", "concept_id": cid},
+                    author="test-user",
+                    source="discord",
+                )
+                send_mock.assert_awaited_once()
+
+        asyncio.run(_click())
 
 
 class TestSkipQuizButtonRegression:
@@ -268,15 +289,14 @@ class TestSkipQuizButtonRegression:
 
         assert len(interaction.followup.calls) == 1
         sent = interaction.followup.calls[0]
-        assert sent["content"].startswith(
-            "Fresh quiz after skip\n\n📖 **Repeatable Quiz** · Score:"
-        )
+        assert "📖 **Repeatable Quiz** · Score:" in sent["content"]
         assert isinstance(sent["view"], quiz_views.QuizQuestionView)
         assert sent["view"].concept_id == cid
         reminder = db.get_scheduled_review_reminder()
         assert reminder is not None
         assert reminder["concept_id"] == cid
-        assert reminder["question_text"] == "Fresh quiz after skip"
+        question_text = sent["content"].split("\n\n📖", 1)[0]
+        assert reminder["question_text"] == question_text
 
     def test_skip_button_callback_updates_session_and_navigation(self, test_db):
         """Clicking the skip button uses skip_quiz and returns navigation controls."""
@@ -315,6 +335,43 @@ class TestSkipQuizButtonRegression:
         assert db.get_session("quiz_anchor_concept_id") is None
         assert db.get_session("quiz_answered") == "1"
         assert db.get_session("last_assess_concept_id") == str(cid)
+
+    def test_skip_button_uses_shared_skip_executor(self, test_db):
+        cid = db.add_concept("Delegated Skip", "Desc")
+        db.update_concept(cid, review_count=3)
+
+        async def message_handler(_text, _author, user_id=None):
+            return "unused", None, None, None
+
+        interaction = _MockInteraction()
+        view = quiz_views.QuizQuestionView(
+            concept_id=cid,
+            message_handler=message_handler,
+            show_skip=True,
+        )
+        button = _get_button(view, "I know this")
+
+        async def _click():
+            with patch.object(
+                quiz_views,
+                "execute_skip_quiz_action",
+                return_value={
+                    "message": "⏭️ Skipped — score: 10→20, next review in 3d",
+                    "concept_id": cid,
+                    "quality": 5,
+                    "actions": [],
+                },
+            ) as skip_mock:
+                await button.callback(interaction)
+                skip_mock.assert_called_once_with(
+                    cid,
+                    user_id=quiz_views._interaction_user_id(interaction),
+                    source="discord",
+                )
+
+        asyncio.run(_click())
+
+        assert interaction.followup.calls[0]["content"].startswith("⏭️ Skipped — score:")
 
     def test_skip_quiz_clears_stale_active_concept(self, test_db):
         """Successful skip clears active_concept_id alongside the quiz anchor."""

@@ -48,6 +48,83 @@ def _quiz_explain_prompt(concept_id: int, title: str) -> str:
     )
 
 
+def build_quiz_followup_prompt(kind: str, concept_id: int | None = None) -> str:
+    normalized = str(kind).lower().strip()
+    if normalized == "next_due":
+        return "[BUTTON] Quiz me on the next due concept"
+
+    if concept_id is None:
+        raise ValueError(f"quiz follow-up '{normalized}' requires concept_id")
+
+    concept = db.get_concept(int(concept_id))
+    title = concept["title"] if concept else f"#{concept_id}"
+
+    if normalized == "quiz_again":
+        return _quiz_again_prompt(int(concept_id), title)
+    if normalized == "explain":
+        return _quiz_explain_prompt(int(concept_id), title)
+    raise ValueError(f"Unknown quiz follow-up '{normalized}'")
+
+
+def derive_discord_quiz_delivery(actions: list[dict] | None) -> tuple[dict | None, dict | None]:
+    """Map shared chat action blocks back to the Discord quiz view metadata contract."""
+    if not actions:
+        return None, None
+
+    for block in actions:
+        if str(block.get("type", "")).lower().strip() != "button_group":
+            continue
+        for button in block.get("buttons", []):
+            action = button.get("action", {})
+            kind = str(action.get("kind", "")).lower().strip()
+            if kind == "skip_quiz" and action.get("concept_id") is not None:
+                return None, {
+                    "concept_id": int(action["concept_id"]),
+                    "show_skip": True,
+                }
+
+        followups = [
+            button.get("action", {})
+            for button in block.get("buttons", [])
+            if str(button.get("action", {}).get("kind", "")).lower().strip() == "quiz_followup"
+        ]
+        if not followups:
+            continue
+
+        concept_id = next(
+            (
+                int(action["concept_id"])
+                for action in followups
+                if action.get("concept_id") is not None
+            ),
+            None,
+        )
+        quality = 2 if any(action.get("followup") == "explain" for action in followups) else 5
+        if concept_id is not None:
+            return {"concept_id": concept_id, "quality": quality}, None
+
+    return None, None
+
+
+def execute_skip_quiz_action(concept_id: int, *, user_id: str, source: str) -> dict:
+    from services.tools_assess import skip_quiz
+
+    result = skip_quiz(int(concept_id), user_id=user_id, source=source)
+    if "error" in result:
+        return {"error": result["error"]}
+
+    message = (
+        f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
+        f"next review in {result['interval_days']}d"
+    )
+    return {
+        "message": message,
+        "concept_id": result["concept_id"],
+        "quality": 5,
+        "actions": build_quiz_navigation_actions(result["concept_id"], 5),
+    }
+
+
 def build_quiz_question_actions(
     concept_id: int | None,
     choices: list[str] | None = None,
@@ -76,42 +153,40 @@ def build_quiz_question_actions(
 def build_quiz_navigation_actions(concept_id: int | None, quality: int | None) -> list[dict]:
     if concept_id is None or quality is None:
         return []
-    concept = db.get_concept(int(concept_id))
-    title = concept["title"] if concept else f"#{concept_id}"
 
     buttons = []
     if quality >= 3:
         buttons.append(
             _button(
                 "Next due",
-                {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"},
+                {"kind": "quiz_followup", "followup": "next_due"},
                 style="primary",
             )
         )
         buttons.append(
             _button(
                 "Quiz again",
-                {"kind": "send_message", "message": _quiz_again_prompt(int(concept_id), title)},
+                {"kind": "quiz_followup", "followup": "quiz_again", "concept_id": int(concept_id)},
             )
         )
     else:
         buttons.append(
             _button(
                 "Explain",
-                {"kind": "send_message", "message": _quiz_explain_prompt(int(concept_id), title)},
+                {"kind": "quiz_followup", "followup": "explain", "concept_id": int(concept_id)},
                 style="primary",
             )
         )
         buttons.append(
             _button(
                 "Quiz again",
-                {"kind": "send_message", "message": _quiz_again_prompt(int(concept_id), title)},
+                {"kind": "quiz_followup", "followup": "quiz_again", "concept_id": int(concept_id)},
             )
         )
         buttons.append(
             _button(
                 "Next due",
-                {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"},
+                {"kind": "quiz_followup", "followup": "next_due"},
             )
         )
 

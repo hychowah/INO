@@ -370,9 +370,9 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Template/runtime file split:** The tracked file is now `data/preferences.template.md`. The live file used in prompts remains `data/preferences.md`, but it is git-ignored and copied from the template on first bot startup (`bot/events.py` `on_ready()`). This avoids committing personal preference edits while still giving fresh clones a default file.
 
-**Why there is no DB-backed proposal:** `PreferenceUpdateView` carries the proposed file content in memory and calls `execute_preference_update()` directly on approval. Unlike maintenance or dedup proposals, this flow edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
+**Why there is no DB-backed proposal:** this flow still does not create a durable proposal row, but Discord no longer owns the approval write path itself. `/preference` now routes through `services.chat_session.handle_chat_message()` to emit the same `pending_confirm` envelope used by chat/API, and `PreferenceUpdateView` delegates Apply/Reject through `confirm_chat_action()` / `decline_chat_action()` rather than carrying an ad hoc callback with raw proposed content. Unlike maintenance or dedup proposals, this still edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
 
-**Key files:** `bot/commands.py` (`/preference`), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/pipeline.py` (`SKILL_SETS["preference-edit"]`, `_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
+**Key files:** `bot/commands.py` (`/preference` delegates to shared chat-session pending confirms), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/pipeline.py` (`SKILL_SETS["preference-edit"]`, `_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/chat_session.py` (`preference_update` confirm/decline ownership), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
 
 ---
 
@@ -472,9 +472,9 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Problem:** Users who already know a concept's answer shouldn't be forced to type it out. A "skip" mechanism awards full credit and moves on, but must not be gameable on first encounters.
 
-**Design — button-only, not an LLM action:**
+**Design — user-triggered shared action, not an LLM action:**
 
-The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButton`), calling `services.tools_assess.skip_quiz()` directly. It is **not** registered in `ACTION_HANDLERS` because the LLM should never autonomously skip a quiz — only the user presses the button.
+The skip remains user-triggered only, but it is no longer Discord-owned business logic. Browser/API and Discord both flow through the shared chat-action surface: `services.chat_session._handle_chat_action()` handles `skip_quiz`, `services.chat_quiz.execute_skip_quiz_action()` owns the canonical skip result payload, and Discord reconstructs the UI from shared `payload.actions`. It is still **not** registered in `ACTION_HANDLERS` because the LLM should never autonomously skip a quiz.
 
 **Scoring:** Uses the same quality=5 algorithm as a normal perfect answer. A synthetic `question_difficulty = min(100, current_score + 10)` is used since no actual question was assessed. This gives `base_gain=7` plus a gap-proportional bonus (`gap * 0.15`), typically ~8.5 points — identical to what a real quality-5 assessment would yield.
 
@@ -482,7 +482,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Race condition prevention:** `quiz_answered` session flag prevents double-scoring. Set by `skip_quiz()` on use. Reset to `None` at the start of every `_handle_user_message` call, in shared chat message entry, and again at the fresh review delivery boundary in `bot.messages.send_review_question()` so a newly sent quiz does not inherit the prior question's answered/skip guard. The Discord button's `clicked` flag also prevents duplicate button presses.
 
-**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` has two roles: (1) when `show_skip=True`, attach a `QuizQuestionView` with the skip button; (2) any non-None `quiz_meta` triggers `format_quiz_metadata()` being appended to the message footer. The delivery-path guard was widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py` so that all quiz deliveries — not only skip-eligible ones — receive the metadata footer. A prior regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed by passing `quiz_meta` through `_send_quiz_response()`. `Explain` remains plain-text by design.
+**4-tuple return signature:** `_handle_user_message` was changed from 3-tuple `(response, pending_action, assess_meta)` to 4-tuple `(response, pending_action, assess_meta, quiz_meta)`. The new `quiz_meta = {concept_id, show_skip}` has two roles: (1) when `show_skip=True`, attach a `QuizQuestionView` with the skip button; (2) any non-None `quiz_meta` triggers `format_quiz_metadata()` being appended to the message footer. The delivery-path guard was widened from `elif quiz_meta and quiz_meta.get('show_skip'):` to `elif quiz_meta:` in both `bot/commands.py` and `bot/events.py` so that all quiz deliveries — not only skip-eligible ones — receive the metadata footer. A prior regression left `Quiz again` and `Next due` discarding `quiz_meta` and relying on session state; this was fixed first by passing `quiz_meta` through `_send_quiz_response()`, then by replacing quiz follow-up pseudo-message dispatch with explicit `quiz_followup` actions handled centrally in `services.chat_session.py`. `bot.messages.py` now rebuilds Discord quiz views from shared `payload.actions`.
 
 **Synthetic remark & LLM continuity:** `skip_quiz()` writes a synthetic remark (`"[Skipped — user indicated prior knowledge]"`) to preserve the LLM's strategy context. `quiz.md` instructs the LLM to probe skipped concepts more rigorously on next encounter.
 
@@ -492,7 +492,7 @@ The skip is handled entirely in Discord UI (`QuizQuestionView` / `_QuizSkipButto
 
 **Quiz message metadata:** Every quiz question message now includes a bot-injected footer line produced by `format_quiz_metadata()` (in `services/formatting.py`): `📖 **{title}** · Score: N/100 · Review #N`. When `review_count < 2`, a hint `_(skip unlocks after N more review(s))_` is also appended. This is injected by the bot layer — the LLM does not generate it.
 
-**Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/views.py` (`QuizQuestionView`, `_QuizSkipButton`, `_send_quiz_response`), `services/formatting.py` (`format_quiz_metadata`), `bot/messages.py` (`send_review_question`, appends metadata + skip button), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, widened `elif quiz_meta:` guard), `data/skills/quiz.md` (LLM skip guidance).
+**Key files:** `services/tools_assess.py` (`skip_quiz()`), `services/chat_quiz.py` (`execute_skip_quiz_action()`, `build_quiz_navigation_actions()`, `derive_discord_quiz_delivery()`), `services/chat_session.py` (`skip_quiz` and `quiz_followup` shared action handling), `services/views.py` (`QuizQuestionView`, `QuizNavigationView`, `_QuizSkipButton`), `services/formatting.py` (`format_quiz_metadata`), `bot/messages.py` (`send_review_question`, shared Discord quiz delivery from `payload.actions`), `bot/handler.py` (4-tuple return), `bot/commands.py` & `bot/events.py` (4-tuple handling, widened `elif quiz_meta:` guard), `data/skills/quiz.md` (LLM skip guidance).
 
 ---
 
