@@ -182,7 +182,7 @@ async def test_proposed_actions_view_finalizes_through_shared_chat_action(test_d
 
 
 @pytest.mark.anyio
-async def test_maintain_command_reuses_shared_chat_controller_for_proposals(test_db):
+async def test_maintain_command_uses_shared_maintenance_request_for_proposals(test_db):
     ctx = _MockCtx()
     dedup_id = db.save_proposal("dedup", [{"keep": 1, "merge": [2]}])
     maintenance_id = db.save_proposal("maintenance", [{"action": "update_topic", "params": {"topic_id": 1}}])
@@ -219,11 +219,11 @@ async def test_maintain_command_reuses_shared_chat_controller_for_proposals(test
     with (
         patch.object(bot_commands.config, "MAINTENANCE_MODE_ENABLED", True),
         patch("bot.commands.send_long", new=AsyncMock()) as send_long_mock,
-        patch("bot.commands.chat_session.handle_chat_message", new=AsyncMock(return_value=payload)) as handle_mock,
+        patch("bot.commands.chat_session.handle_maintenance_request", new=AsyncMock(return_value=payload)) as handle_mock,
     ):
         await bot_commands.maintain_command.callback(ctx)
 
-    handle_mock.assert_awaited_once_with("/maintain", author="test-author", source="discord")
+    handle_mock.assert_awaited_once_with()
     send_long_mock.assert_awaited_once_with(ctx, "Shared maintenance summary")
     assert len(ctx.send.await_args_list) == 2
     assert isinstance(ctx.send.await_args_list[0].kwargs["view"], DedupConfirmView)
@@ -231,7 +231,7 @@ async def test_maintain_command_reuses_shared_chat_controller_for_proposals(test
 
 
 @pytest.mark.anyio
-async def test_reorganize_command_reuses_shared_chat_controller_for_proposals(test_db):
+async def test_reorganize_command_uses_shared_reorganize_request_for_proposals(test_db):
     ctx = _MockCtx()
     proposal_id = db.save_proposal(
         "taxonomy",
@@ -257,11 +257,11 @@ async def test_reorganize_command_reuses_shared_chat_controller_for_proposals(te
 
     with (
         patch("bot.commands.send_long", new=AsyncMock()) as send_long_mock,
-        patch("bot.commands.chat_session.handle_chat_message", new=AsyncMock(return_value=payload)) as handle_mock,
+        patch("bot.commands.chat_session.handle_reorganize_request", new=AsyncMock(return_value=payload)) as handle_mock,
     ):
         await bot_commands.reorganize_command.callback(ctx)
 
-    handle_mock.assert_awaited_once_with("/reorganize", author="test-author", source="discord")
+    handle_mock.assert_awaited_once_with()
     send_long_mock.assert_awaited_once_with(ctx, "Shared taxonomy summary")
     ctx.send.assert_awaited_once()
     assert isinstance(ctx.send.await_args.kwargs["view"], ProposedActionsView)

@@ -14,7 +14,6 @@ from typing import Any
 
 import config
 import db
-from db.preferences import get_persona, get_persona_content
 from services import context as ctx
 from services import state, tools
 from services.action_contracts import build_action_json_schema
@@ -31,24 +30,14 @@ from services.repair import repair_action
 logger = logging.getLogger("pipeline")
 
 
-SKILLS_DIR = config.SKILLS_DIR
-PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3
 MAX_MAINTENANCE_ACTIONS = 5
 MAX_TAXONOMY_ACTIONS = 15
 DEFAULT_CONTINUATION_CONTEXT_LIMIT = 1500
 
-# Skill sets: which skill files to load per mode category.
-SKILL_SETS: dict[str, list[str]] = {
-    "interactive": ["core", "quiz", "knowledge"],
-    "review": ["core", "quiz"],
-    "maintenance": ["core", "maintenance", "knowledge"],
-    "quiz-packaging": ["core", "quiz"],
-    "taxonomy": ["taxonomy"],
-    # Isolated one-shot skill set for /preference edits — not reachable via
-    # _call_llm/_mode_to_skill_set to avoid conversation history injection.
-    "preference-edit": ["preferences"],
-}
+SKILLS_DIR = ctx.SKILLS_DIR
+PREFERENCES_MD_PATH = ctx.PREFERENCES_MD_PATH
+SKILL_SETS = ctx.SKILL_SETS
 
 # Actions that clear active quiz context — the LLM moved on from the quiz.
 # quiz/multi_quiz are NOT here: they set new context that must persist for assess.
@@ -90,129 +79,10 @@ SAFE_TAXONOMY_ACTIONS = frozenset(
 )
 
 
-def _mode_to_skill_set(mode: str) -> str:
-    """Map a pipeline mode string to a skill set name."""
-    return {
-        "command": "interactive",
-        "reply": "interactive",
-        "review-check": "review",
-        "maintenance": "maintenance",
-        "taxonomy-mode": "taxonomy",
-        "quiz-packaging": "quiz-packaging",
-    }.get(mode, "interactive")
-
-
-# Cached system prompt — keyed by (persona, skill_set), with mtimes for hot-reload.
-# Format: {(persona, skill_set): (prompt_str, persona_mtime, {skill_file: mtime})}
-_system_prompt_cache: dict[tuple[str, str], tuple[str, float, dict[str, float]]] = {}
-
-# Cached base content per skill set — (content, prefs_mtime, {skill_file: mtime})
-_base_prompt_cache: dict[str, tuple[str, float, dict[str, float]]] = {}
-
-
-def _get_base_prompt(skill_set: str = "interactive") -> str:
-    """Read skill files for *skill_set* + preferences.md, cached with mtime check."""
-    global _base_prompt_cache
-
-    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
-    skill_paths = {name: SKILLS_DIR / f"{name}.md" for name in skill_names}
-
-    # Gather current mtimes
-    current_mtimes: dict[str, float] = {}
-    for name, path in skill_paths.items():
-        current_mtimes[name] = path.stat().st_mtime if path.exists() else 0
-    prefs_mtime = PREFERENCES_MD_PATH.stat().st_mtime if PREFERENCES_MD_PATH.exists() else 0
-
-    # Check cache
-    if skill_set in _base_prompt_cache:
-        cached_content, cached_prefs_mtime, cached_skill_mtimes = _base_prompt_cache[skill_set]
-        if cached_prefs_mtime == prefs_mtime and cached_skill_mtimes == current_mtimes:
-            return cached_content
-
-    # Build fresh: concatenate skill files + preferences
-    parts: list[str] = []
-    for name in skill_names:
-        path = skill_paths[name]
-        if path.exists():
-            parts.append(ctx._read_file(path))
-        else:
-            logger.warning(f"Skill file missing: {path}")
-
-    prefs = ctx._read_file(PREFERENCES_MD_PATH)
-    content = "\n\n".join(parts) + f"\n\n## User Preferences\n\n{prefs}"
-
-    _base_prompt_cache[skill_set] = (content, prefs_mtime, current_mtimes)
-    logger.info(
-        f"Base prompt built for skill_set '{skill_set}' "
-        f"({len(content)} chars, skills: {skill_names})"
-    )
-    return content
-
-
-def build_system_prompt(persona: str | None = None, mode: str = "command") -> str:
-    """Compose system prompt: skill files + persona + preferences.md.
-    Cached per (persona, skill_set) with file mtime checks for hot-reload."""
-    global _system_prompt_cache
-    if persona is None:
-        persona = get_persona()
-
-    skill_set = _mode_to_skill_set(mode)
-
-    # Check persona file mtime for hot-reload
-    persona_content = get_persona_content(persona)
-    persona_path = db.PERSONAS_DIR / f"{persona}.md"
-    persona_mtime = persona_path.stat().st_mtime if persona_path.exists() else 0
-
-    cache_key = (persona, skill_set)
-
-    if cache_key in _system_prompt_cache:
-        cached_prompt, cached_persona_mtime, cached_skill_mtimes = _system_prompt_cache[cache_key]
-        if cached_persona_mtime == persona_mtime:
-            # Verify base hasn't changed by rebuilding (uses its own cache)
-            base = _get_base_prompt(skill_set)
-            expected = _compose_prompt(base, persona_content)
-            if cached_prompt == expected:
-                return cached_prompt
-
-    base = _get_base_prompt(skill_set)
-    full_prompt = _compose_prompt(base, persona_content)
-
-    # Gather current skill mtimes for cache
-    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
-    skill_mtimes = {}
-    for name in skill_names:
-        p = SKILLS_DIR / f"{name}.md"
-        skill_mtimes[name] = p.stat().st_mtime if p.exists() else 0
-
-    _system_prompt_cache[cache_key] = (full_prompt, persona_mtime, skill_mtimes)
-    logger.info(
-        f"System prompt built for persona '{persona}', "
-        f"skill_set '{skill_set}' ({len(full_prompt)} chars)"
-    )
-    return full_prompt
-
-
-def _compose_prompt(base: str, persona_content: str) -> str:
-    """Insert persona content into the base prompt (skills + prefs).
-    Persona goes between skill content and User Preferences."""
-    marker = "\n\n## User Preferences\n\n"
-    if marker in base:
-        skills_part, prefs_part = base.split(marker, 1)
-        return (
-            f"{skills_part}\n\n"
-            f"## Active Persona\n\n{persona_content}\n\n"
-            f"## User Preferences\n\n{prefs_part}"
-        )
-    # Fallback: append at end
-    return f"{base}\n\n## Active Persona\n\n{persona_content}"
-
-
-def invalidate_prompt_cache():
-    """Clear all cached prompts. Call after persona switch or file edits."""
-    global _system_prompt_cache, _base_prompt_cache
-    _system_prompt_cache.clear()
-    _base_prompt_cache.clear()
-    logger.info("System prompt cache invalidated")
+_mode_to_skill_set = ctx._mode_to_skill_set
+_get_base_prompt = ctx._get_base_prompt
+build_system_prompt = ctx.build_system_prompt
+invalidate_prompt_cache = ctx.invalidate_prompt_cache
 
 
 def reset_conversation_session():

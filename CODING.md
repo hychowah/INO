@@ -84,10 +84,10 @@ ROOT
 │   └── preferences.md     # Runtime LLM user preferences (local, git-ignored)
 │
 ├── services/              # All business logic
-│   ├── pipeline.py        # Orchestration: LLM calls, skill loading, fetch loop, action execution
+│   ├── pipeline.py        # Orchestration: LLM calls, fetch loop, action execution, session management
 │   ├── tools.py           # Action executor: maps LLM verbs → DB calls
 │   ├── tools_assess.py    # Quiz/assess action handlers extracted from tools.py
-│   ├── context.py         # Prompt builder: dynamic context for LLM calls
+│   ├── context.py         # Prompt builder: dynamic context, skill loading, prompt caching, system-prompt composition
 │   ├── embeddings.py      # Embedding service: lazy-loaded sentence-transformers singleton
 │   ├── parser.py          # LLM response parsing and output classification
 │   ├── action_contracts.py # Lightweight action validation metadata for LLM output contract checks
@@ -101,11 +101,12 @@ ROOT
 │   ├── formatting.py      # Discord message helpers: truncate_for_discord, truncate_with_suffix, format_quiz_metadata
 │   ├── chat_payload.py    # Browser/API chat envelope owner (`ChatResponse` payload shaping)
 │   ├── chat_admin.py      # Browser/API maintenance/taxonomy/proposal orchestration helpers
+│   ├── chat_quiz.py       # Browser/API quiz follow-up button derivation for chat payloads
 │   ├── chat_actions.py    # Shared confirm/decline helpers and action whitelists
 │   ├── views.py           # Persistent Discord button views (maintenance, dedup, quiz, preference edit)
 │   ├── dedup.py           # Duplicate concept detection sub-agent
 │   ├── repair.py          # Malformed action repair sub-agent
-│   └── chat_session.py    # Shared browser/API chat controller; delegates payload shaping/admin review blocks to the seams above
+│   └── chat_session.py    # Shared browser/API chat controller; delegates payload shaping, quiz follow-up blocks, and admin review blocks to the seams above
 │
 ├── db/                    # Database layer (SQLite)
 │   ├── core.py            # Connections, init, datetime utils

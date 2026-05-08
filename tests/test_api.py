@@ -248,6 +248,72 @@ class TestChat:
         assert history[-1]["content"] == "✅ Created topic **Compilers** (#3)"
 
     @pytest.mark.anyio
+    async def test_confirm_maintenance_review_uses_shared_admin_executor(self, client):
+        action_data = {
+            "action": "maintenance_review",
+            "message": "Apply maintenance review?",
+            "params": {
+                "dedup_groups": [{"keep": 1, "merge": [2]}],
+                "proposed_actions": [{"action": "update_topic", "params": {"topic_id": 1}}],
+            },
+        }
+
+        with (
+            patch(
+                "services.chat_admin.execute_dedup_merges",
+                new=AsyncMock(return_value=["merged duplicate concepts"]),
+            ),
+            patch(
+                "services.chat_admin.pipeline.execute_approved_actions",
+                new=AsyncMock(return_value=["renamed topic"]),
+            ),
+        ):
+            resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": (
+                "Apply maintenance review?\n\n"
+                "Applied dedup changes:\n- merged duplicate concepts\n\n"
+                "Applied maintenance changes:\n- renamed topic"
+            ),
+            "pending_action": None,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-2]["content"] == "[confirmed: maintenance changes]"
+        assert history[-1]["content"] == (
+            "Applied dedup changes:\n- merged duplicate concepts\n\n"
+            "Applied maintenance changes:\n- renamed topic"
+        )
+
+    @pytest.mark.anyio
+    async def test_confirm_taxonomy_review_uses_shared_admin_executor(self, client):
+        action_data = {
+            "action": "taxonomy_review",
+            "message": "Apply taxonomy review?",
+            "params": {
+                "proposed_actions": [{"action": "link_topics", "params": {"parent_id": 1, "child_id": 2}}],
+            },
+        }
+
+        with patch(
+            "services.chat_admin.pipeline.execute_approved_actions",
+            new=AsyncMock(return_value=["moved topic under parent"]),
+        ):
+            resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "type": "reply",
+            "message": "Apply taxonomy review?\n\nApplied taxonomy changes:\n- moved topic under parent",
+            "pending_action": None,
+        }
+        history = db.get_chat_history(limit=5)
+        assert history[-2]["content"] == "[confirmed: taxonomy changes]"
+        assert history[-1]["content"] == "Applied taxonomy changes:\n- moved topic under parent"
+
+    @pytest.mark.anyio
     async def test_chat_action_taxonomy_uses_taxonomy_source(self, client):
         captured = {}
         proposal_id = db.save_proposal(

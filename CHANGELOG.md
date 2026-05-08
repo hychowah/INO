@@ -18,6 +18,8 @@ Key changes, newest first.
 
 ### Refactored
 
+- **Prompt ownership move** — skill loading, prompt caching, and system-prompt composition now live in `services/context.py`, reducing `services/pipeline.py` to a narrower orchestration role while preserving the existing pipeline public helper surface
+- **Shared chat quiz-action seam** — browser/API quiz follow-up button derivation now lives in `services/chat_quiz.py`, shrinking `services/chat_session.py` and separating chat quiz UI-action shaping from the main chat controller
 - **Post-merge wrapper retirement cleanup** — removed the obsolete pipeline and tools compatibility aliases around quiz delivery formatting, suggest-topic confirm, maintenance approval, dedup dispatch, and Discord handler output parsing; documentation navigation now reflects that the wrapper-retirement plan is completed historical context rather than an active workstream
 - **Canonical SPA routes only** — retired the legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` browser aliases so the React router, nav matching, and route docs now align on one canonical browser route set
 - **Shared chat entry ownership** — FastAPI chat, confirm, decline, and structured chat-action flows now serialize inside `services/chat_session.py`; interactive turn setup is centralized in `services/state.begin_interactive_turn()` instead of duplicated across adapters

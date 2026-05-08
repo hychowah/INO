@@ -293,7 +293,7 @@ async def maintain_command(ctx):
     if is_interaction:
         await ctx.interaction.response.defer(ephemeral=False)
 
-    payload = await chat_session.handle_chat_message("/maintain", author=str(ctx.author), source="discord")
+    payload = await chat_session.handle_maintenance_request()
     await send_long(ctx, payload.get("message", ""))
     await _send_discord_proposal_blocks(ctx, payload.get("actions"))
 
@@ -312,24 +312,14 @@ async def review_command(ctx):
     else:
         await ctx.typing()
 
-    _ensure_db()
-
-    review_lines = None
-    discord_result = None
     try:
-        async with state.pipeline_serialized():
-            review_lines = pipeline.handle_review_check()
-            if review_lines:
-                async with ctx.channel.typing():
-                    quiz = await generate_review_quiz_from_payload(
-                        review_lines[0],
-                        author=str(ctx.author),
-                        source="discord",
-                        track_in_progress=True,
-                    )
-                discord_result = quiz.to_discord_result()
+        async with ctx.channel.typing():
+            quiz = await chat_session.handle_review_request(
+                author=str(ctx.author),
+                source="discord",
+            )
 
-        if not review_lines:
+        if quiz is None:
             msg = "✅ No concepts to review — add some topics first!"
             if is_interaction:
                 await ctx.interaction.followup.send(msg)
@@ -337,7 +327,7 @@ async def review_command(ctx):
                 await ctx.send(msg)
             return
 
-        response, _pending_action, assess_meta, quiz_meta = discord_result
+        response, _pending_action, assess_meta, quiz_meta = quiz.to_discord_result()
         if is_interaction:
             send_fn = ctx.interaction.followup.send
         else:
@@ -392,11 +382,7 @@ async def reorganize_command(ctx):
         await ctx.interaction.response.defer(ephemeral=False)
 
     try:
-        payload = await chat_session.handle_chat_message(
-            "/reorganize",
-            author=str(ctx.author),
-            source="discord",
-        )
+        payload = await chat_session.handle_reorganize_request()
         await send_long(ctx, payload.get("message", ""))
         await _send_discord_proposal_blocks(ctx, payload.get("actions"))
 

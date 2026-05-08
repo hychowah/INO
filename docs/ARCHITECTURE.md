@@ -100,7 +100,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `api/auth.py` | ~25 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; optional `X-Learning-User` request scoping falls back to `LEARN_LOCAL_USER_ID`; `/api/health` is always public |
 | `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals, and the canonical local-first runtime user alias |
-| `services/context.py` | ~640 | Prompt/context construction — builds the dynamic context injected into every LLM call |
+| `services/context.py` | ~920 | Prompt/context construction plus skill loading, prompt caching, and system-prompt composition for runtime LLM calls |
 | `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
 | `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
 | `services/review_state.py` | ~120 | Shared typed reminder-state owner for delayed-answer recovery, resend cadence, and reminder resolution |
@@ -108,7 +108,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
 | `services/chat_payload.py` | ~20 | Single owner of browser/API chat envelope shaping and message guarding for `ChatResponse` payloads |
 | `services/chat_admin.py` | ~300 | Shared maintenance, taxonomy, and proposal-review orchestration for browser/API chat actions and review blocks |
-| `services/chat_session.py` | ~430 | Shared browser/API chat controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; delegates payload shaping to `chat_payload` and admin/proposal flows to `chat_admin` |
+| `services/chat_quiz.py` | ~120 | Shared browser/API quiz button derivation for question actions, assess follow-up actions, and chat-side skip navigation |
+| `services/chat_session.py` | ~325 | Shared browser/API chat controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; delegates payload shaping to `chat_payload`, quiz follow-up blocks to `chat_quiz`, and admin/proposal flows to `chat_admin` |
 | `services/learn_turn.py` | ~95 | Interactive-turn DTO seam — resolves `command` vs `reply`, captures quiz/navigation metadata, and projects one result into Discord or browser/API adapters |
 | `services/review_flow.py` | ~125 | Shared review-quiz generation seam used by scheduler, Discord `/review`, and shared chat review; projects quiz results into browser/API payloads or Discord delivery tuples |
 | `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
@@ -135,7 +136,7 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/pipeline.py` | ~1040 | Core orchestrator — skill loading, context → LLM → validate/retry → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow that bypasses normal conversation-history injection |
+| `services/pipeline.py` | ~1010 | Core orchestrator — context → LLM → validate/retry → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow and compatibility aliases for prompt helpers now implemented in `services/context.py` |
 | `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter, structured-output fallback when `response_format` is rejected, and reasoning-provider selection |
 | `services/parser.py` | ~180 | LLM output boundary and presentation guard — `validate_llm_output`, `parse_llm_response`, `process_output`, `extract_llm_action`, `guard_user_message` |
 | `services/action_contracts.py` | ~290 | Lightweight LLM action schema/validation — required params, param-type checks, action JSON schema for structured output mode |

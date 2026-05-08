@@ -182,15 +182,14 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
     fallback = AsyncMock(return_value="QUIZ")
 
     with (
-        patch("bot.commands._ensure_db"),
-        patch("bot.commands.pipeline.handle_review_check", return_value=[f"{cid}|context"]),
+        patch("services.chat_session.pipeline.handle_review_check", return_value=[f"{cid}|context"]),
         patch(
-            "bot.commands.pipeline.generate_quiz_question",
+            "services.chat_session.pipeline.generate_quiz_question",
             new=AsyncMock(side_effect=LLMError("boom", retryable=True)),
         ),
-        patch("bot.commands.pipeline.call_with_fetch_loop", new=fallback),
+        patch("services.chat_session.pipeline.call_with_fetch_loop", new=fallback),
         patch(
-            "bot.commands.pipeline.execute_llm_response",
+            "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Slash fallback question"),
         ),
         patch("services.review_flow.process_output", return_value=("reply", "Slash fallback question")),
@@ -210,15 +209,14 @@ async def test_bot_review_does_not_persist_pending_when_send_fails(test_db):
     ctx = _MockCtx()
 
     with (
-        patch("bot.commands._ensure_db"),
-        patch("bot.commands.pipeline.handle_review_check", return_value=[f"{cid}|context"]),
+        patch("services.chat_session.pipeline.handle_review_check", return_value=[f"{cid}|context"]),
         patch(
-            "bot.commands.pipeline.generate_quiz_question",
+            "services.chat_session.pipeline.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
         patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
-            "bot.commands.pipeline.execute_llm_response",
+            "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Question survives generation"),
         ),
         patch("services.review_flow.process_output", return_value=("reply", "Question survives generation")),

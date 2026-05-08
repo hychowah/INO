@@ -17,6 +17,11 @@ from services.chat_actions import (
     require_confirmable_action,
 )
 from services.chat_payload import build_chat_payload
+from services.chat_quiz import (
+    build_quiz_navigation_actions,
+    build_quiz_question_actions,
+    derive_quiz_actions,
+)
 from services.dedup import execute_dedup_merges
 from services.learn_turn import run_learn_turn
 from services.parser import parse_llm_response, process_output
@@ -26,147 +31,6 @@ from services.tools import execute_action, set_action_source
 from services.tools_assess import skip_quiz
 
 _db_initialized = False
-
-
-def _button(label: str, action: dict, style: str = "secondary") -> dict:
-    return {
-        "label": label,
-        "style": style,
-        "action": action,
-    }
-
-
-def _button_group(buttons: list[dict], title: str | None = None) -> list[dict]:
-    if not buttons:
-        return []
-    group = {"type": "button_group", "buttons": buttons}
-    if title:
-        group["title"] = title
-    return [group]
-
-
-def _multiple_choice_block(choices: list[str]) -> list[dict]:
-    normalized = [str(choice).strip() for choice in choices if str(choice).strip()]
-    if not normalized:
-        return []
-    return [
-        {
-            "type": "multiple_choice",
-            "title": "Choose an answer",
-            "choices": [
-                {
-                    "label": choice,
-                    "action": {"kind": "send_message", "message": f"I choose: {choice}"},
-                }
-                for choice in normalized
-            ],
-        }
-    ]
-
-
-def _quiz_again_prompt(concept_id: int, title: str) -> str:
-    return f"[BUTTON] Quiz me again on concept #{concept_id} ({title})"
-
-
-def _quiz_explain_prompt(concept_id: int, title: str) -> str:
-    return (
-        f"[BUTTON] Explain concept #{concept_id} ({title}) in detail "
-        f"— I got the quiz wrong and need help understanding it"
-    )
-
-
-def _quiz_question_actions(concept_id: int | None, choices: list[str] | None = None) -> list[dict]:
-    actions = _multiple_choice_block(choices or [])
-    if concept_id is None:
-        return actions
-    concept = db.get_concept(int(concept_id))
-    if not concept or concept.get("review_count", 0) < 2:
-        return actions
-    actions.extend(
-        _button_group(
-            [
-                _button(
-                    "I know this",
-                    {"kind": "skip_quiz", "concept_id": int(concept_id)},
-                    style="secondary",
-                )
-            ],
-            title="Quiz actions",
-        )
-    )
-    return actions
-
-
-def _quiz_navigation_actions(concept_id: int | None, quality: int | None) -> list[dict]:
-    if concept_id is None or quality is None:
-        return []
-    concept = db.get_concept(int(concept_id))
-    title = concept["title"] if concept else f"#{concept_id}"
-
-    buttons = []
-    if quality >= 3:
-        buttons.append(
-            _button(
-                "Next due",
-                {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"},
-                style="primary",
-            )
-        )
-        buttons.append(
-            _button(
-                "Quiz again",
-                {"kind": "send_message", "message": _quiz_again_prompt(int(concept_id), title)},
-            )
-        )
-    else:
-        buttons.append(
-            _button(
-                "Explain",
-                {"kind": "send_message", "message": _quiz_explain_prompt(int(concept_id), title)},
-                style="primary",
-            )
-        )
-        buttons.append(
-            _button(
-                "Quiz again",
-                {"kind": "send_message", "message": _quiz_again_prompt(int(concept_id), title)},
-            )
-        )
-        buttons.append(
-            _button(
-                "Next due",
-                {"kind": "send_message", "message": "[BUTTON] Quiz me on the next due concept"},
-            )
-        )
-
-    buttons.append(_button("Done", {"kind": "dismiss"}))
-    return _button_group(buttons, title="Quiz follow-up")
-
-
-def _derive_actions(action_data: dict | None, reply: str) -> list[dict]:
-    if not action_data or "⚠️" in (reply or ""):
-        return []
-
-    action_name = action_data.get("action", "").lower().strip()
-    params = action_data.get("params", {})
-
-    if action_name == "quiz":
-        return _quiz_question_actions(params.get("concept_id"), params.get("choices"))
-
-    if action_name == "assess":
-        concept_id = db.get_session("last_assess_concept_id") or params.get("concept_id")
-        quality = db.get_session("last_assess_quality") or params.get("quality")
-        try:
-            concept_id = int(concept_id) if concept_id is not None else None
-        except (TypeError, ValueError):
-            concept_id = None
-        try:
-            quality = int(quality) if quality is not None else None
-        except (TypeError, ValueError):
-            quality = None
-        return _quiz_navigation_actions(concept_id, quality)
-
-    return []
 
 
 def _ensure_db() -> None:
@@ -249,25 +113,50 @@ async def _handle_learn_message(text: str, author: str = "chat", source: str = "
         return result.to_chat_payload()
 
     return result.to_chat_payload(
-        actions=_derive_actions(result.action_data, result.message),
+        actions=derive_quiz_actions(result.action_data, result.message),
     )
 
 
-async def _handle_review_command(raw_text: str, author: str = "chat", source: str = "chat") -> dict:
+async def handle_review_request(
+    *,
+    author: str = "chat",
+    source: str = "chat",
+) -> "ReviewQuizResult | None":
+    async with state.pipeline_serialized():
+        return await _handle_review_request(author=author, source=source)
+
+
+async def _handle_review_request(
+    *,
+    author: str = "chat",
+    source: str = "chat",
+) -> "ReviewQuizResult | None":
+    _ensure_db()
+    state.begin_interactive_turn()
+
     review_lines = pipeline.handle_review_check()
     if not review_lines:
-        _record_exchange(raw_text, "No concepts to review — add some topics first!")
-        return build_chat_payload("No concepts to review — add some topics first!")
+        return None
 
-    quiz = await generate_review_quiz_from_payload(
+    return await generate_review_quiz_from_payload(
         review_lines[0],
         author=author,
         source=source,
         track_in_progress=True,
     )
+
+
+async def _handle_review_command(raw_text: str, author: str = "chat", source: str = "chat") -> dict:
+    quiz = await _handle_review_request(author=author, source=source)
+    if quiz is None:
+        _record_exchange(raw_text, "No concepts to review — add some topics first!")
+        return build_chat_payload("No concepts to review — add some topics first!")
+
     if quiz.concept_id:
         register_interactive_review_delivery(quiz.concept_id, quiz.message)
-    return quiz.to_chat_payload(quiz_actions=_quiz_question_actions(quiz.concept_id, quiz.choices))
+    return quiz.to_chat_payload(
+        quiz_actions=build_quiz_question_actions(quiz.concept_id, quiz.choices)
+    )
 
 
 async def _handle_preference_command(raw_text: str, args: str) -> dict:
@@ -304,6 +193,34 @@ async def _handle_maintenance_command(raw_text: str) -> dict:
 
 async def _handle_reorganize_command(raw_text: str) -> dict:
     return await chat_admin.handle_reorganize_command(raw_text, record_exchange=_record_exchange)
+
+
+async def handle_maintenance_request(
+    *,
+    raw_text: str = "/maintain",
+) -> dict:
+    async with state.pipeline_serialized():
+        return await _handle_maintenance_request(raw_text=raw_text)
+
+
+async def _handle_maintenance_request(*, raw_text: str = "/maintain") -> dict:
+    _ensure_db()
+    state.begin_interactive_turn()
+    return await _handle_maintenance_command(raw_text)
+
+
+async def handle_reorganize_request(
+    *,
+    raw_text: str = "/reorganize",
+) -> dict:
+    async with state.pipeline_serialized():
+        return await _handle_reorganize_request(raw_text=raw_text)
+
+
+async def _handle_reorganize_request(*, raw_text: str = "/reorganize") -> dict:
+    _ensure_db()
+    state.begin_interactive_turn()
+    return await _handle_reorganize_command(raw_text)
 
 
 async def handle_chat_message(text: str, author: str = "chat", source: str = "chat") -> dict:
@@ -417,38 +334,8 @@ async def _confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
         db.add_chat_message("assistant", result)
         return build_chat_payload(f"{message}\n\n{result}")
 
-    if action == "maintenance_review":
-        parts = []
-        dedup_groups = params.get("dedup_groups", [])
-        proposed_actions = params.get("proposed_actions", [])
-        if dedup_groups:
-            dedup_summaries = await execute_dedup_merges(dedup_groups)
-            if dedup_summaries:
-                parts.append(
-                    "Applied dedup changes:\n" + "\n".join(f"- {s}" for s in dedup_summaries)
-                )
-        if proposed_actions:
-            maint_summaries = await pipeline.execute_approved_actions(
-                proposed_actions,
-                source="maintenance",
-            )
-            if maint_summaries:
-                parts.append(
-                    "Applied maintenance changes:\n" + "\n".join(f"- {s}" for s in maint_summaries)
-                )
-        summary = "\n\n".join(parts) if parts else "No maintenance changes were applied."
-        db.add_chat_message("user", confirmation_history_entry(action_data))
-        db.add_chat_message("assistant", summary)
-        return build_chat_payload(f"{message}\n\n{summary}")
-
-    if action == "taxonomy_review":
-        proposed_actions = params.get("proposed_actions", [])
-        summaries = await pipeline.execute_approved_actions(proposed_actions, source="taxonomy")
-        summary = (
-            "Applied taxonomy changes:\n" + "\n".join(f"- {s}" for s in summaries)
-            if summaries
-            else "No taxonomy changes were applied."
-        )
+    if action in {"maintenance_review", "taxonomy_review"}:
+        summary = await chat_admin.execute_confirmed_review(action, params)
         db.add_chat_message("user", confirmation_history_entry(action_data))
         db.add_chat_message("assistant", summary)
         return build_chat_payload(f"{message}\n\n{summary}")
@@ -501,7 +388,10 @@ async def _handle_chat_action(action: dict, author: str = "chat", source: str = 
             f"⏭️ Skipped — score: {result['old_score']}→{result['new_score']}, "
             f"next review in {result['interval_days']}d"
         )
-        return build_chat_payload(message, actions=_quiz_navigation_actions(result["concept_id"], 5))
+        return build_chat_payload(
+            message,
+            actions=build_quiz_navigation_actions(result["concept_id"], 5),
+        )
 
     admin_result = await chat_admin.handle_proposal_action(action)
     if admin_result is not None:

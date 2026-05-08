@@ -32,7 +32,7 @@
 | `docs/DEVNOTES.md` | Bug history, architecture decisions, institutional memory; **see §7 for pending review tracking and §26 for persisted scheduler/reminder state** |
 | `docs/DOC_INDEX.md` | Broader documentation inventory and navigation aid |
 | `docs/DOC_STANDARD.md` | Documentation writing and maintenance conventions |
-| `docs/plans/` | Reserved location for active implementation plan files; currently empty |
+| `docs/plans/` | Active implementation plan files, including the architecture simplification master plan and progress tracker |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds |
 | `.github/workflows/tests.yml` | Python CI matrix and pytest collection guard |
 | `.github/workflows/lint.yml` | Ruff lint/format CI workflow |
@@ -40,7 +40,8 @@
 
 Active in-repo plan files:
 
-- None currently.
+- `docs/plans/architecture-simplification-master-plan.md` — canonical strategy, scope, metrics, and phase plan for architecture simplification
+- `docs/plans/architecture-simplification-progress.md` — living tracker for baseline metrics, phase status, and next actions
 
 ## Skill Sets by Mode
 

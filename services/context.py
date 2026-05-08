@@ -14,8 +14,43 @@ from typing import Any
 
 import config
 import db
+from db.preferences import get_persona, get_persona_content
 
 logger = logging.getLogger("context")
+
+
+SKILLS_DIR = config.SKILLS_DIR
+PREFERENCES_MD_PATH = config.PREFERENCES_MD
+
+# Skill sets: which skill files to load per mode category.
+SKILL_SETS: dict[str, list[str]] = {
+    "interactive": ["core", "quiz", "knowledge"],
+    "review": ["core", "quiz"],
+    "maintenance": ["core", "maintenance", "knowledge"],
+    "quiz-packaging": ["core", "quiz"],
+    "taxonomy": ["taxonomy"],
+    # Isolated one-shot skill set for /preference edits.
+    "preference-edit": ["preferences"],
+}
+
+
+def _mode_to_skill_set(mode: str) -> str:
+    """Map a pipeline mode string to a skill set name."""
+    return {
+        "command": "interactive",
+        "reply": "interactive",
+        "review-check": "review",
+        "maintenance": "maintenance",
+        "taxonomy-mode": "taxonomy",
+        "quiz-packaging": "quiz-packaging",
+    }.get(mode, "interactive")
+
+
+# Cached system prompt — keyed by (persona, skill_set), with mtimes for hot-reload.
+_system_prompt_cache: dict[tuple[str, str], tuple[str, float, dict[str, float]]] = {}
+
+# Cached base content per skill set — (content, prefs_mtime, {skill_file: mtime})
+_base_prompt_cache: dict[str, tuple[str, float, dict[str, float]]] = {}
 
 
 def _read_file(path: Path) -> str:
@@ -23,6 +58,106 @@ def _read_file(path: Path) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8")
     return ""
+
+
+def _get_base_prompt(skill_set: str = "interactive") -> str:
+    """Read skill files for *skill_set* + preferences.md, cached with mtime check."""
+    global _base_prompt_cache
+
+    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
+    skill_paths = {name: SKILLS_DIR / f"{name}.md" for name in skill_names}
+
+    current_mtimes: dict[str, float] = {}
+    for name, path in skill_paths.items():
+        current_mtimes[name] = path.stat().st_mtime if path.exists() else 0
+    prefs_mtime = PREFERENCES_MD_PATH.stat().st_mtime if PREFERENCES_MD_PATH.exists() else 0
+
+    if skill_set in _base_prompt_cache:
+        cached_content, cached_prefs_mtime, cached_skill_mtimes = _base_prompt_cache[skill_set]
+        if cached_prefs_mtime == prefs_mtime and cached_skill_mtimes == current_mtimes:
+            return cached_content
+
+    parts: list[str] = []
+    for name in skill_names:
+        path = skill_paths[name]
+        if path.exists():
+            parts.append(_read_file(path))
+        else:
+            logger.warning("Skill file missing: %s", path)
+
+    prefs = _read_file(PREFERENCES_MD_PATH)
+    content = "\n\n".join(parts) + f"\n\n## User Preferences\n\n{prefs}"
+
+    _base_prompt_cache[skill_set] = (content, prefs_mtime, current_mtimes)
+    logger.info(
+        "Base prompt built for skill_set '%s' (%s chars, skills: %s)",
+        skill_set,
+        len(content),
+        skill_names,
+    )
+    return content
+
+
+def _compose_prompt(base: str, persona_content: str) -> str:
+    """Insert persona content into the base prompt (skills + prefs)."""
+    marker = "\n\n## User Preferences\n\n"
+    if marker in base:
+        skills_part, prefs_part = base.split(marker, 1)
+        return (
+            f"{skills_part}\n\n"
+            f"## Active Persona\n\n{persona_content}\n\n"
+            f"## User Preferences\n\n{prefs_part}"
+        )
+    return f"{base}\n\n## Active Persona\n\n{persona_content}"
+
+
+def build_system_prompt(persona: str | None = None, mode: str = "command") -> str:
+    """Compose system prompt: skill files + persona + preferences.md."""
+    global _system_prompt_cache
+    if persona is None:
+        persona = get_persona()
+
+    skill_set = _mode_to_skill_set(mode)
+
+    persona_content = get_persona_content(persona)
+    persona_path = db.PERSONAS_DIR / f"{persona}.md"
+    persona_mtime = persona_path.stat().st_mtime if persona_path.exists() else 0
+
+    cache_key = (persona, skill_set)
+
+    if cache_key in _system_prompt_cache:
+        cached_prompt, cached_persona_mtime, _cached_skill_mtimes = _system_prompt_cache[cache_key]
+        if cached_persona_mtime == persona_mtime:
+            base = _get_base_prompt(skill_set)
+            expected = _compose_prompt(base, persona_content)
+            if cached_prompt == expected:
+                return cached_prompt
+
+    base = _get_base_prompt(skill_set)
+    full_prompt = _compose_prompt(base, persona_content)
+
+    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
+    skill_mtimes = {}
+    for name in skill_names:
+        path = SKILLS_DIR / f"{name}.md"
+        skill_mtimes[name] = path.stat().st_mtime if path.exists() else 0
+
+    _system_prompt_cache[cache_key] = (full_prompt, persona_mtime, skill_mtimes)
+    logger.info(
+        "System prompt built for persona '%s', skill_set '%s' (%s chars)",
+        persona,
+        skill_set,
+        len(full_prompt),
+    )
+    return full_prompt
+
+
+def invalidate_prompt_cache() -> None:
+    """Clear all cached prompts. Call after persona switch or file edits."""
+    global _system_prompt_cache, _base_prompt_cache
+    _system_prompt_cache.clear()
+    _base_prompt_cache.clear()
+    logger.info("System prompt cache invalidated")
 
 
 # ============================================================================

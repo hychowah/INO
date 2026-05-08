@@ -318,6 +318,45 @@ def _taxonomy_review_actions(proposed_actions: tuple[int, list[dict]]) -> list[d
     )
 
 
+def _format_applied_changes(label: str, summaries: list[str]) -> str:
+    if summaries:
+        return f"Applied {label} changes:\n" + "\n".join(f"- {line}" for line in summaries)
+    return f"No {label} changes were applied."
+
+
+async def execute_confirmed_review(action: str, params: dict) -> str:
+    normalized_action = str(action).lower().strip()
+
+    if normalized_action == "maintenance_review":
+        parts = []
+        dedup_groups = params.get("dedup_groups", [])
+        proposed_actions = params.get("proposed_actions", [])
+
+        if dedup_groups:
+            dedup_summaries = await execute_dedup_merges(dedup_groups)
+            if dedup_summaries:
+                parts.append(_format_applied_changes("dedup", dedup_summaries))
+
+        if proposed_actions:
+            maintenance_summaries = await pipeline.execute_approved_actions(
+                proposed_actions,
+                source="maintenance",
+            )
+            if maintenance_summaries:
+                parts.append(_format_applied_changes("maintenance", maintenance_summaries))
+
+        return "\n\n".join(parts) if parts else "No maintenance changes were applied."
+
+    if normalized_action == "taxonomy_review":
+        taxonomy_summaries = await pipeline.execute_approved_actions(
+            params.get("proposed_actions", []),
+            source="taxonomy",
+        )
+        return _format_applied_changes("taxonomy", taxonomy_summaries)
+
+    raise ValueError(f"Action '{action}' is not supported by confirmed review execution")
+
+
 async def handle_maintenance_command(raw_text: str, *, record_exchange: Callable[[str, str], None]) -> dict:
     if not config.MAINTENANCE_MODE_ENABLED:
         message = "Maintenance mode is currently disabled. Use /reorganize for taxonomy work."
@@ -420,11 +459,7 @@ async def handle_proposal_action(action: dict) -> dict | None:
             if not groups:
                 raise ValueError("apply_dedup_groups requires groups")
             summaries = await execute_dedup_merges(groups)
-        summary = (
-            "Applied dedup changes:\n" + "\n".join(f"- {line}" for line in summaries)
-            if summaries
-            else "No dedup changes were applied."
-        )
+        summary = _format_applied_changes("dedup", summaries)
         return build_chat_payload(summary)
 
     if kind == "apply_maintenance_actions":
@@ -442,13 +477,7 @@ async def handle_proposal_action(action: dict) -> dict | None:
             if not actions:
                 raise ValueError("apply_maintenance_actions requires actions")
             summaries = await pipeline.execute_approved_actions(actions, source=action_source)
-        source_label = action_source.title()
-        summary = (
-            f"Applied {source_label.lower()} changes:\n"
-            + "\n".join(f"- {line}" for line in summaries)
-            if summaries
-            else f"No {source_label.lower()} changes were applied."
-        )
+        summary = _format_applied_changes(action_source.lower(), summaries)
         return build_chat_payload(summary)
 
     if kind == "reject_proposals":
