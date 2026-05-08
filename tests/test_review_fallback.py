@@ -70,7 +70,7 @@ async def test_scheduler_fallback_uses_review_check_mode(test_db):
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Fallback question"),
         ),
-        patch("services.pipeline.process_output", return_value=("reply", "Fallback question")),
+        patch("services.review_flow.process_output", return_value=("reply", "Fallback question")),
         patch("bot.messages.send_long_with_view", new=mock_send_long_with_view),
     ):
         await scheduler._send_review_quiz(f"{cid}|context")
@@ -93,18 +93,12 @@ async def test_generate_review_quiz_from_payload_tolerates_none_choices(test_db)
                 }
             ),
         ),
-        patch(
-            "services.review_flow.pipeline.package_quiz_for_discord",
-            new=AsyncMock(return_value="QUIZ"),
-        ),
+        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.review_flow.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Why does induced drag drop?"),
         ),
-        patch(
-            "services.review_flow.pipeline.process_output",
-            return_value=("reply", "Why does induced drag drop?"),
-        ),
+        patch("services.review_flow.process_output", return_value=("reply", "Why does induced drag drop?")),
     ):
         from services.review_flow import generate_review_quiz_from_payload
 
@@ -140,7 +134,7 @@ async def test_chat_review_fallback_uses_review_check_mode(test_db):
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Fallback question"),
         ),
-        patch("services.pipeline.process_output", return_value=("reply", "Fallback question")),
+        patch("services.review_flow.process_output", return_value=("reply", "Fallback question")),
     ):
         result = await chat_session._handle_review_command("/review")
 
@@ -162,15 +156,12 @@ async def test_chat_review_registers_typed_review_reminder(test_db):
             "services.chat_session.pipeline.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch(
-            "services.chat_session.pipeline.package_quiz_for_discord",
-            new=AsyncMock(return_value="QUIZ"),
-        ),
+        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Why is Fabric smoother?"),
         ),
-        patch("services.pipeline.process_output", return_value=("reply", "Why is Fabric smoother?")),
+        patch("services.review_flow.process_output", return_value=("reply", "Why is Fabric smoother?")),
     ):
         result = await chat_session._handle_review_command("/review")
 
@@ -202,10 +193,7 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
             "bot.commands.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Slash fallback question"),
         ),
-        patch(
-            "bot.commands.pipeline.process_output",
-            return_value=("reply", "Slash fallback question"),
-        ),
+        patch("services.review_flow.process_output", return_value=("reply", "Slash fallback question")),
         patch("bot.commands.send_discord_result", new=AsyncMock(return_value=object())),
     ):
         await bot_commands.review_command.callback(ctx)
@@ -228,18 +216,12 @@ async def test_bot_review_does_not_persist_pending_when_send_fails(test_db):
             "bot.commands.pipeline.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch(
-            "bot.commands.pipeline.package_quiz_for_discord",
-            new=AsyncMock(return_value="QUIZ"),
-        ),
+        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
             "bot.commands.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Question survives generation"),
         ),
-        patch(
-            "bot.commands.pipeline.process_output",
-            return_value=("reply", "Question survives generation"),
-        ),
+        patch("services.review_flow.process_output", return_value=("reply", "Question survives generation")),
         patch(
             "bot.commands.send_discord_result",
             new=AsyncMock(side_effect=RuntimeError("send failed")),

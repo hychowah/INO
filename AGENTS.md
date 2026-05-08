@@ -26,6 +26,6 @@ Instructions are split into modular skill files loaded per-mode:
 - **taxonomy** (TAXONOMY-MODE, /reorganize): taxonomy
 - **preference-edit** (/preference text edit path): preferences only
 
-Scheduled quiz delivery no longer uses an LLM packaging stage. `package_quiz_for_discord()` is now a deterministic compatibility wrapper over the P1 output.
+Scheduled quiz delivery no longer uses an LLM packaging stage. `format_quiz_action()` deterministically turns the P1 output into the final delivery text.
 
 See `docs/index.md` for the full knowledge base map.

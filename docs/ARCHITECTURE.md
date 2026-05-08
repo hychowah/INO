@@ -339,8 +339,8 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   │    Cached in: concepts.last_quiz_generator_output          │
   │                       │                                    │
   │                       ▼                                    │
-  │  Delivery: pipeline.package_quiz_for_discord(p1_result)    │
-  │    Deterministic compatibility wrapper                     │
+  │  Delivery: pipeline.format_quiz_action(p1_result)          │
+  │    Deterministic formatter                                 │
   │    Input: P1 JSON                                          │
   │    Output: REPLY string using formatted_question           │
   │                                                            │

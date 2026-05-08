@@ -5,7 +5,7 @@ import config
 import db
 from services import pipeline
 from services.chat_payload import build_chat_payload
-from services.dedup import execute_dedup_merges, format_dedup_suggestions
+from services.dedup import execute_dedup_merges, format_dedup_suggestions, handle_dedup_check
 
 _PROPOSAL_ITEM_ID_KEY = "_proposal_item_id"
 
@@ -357,7 +357,7 @@ async def handle_maintenance_command(raw_text: str, *, record_exchange: Callable
             _with_proposal_item_ids(existing_dedup["payload"], prefix="dedup"),
         )
     else:
-        dedup_groups = await pipeline.handle_dedup_check()
+        dedup_groups = await handle_dedup_check()
         if dedup_groups:
             parts.append(format_dedup_suggestions(dedup_groups))
             dedup_proposal = _persist_proposal("dedup", dedup_groups)

@@ -7,7 +7,6 @@ from services.llm import LLMError
 from services.pipeline import (
     _quiz_generator_system_prompt,
     format_quiz_action,
-    package_quiz_for_discord,
 )
 
 
@@ -40,9 +39,8 @@ def test_quiz_generator_system_prompt_includes_preferences_and_persona():
     assert "pref body" in prompt
 
 
-@pytest.mark.anyio
-async def test_package_quiz_for_discord_uses_deterministic_formatter():
-    result = await package_quiz_for_discord(
+def test_format_quiz_action_formats_delivery_text():
+    result = format_quiz_action(
         {
             "question": "What does ASGI stand for?",
             "formatted_question": "Quick check: what does ASGI stand for?",

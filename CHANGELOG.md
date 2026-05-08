@@ -18,6 +18,7 @@ Key changes, newest first.
 
 ### Refactored
 
+- **Post-merge wrapper retirement cleanup** — removed the obsolete pipeline and tools compatibility aliases around quiz delivery formatting, suggest-topic confirm, maintenance approval, dedup dispatch, and Discord handler output parsing; documentation navigation now reflects that the wrapper-retirement plan is completed historical context rather than an active workstream
 - **Canonical SPA routes only** — retired the legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` browser aliases so the React router, nav matching, and route docs now align on one canonical browser route set
 - **Shared chat entry ownership** — FastAPI chat, confirm, decline, and structured chat-action flows now serialize inside `services/chat_session.py`; interactive turn setup is centralized in `services/state.begin_interactive_turn()` instead of duplicated across adapters
 - **Shared adapter delivery seams** — browser/API chat envelopes now originate in `services/chat_payload.py`, maintenance/taxonomy/proposal review packaging now lives in `services/chat_admin.py`, and Discord non-pending sends now funnel through `bot/messages.py`

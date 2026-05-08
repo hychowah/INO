@@ -2,7 +2,7 @@
 
 import db
 
-from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
+from services.tools import execute_action, set_action_source
 
 INTERCEPTED_ACTIONS = frozenset({"add_concept", "suggest_topic"})
 LIGHTWEIGHT_CONFIRMABLE_ACTIONS = frozenset({"add_concept", "suggest_topic"})
@@ -27,6 +27,8 @@ def execute_lightweight_confirm(action_data: dict, *, source: str) -> tuple[bool
     set_action_source(source)
 
     if action == "suggest_topic":
+        from services.tools_assess import execute_suggest_topic_accept
+
         success, summary, _topic_id = execute_suggest_topic_accept(action_data)
         if not success:
             return False, f"⚠️ {summary}"

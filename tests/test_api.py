@@ -232,7 +232,7 @@ class TestChat:
             "params": {"title": "Compilers"},
         }
         with patch(
-            "services.chat_actions.execute_suggest_topic_accept",
+            "services.tools_assess.execute_suggest_topic_accept",
             return_value=(True, "✅ Created topic **Compilers** (#3)", 3),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})

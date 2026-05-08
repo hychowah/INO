@@ -8,7 +8,7 @@ import discord
 import db
 from services import pipeline, state
 from services.learn_turn import run_learn_turn
-from services.parser import parse_llm_response
+from services.parser import parse_llm_response, process_output
 
 logger = logging.getLogger("bot")
 
@@ -72,7 +72,7 @@ async def _handle_user_message(
                 call_with_fetch_loop=pipeline.call_with_fetch_loop,
                 parse_response=parse_llm_response,
                 execute_response=pipeline.execute_llm_response,
-                process_output=pipeline.process_output,
+                process_output=process_output,
                 on_pending_intercept=lambda display_msg: _record_pending_confirmation(text, display_msg),
             )
 

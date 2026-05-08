@@ -36,12 +36,12 @@ async def test_send_review_quiz_attaches_skip_button_for_eligible_concept(test_d
             "services.pipeline.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch("services.pipeline.package_quiz_for_discord", new=AsyncMock(return_value="QUIZ")),
+        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: What is eligible?"),
         ),
-        patch("services.pipeline.process_output", return_value=("reply", "What is eligible?")),
+        patch("services.review_flow.process_output", return_value=("reply", "What is eligible?")),
         patch("bot.messages.send_long_with_view", new=mock_send_long_with_view),
     ):
         await scheduler._send_review_quiz(f"{cid}|context")
@@ -81,12 +81,12 @@ async def test_send_review_quiz_omits_skip_button_for_ineligible_concept(test_db
             "services.pipeline.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch("services.pipeline.package_quiz_for_discord", new=AsyncMock(return_value="QUIZ")),
+        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: What is new?"),
         ),
-        patch("services.pipeline.process_output", return_value=("reply", "What is new?")),
+        patch("services.review_flow.process_output", return_value=("reply", "What is new?")),
         patch("bot.messages.send_long_with_view", new=mock_send_long_with_view),
     ):
         await scheduler._send_review_quiz(f"{cid}|context")

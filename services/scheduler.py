@@ -22,7 +22,7 @@ import db
 from bot.messages import send_review_question
 from services import backup as backup_service
 from services import pipeline, state
-from services.dedup import format_dedup_suggestions
+from services.dedup import format_dedup_suggestions, handle_dedup_check
 from services.formatting import truncate_for_discord
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import (
@@ -297,7 +297,6 @@ async def _send_mode_report(
     final_result: str,
     proposed_actions: list,
     proposal_type: str,
-    execute_fn,
 ):
     """DM the user a mode report with optional proposed-action buttons.
 
@@ -380,7 +379,6 @@ async def _send_maintenance_report(diagnostic_context: str):
             final_result=final_result,
             proposed_actions=proposed_actions,
             proposal_type="maintenance",
-            execute_fn=pipeline.execute_maintenance_actions,
         )
     except Exception as e:
         logger.error(f"Error in maintenance pipeline: {e}", exc_info=True)
@@ -406,10 +404,6 @@ async def _check_taxonomy():
                 final_result=final_result,
                 proposed_actions=proposed_actions,
                 proposal_type="taxonomy",
-                execute_fn=lambda approved_actions: pipeline.execute_approved_actions(
-                    approved_actions,
-                    source="taxonomy",
-                ),
             )
         except Exception as e:
             logger.error(f"Error in taxonomy check: {e}", exc_info=True)
@@ -438,7 +432,7 @@ async def _check_dedup():
 
         logger.info("[DEDUP] Running dedup check...")
         try:
-            groups = await pipeline.handle_dedup_check()
+            groups = await handle_dedup_check()
             if not groups:
                 logger.debug("[DEDUP] No duplicates found")
                 return

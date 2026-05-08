@@ -18,6 +18,7 @@ import logging
 import db
 from services import context as ctx
 from services import pipeline
+from services.dedup import execute_dedup_merges, handle_dedup_check
 
 
 def setup_logging(verbose: bool = False):
@@ -103,7 +104,7 @@ async def run_dedup_test(dry_run: bool = False):
         print(f"  #{concept['id']}: {concept['title']}{description}{topics}")
 
     print("\nCalling LLM dedup agent...")
-    groups = await pipeline.handle_dedup_check()
+    groups = await handle_dedup_check()
 
     if not groups:
         print("  No duplicates found by LLM.\n")
@@ -119,7 +120,7 @@ async def run_dedup_test(dry_run: bool = False):
         return
 
     print("\n  Executing merges...")
-    summaries = await pipeline.execute_dedup_merges(groups)
+    summaries = await execute_dedup_merges(groups)
     for summary in summaries:
         print(f"    ✓ {summary}")
     print(f"\n  Done — {len(summaries)} merge(s) executed.\n")

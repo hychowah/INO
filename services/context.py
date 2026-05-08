@@ -837,7 +837,7 @@ def build_maintenance_context() -> str:
         parts.append("")
 
     # Note: potential_duplicates are handled by the dedicated dedup sub-agent
-    # (pipeline.handle_dedup_check), not the maintenance agent.
+    # (services.dedup.handle_dedup_check), not the maintenance agent.
 
     if issue_count == 0:
         parts.append("### ✅ No issues found — knowledge base is healthy!\n")

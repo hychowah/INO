@@ -206,13 +206,13 @@ async def run_p1(concept_id: int):
 
 async def run_p2(p1_result: dict, concept_id: int):
     """Run the delivery-formatting stage and show output."""
-    from services.pipeline import package_quiz_for_discord
+    from services.pipeline import format_quiz_action
 
     print("\n" + "=" * 60)
     print("DELIVERY OUTPUT")
     print("=" * 60)
     try:
-        result = await package_quiz_for_discord(p1_result, concept_id)
+        result = format_quiz_action(p1_result, concept_id)
         print(result)
         return result
     except Exception as e:

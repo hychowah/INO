@@ -11,7 +11,7 @@ import db
 from services import pipeline
 from services.chat_payload import build_chat_payload
 from services.llm import LLMError
-from services.parser import parse_llm_response
+from services.parser import parse_llm_response, process_output
 from services.review_state import bind_single_quiz_context
 from services.tools import set_action_source
 
@@ -94,7 +94,7 @@ async def generate_review_quiz_from_payload(
         try:
             if concept_id is not None:
                 p1_result = await pipeline.generate_quiz_question(concept_id)
-                llm_response = await pipeline.package_quiz_for_discord(p1_result, concept_id)
+                llm_response = pipeline.format_quiz_action(p1_result, concept_id)
             else:
                 raise LLMError("No concept_id in payload", retryable=True)
         except LLMError:
@@ -105,7 +105,7 @@ async def generate_review_quiz_from_payload(
             )
 
         final_result = await pipeline.execute_llm_response(review_text, llm_response, "reply")
-        _msg_type, response = pipeline.process_output(final_result)
+        _msg_type, response = process_output(final_result)
         message = response.strip() if response else "Could not generate a review quiz. Try again?"
         if concept_id is not None:
             bind_single_quiz_context(concept_id, question=message)

@@ -91,7 +91,7 @@ class TestExecuteSuggestTopicAccept:
     """Shared accept logic: creates topic + concepts in one flow."""
 
     def test_creates_topic_and_concepts(self):
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",
@@ -123,7 +123,7 @@ class TestExecuteSuggestTopicAccept:
         assert "Cosine Similarity" in concept_titles
 
     def test_empty_concepts_list(self):
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",
@@ -144,7 +144,7 @@ class TestExecuteSuggestTopicAccept:
         assert topic is not None
 
     def test_no_concepts_key(self):
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",
@@ -158,7 +158,7 @@ class TestExecuteSuggestTopicAccept:
         assert topic_id is not None
 
     def test_partial_failure_duplicate_concept(self):
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         # Pre-create a concept with the same title
         pre_tid = db.add_topic(title="Pre-existing")
@@ -181,7 +181,7 @@ class TestExecuteSuggestTopicAccept:
         assert topic_id is not None
 
     def test_skips_invalid_concept_entries(self):
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",
@@ -201,7 +201,7 @@ class TestExecuteSuggestTopicAccept:
 
     def test_creates_topic_with_parent_ids(self):
         """suggest_topic with parent_ids should create a child topic."""
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         # Pre-create parent topic
         parent_id = db.add_topic(title="Python", description="Python language")
@@ -235,7 +235,7 @@ class TestExecuteSuggestTopicAccept:
 
     def test_creates_topic_with_parent_ids_as_int(self):
         """parent_ids as a single int (not list) should be handled."""
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         parent_id = db.add_topic(title="Python")
 
@@ -256,7 +256,7 @@ class TestExecuteSuggestTopicAccept:
 
     def test_creates_topic_without_parent_ids(self):
         """suggest_topic without parent_ids creates a root topic (backward compat)."""
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",
@@ -282,7 +282,7 @@ class TestSuggestTopicChatHistory:
 
     def test_confirmed_format(self):
         from services.chat_actions import confirmation_history_entry
-        from services.tools import execute_suggest_topic_accept
+        from services.tools_assess import execute_suggest_topic_accept
 
         action_data = {
             "action": "suggest_topic",

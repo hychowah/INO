@@ -22,7 +22,7 @@ from services.learn_turn import run_learn_turn
 from services.parser import parse_llm_response, process_output
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import register_interactive_review_delivery
-from services.tools import execute_action, execute_suggest_topic_accept, set_action_source
+from services.tools import execute_action, set_action_source
 from services.tools_assess import skip_quiz
 
 _db_initialized = False

@@ -31,13 +31,6 @@ from services.repair import repair_action
 logger = logging.getLogger("pipeline")
 
 
-def process_output(output: str) -> tuple[str, str]:
-    """Compatibility wrapper for callers that patch or import pipeline.process_output."""
-    from services.parser import process_output as _process_output
-
-    return _process_output(output)
-
-
 SKILLS_DIR = config.SKILLS_DIR
 PREFERENCES_MD_PATH = config.PREFERENCES_MD
 MAX_FETCH_ITERATIONS = 3
@@ -960,13 +953,6 @@ async def generate_quiz_question(concept_id: int) -> dict:
     return result
 
 
-async def package_quiz_for_discord(p1_result: dict, concept_id: int) -> str:
-    """Compatibility wrapper for deterministic quiz delivery formatting."""
-    formatted = format_quiz_action(p1_result, concept_id)
-    logger.info(f"Formatted quiz delivery for concept #{concept_id} ({len(formatted)} chars)")
-    return formatted
-
-
 def build_review_payload(concept_id: int) -> str | None:
     """Build the canonical review payload for one concept."""
     detail = db.get_concept_detail(concept_id)
@@ -1331,20 +1317,6 @@ def handle_taxonomy() -> str | None:
     return ctx.build_taxonomy_context()
 
 
-async def handle_dedup_check() -> list[dict] | None:
-    """Compatibility wrapper for the dedicated dedup sub-agent."""
-    from services.dedup import handle_dedup_check as run_dedup_check
-
-    return await run_dedup_check()
-
-
-async def execute_dedup_merges(groups: list[dict]) -> list[str]:
-    """Compatibility wrapper for executing dedup merge recommendations."""
-    from services.dedup import execute_dedup_merges as run_dedup_merges
-
-    return await run_dedup_merges(groups)
-
-
 async def execute_approved_actions(actions: list[dict], *, source: str = "maintenance") -> list[str]:
     """Execute approved actions while preserving their policy source."""
     tools.set_action_source(source)
@@ -1367,8 +1339,3 @@ async def execute_approved_actions(actions: list[dict], *, source: str = "mainte
         logger.info(f"Approved {source} action: {action_name} → {'error' if is_error else 'ok'}")
 
     return summaries
-
-
-async def execute_maintenance_actions(actions: list[dict]) -> list[str]:
-    """Compatibility wrapper for maintenance approvals."""
-    return await execute_approved_actions(actions, source="maintenance")

@@ -158,7 +158,7 @@ async def test_check_taxonomy_skips_when_no_topics_found(test_db):
 async def test_check_dedup_skips_when_pending_proposal_exists(test_db):
     with (
         patch("services.scheduler.db.get_pending_proposal", return_value={"id": 5}) as pending_mock,
-        patch("services.scheduler.pipeline.handle_dedup_check", new=AsyncMock()) as dedup_mock,
+        patch("services.scheduler.handle_dedup_check", new=AsyncMock()) as dedup_mock,
     ):
         await scheduler._check_dedup()
 
@@ -172,7 +172,7 @@ async def test_check_dedup_sends_suggestions_for_found_groups(test_db):
 
     with (
         patch("services.scheduler.db.get_pending_proposal", return_value=None),
-        patch("services.scheduler.pipeline.handle_dedup_check", new=AsyncMock(return_value=groups)),
+        patch("services.scheduler.handle_dedup_check", new=AsyncMock(return_value=groups)),
         patch("services.scheduler.db.save_proposal", return_value=12) as save_mock,
         patch.object(scheduler, "_bot", object()),
         patch.object(scheduler, "_authorized_user_id", 123),

@@ -39,6 +39,7 @@
 26. [Persisted Scheduler & Shared Owner Lock](#26-persisted-scheduler--shared-owner-lock)
 27. [LLM Output Contract Boundary](#27-llm-output-contract-boundary)
 28. [Local Alias And Shared Chat Entry Boundaries](#28-local-alias-and-shared-chat-entry-boundaries)
+29. [Plan Files Are Active-Only](#29-plan-files-are-active-only)
 
 ---
 
@@ -131,7 +132,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 **Fix (defense-in-depth):**
 1. **Code guard** in `_handle_update_concept` (tools.py): when `action_source='maintenance'`, strip `mastery_level`, `ease_factor`, `interval_days`, `next_review_at`, `last_reviewed_at`, `review_count`
-2. **Action source** set in `execute_maintenance_actions` (pipeline.py) so approved proposals also get the guard
+2. **Action source** set in `execute_approved_actions(..., source="maintenance")` (pipeline.py) so approved proposals also get the guard
 3. **Reduced temptation**: struggling concepts diagnostic hides raw scores, shows `(7 reviews, still building)` instead
 4. **Prompt prohibition** in `maintenance.md`: "NEVER modify score/scheduling fields"
 
@@ -261,7 +262,7 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 **Current design:**
 - **P1 (Reasoning model):** `generate_quiz_question()` uses `data/skills/quiz_generator.md` plus injected Active Persona and runtime User Preferences. It receives concept detail + related concepts + recent structured review metadata and returns JSON: `question`, `formatted_question`, `difficulty`, `question_type`, `target_facet`, `reasoning`, `concept_ids`, and optional `choices`. Calls use `response_format={"type": "json_object"}`.
-- **Delivery stage:** `package_quiz_for_discord()` is now a deterministic compatibility wrapper over `format_quiz_action()`. It uses `formatted_question` (or `question` as fallback) and returns the final `REPLY:` string. No LLM packaging stage remains in the scheduled-quiz flow.
+- **Delivery stage:** `format_quiz_action()` deterministically formats the P1 output into the final `REPLY:` string using `formatted_question` (or `question` as fallback). No LLM packaging stage remains in the scheduled-quiz flow.
 - **Fallback:** If P1 fails (timeout, parse error, provider unavailable), scheduler, chat review, and slash `/review` commands fall back to single-prompt `call_with_fetch_loop(mode="review-check")`.
 - **Open-response normalization:** the shared helper `services/review_flow.generate_review_quiz_from_payload()` must treat `p1_result["choices"] = None` the same as an empty choice list. P1 may legitimately emit `choices: null` for free-response questions; without normalization, `/review` and shared chat review crashed while iterating over `None`.
 
@@ -393,6 +394,18 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Design rule:** for local-first runtime behavior, identity, serialization, and turn-entry bookkeeping should each be bound once at the owning boundary. Avoid reintroducing route-level or view-level copies of those rules.
 
 **Key files:** `config.py`, `services/state.py`, `api/auth.py`, `api/routes/chat.py`, `services/chat_session.py`, `services/chat_actions.py`, `bot/commands.py`, `bot/events.py`, `services/views.py`, `services/pipeline.py`, `tests/test_user_context_entrypoints.py`, `tests/test_pipeline_sessions.py`.
+
+---
+
+## 29. Plan Files Are Active-Only
+
+**Problem:** completed implementation plans were deleted from `docs/plans/`, but the navigation docs still described that folder as housing historical completed plan records. That left stale breadcrumbs for later search-driven editing sessions.
+
+**Rule:** treat `docs/plans/` as an active-work coordination surface only. When a feature ships, either archive the plan outside this folder or delete it after moving any durable lessons into `docs/DEVNOTES.md`, `docs/ARCHITECTURE.md`, or the owning reference doc.
+
+**Cleanup requirement:** if `docs/plans/` becomes empty, update `docs/index.md` and `docs/DOC_INDEX.md` to say there is no active in-repo plan file rather than implying historical plans still live there.
+
+**Key files:** `docs/DOC_STANDARD.md`, `docs/index.md`, `docs/DOC_INDEX.md`, `docs/DEVNOTES.md`.
 
 ---
 
