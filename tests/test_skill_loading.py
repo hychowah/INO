@@ -2,7 +2,7 @@
 
 import pytest
 
-from services.pipeline import (
+from services.context import (
     SKILL_SETS,
     SKILLS_DIR,
     _get_base_prompt,

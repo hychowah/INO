@@ -100,7 +100,7 @@ Use this to know which file to open first for common tasks.
 | Understanding score/interval math | `docs/ARCHITECTURE.md` § Spaced Repetition |
 | Debugging a quirky edge case | `docs/DEVNOTES.md` |
 | Changing what the LLM can do | `data/skills/core.md` (actions) or mode-specific skill file |
-| Adding a new mode | `services/pipeline.py` (`SKILL_SETS`, `_mode_to_skill_set`), then update `AGENTS.md` + `docs/index.md` |
+| Adding a new mode | `services/context.py` (`SKILL_SETS`, `_mode_to_skill_set`), then update `AGENTS.md` + `docs/index.md`; touch `services/pipeline.py` only if the new mode also needs new orchestration |
 
 ---
 

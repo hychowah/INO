@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from services.llm import LLMError
-from services.pipeline import (
+from services.review_flow import (
     _quiz_generator_system_prompt,
     format_quiz_action,
 )
@@ -26,9 +26,9 @@ def test_format_quiz_action_prefers_formatted_question():
 
 def test_quiz_generator_system_prompt_includes_preferences_and_persona():
     with (
-        patch("services.pipeline.ctx._read_file", side_effect=["skill prompt", "pref body"]),
-        patch("services.pipeline.get_persona", return_value="mentor"),
-        patch("services.pipeline.get_persona_content", return_value="persona body"),
+        patch("services.review_flow.ctx._read_file", side_effect=["skill prompt", "pref body"]),
+        patch("services.review_flow.db.get_persona", return_value="mentor"),
+        patch("services.review_flow.db.get_persona_content", return_value="persona body"),
     ):
         prompt = _quiz_generator_system_prompt()
 
@@ -69,13 +69,13 @@ async def test_generate_quiz_question_requests_json_response_format():
     )
 
     with (
-        patch("services.pipeline.ctx.build_quiz_generator_context", return_value="context"),
-        patch("services.pipeline._quiz_generator_system_prompt", return_value="sys"),
-        patch("services.pipeline.get_reasoning_provider", return_value=provider),
-        patch("services.pipeline.db.update_concept") as update_concept,
-        patch("services.pipeline.db.set_session") as set_session,
+        patch("services.review_flow.ctx.build_quiz_generator_context", return_value="context"),
+        patch("services.review_flow._quiz_generator_system_prompt", return_value="sys"),
+        patch("services.review_flow.get_reasoning_provider", return_value=provider),
+        patch("services.review_flow.db.update_concept") as update_concept,
+        patch("services.review_flow.db.set_session") as set_session,
     ):
-        from services.pipeline import generate_quiz_question
+        from services.review_flow import generate_quiz_question
 
         result = await generate_quiz_question(12)
 
@@ -105,11 +105,11 @@ async def test_generate_quiz_question_rejects_missing_formatted_question():
     )
 
     with (
-        patch("services.pipeline.ctx.build_quiz_generator_context", return_value="context"),
-        patch("services.pipeline._quiz_generator_system_prompt", return_value="sys"),
-        patch("services.pipeline.get_reasoning_provider", return_value=provider),
+        patch("services.review_flow.ctx.build_quiz_generator_context", return_value="context"),
+        patch("services.review_flow._quiz_generator_system_prompt", return_value="sys"),
+        patch("services.review_flow.get_reasoning_provider", return_value=provider),
     ):
-        from services.pipeline import generate_quiz_question
+        from services.review_flow import generate_quiz_question
 
         with pytest.raises(LLMError, match="formatted_question"):
             await generate_quiz_question(12)

@@ -38,7 +38,6 @@ from services.parser import extract_fetch_params
 from services.pipeline import (
     MAX_MAINTENANCE_ACTIONS,
     MAX_TAXONOMY_ACTIONS,
-    build_system_prompt,
     call_taxonomy_loop,
     handle_taxonomy,
 )
@@ -65,7 +64,7 @@ def _section(title: str, content: str) -> None:
 
 def _build_full_prompt(mode: str, text: str) -> tuple[str, str]:
     """Return (system_prompt, user_prompt) assembled identically to _call_llm()."""
-    system_prompt = build_system_prompt(mode=mode)
+    system_prompt = ctx.build_system_prompt(mode=mode)
     dynamic_context = ctx.build_prompt_context(text, mode, is_new_session=True)
     user_prompt = (
         f"{dynamic_context}\n\n"

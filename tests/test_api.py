@@ -103,7 +103,7 @@ class TestChat:
     async def test_chat_normal_reply(self, client):
         with (
             patch(
-                "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
             patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
@@ -125,7 +125,7 @@ class TestChat:
     async def test_chat_stream_returns_status_and_done_events(self, client):
         with (
             patch(
-                "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
             patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
@@ -153,7 +153,7 @@ class TestChat:
         }
         with (
             patch(
-                "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
@@ -184,7 +184,7 @@ class TestChat:
         }
         with (
             patch(
-                "services.chat_session.pipeline.call_with_fetch_loop",
+                "services.chat_session.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(

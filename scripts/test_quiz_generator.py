@@ -190,7 +190,7 @@ def write_log(payload: dict) -> Path:
 
 async def run_p1(concept_id: int):
     """Run Prompt 1 (reasoning model) and show output."""
-    from services.pipeline import generate_quiz_question
+    from services.review_flow import generate_quiz_question
 
     print("\n" + "=" * 60)
     print("PROMPT 1 OUTPUT (reasoning model)")
@@ -206,7 +206,7 @@ async def run_p1(concept_id: int):
 
 async def run_p2(p1_result: dict, concept_id: int):
     """Run the delivery-formatting stage and show output."""
-    from services.pipeline import format_quiz_action
+    from services.review_flow import format_quiz_action
 
     print("\n" + "=" * 60)
     print("DELIVERY OUTPUT")
@@ -223,7 +223,7 @@ async def run_p2(p1_result: dict, concept_id: int):
 async def run_format_quiz_action(p1_result: dict, concept_id: int):
     """Run deterministic packaging when available and show output."""
     try:
-        from services.pipeline import format_quiz_action
+        from services.review_flow import format_quiz_action
     except ImportError:
         print(
             "format_quiz_action() not available yet; skipping deterministic packaging comparison."

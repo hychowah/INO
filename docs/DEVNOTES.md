@@ -204,11 +204,11 @@ maintenance (MAINTENANCE)   → core + maintenance + knowledge
 taxonomy (TAXONOMY-MODE)    → taxonomy
 ```
 
-`pipeline.py`: `SKILL_SETS` dict → `_mode_to_skill_set()` → `_get_base_prompt(skill_set)` with per-file mtime hot-reload. Cache keyed on `(persona, skill_set)`.
+`services/context.py`: `SKILL_SETS` dict → `_mode_to_skill_set()` → `_get_base_prompt(skill_set)` with per-file mtime hot-reload. Cache keyed on `(persona, skill_set)`.
 
 **`AGENTS.md` is a pointer file** (~25 lines) — coding-agent entry point, not read by runtime LLM.
 
-**Session isolation:** Maintenance and review-check modes create dedicated sessions. Interactive modes share `_get_conv_session()` with 5-min idle timeout. Taxonomy-mode now also uses an isolated session, and the taxonomy action loop reuses one stable session across all iterations so operator-triggered rebuild passes do not contaminate the interactive session.
+**Session isolation:** `services/llm_runtime.py` owns `_get_conv_session()` and the shared fetch loop. Maintenance and review-check modes create dedicated sessions there. Interactive modes share the normal conversation session with 5-min idle timeout. Taxonomy-mode now also uses an isolated session, and the taxonomy action loop reuses one stable session across all iterations so operator-triggered rebuild passes do not contaminate the interactive session.
 
 ---
 
@@ -270,7 +270,7 @@ taxonomy (TAXONOMY-MODE)    → taxonomy
 
 **Migration 14:** Added `question_type`, `target_facet`, and `question_difficulty` columns on `review_log`. These are fed back into `build_quiz_generator_context()` so P1 can avoid repeating recent quiz facets and question types.
 
-**Key files:** `services/pipeline.py` (`generate_quiz_question`, `_quiz_generator_system_prompt`, `format_quiz_action`), `services/tools_assess.py` (review metadata persistence), `services/context.py` (`build_quiz_generator_context`), `db/reviews.py`, `db/migrations.py`, `services/scheduler.py`, `services/chat_session.py`, `config.py` (REASONING_LLM_* vars).
+**Key files:** `services/review_flow.py` (`generate_quiz_question`, `_quiz_generator_system_prompt`, `format_quiz_action`, review fallback orchestration), `services/tools_assess.py` (review metadata persistence), `services/context.py` (`build_quiz_generator_context`), `services/llm_runtime.py` (`call_with_fetch_loop` fallback owner), `db/reviews.py`, `db/migrations.py`, `services/scheduler.py`, `services/chat_session.py`, `config.py` (REASONING_LLM_* vars).
 
 ---
 
@@ -303,10 +303,10 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 ## 16. Quiz Anchor Concept ID
 
-**Bug:** During an active quiz, the LLM sometimes fetched a related concept for comparison (e.g. user answered about "Decorator pattern" mentioning lambdas, LLM fetched "Lambda Captures"). The fetch loop in `pipeline.py` unconditionally overwrote `active_concept_id` with the fetched concept's ID, causing the subsequent `assess` action to evaluate against the wrong concept. The §15 intent-detection fix handled *new questions* vs *quiz answers*, but this bug occurs when the user IS answering the quiz — just confusingly.
+**Bug:** During an active quiz, the LLM sometimes fetched a related concept for comparison (e.g. user answered about "Decorator pattern" mentioning lambdas, LLM fetched "Lambda Captures"). The fetch loop in `services/llm_runtime.py` unconditionally overwrote `active_concept_id` with the fetched concept's ID, causing the subsequent `assess` action to evaluate against the wrong concept. The §15 intent-detection fix handled *new questions* vs *quiz answers*, but this bug occurs when the user IS answering the quiz — just confusingly.
 
 **Root cause (3 layers):**
-1. **Fetch loop overwrite** (`pipeline.py`): `active_concept_id` was updated on every fetch, even during active quiz processing.
+1. **Fetch loop overwrite** (`services/llm_runtime.py`): `active_concept_id` was updated on every fetch, even during active quiz processing.
 2. **No quiz-specific anchor**: `active_concept_id` served double duty — both "concept being discussed" and "concept being quizzed" — with no way to distinguish enrichment fetches from topic pivots.
 3. **LLM prompt ambiguity** (`quiz.md`): assess docs said "use that ID unless the conversation has moved to a different topic," which the LLM misinterpreted when it fetched a comparison concept.
 
@@ -314,7 +314,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 - **Set** by `_handle_quiz()` in `tools_assess.py` and by both `_send_review_reminder()` / `_send_review_quiz()` in `scheduler.py` whenever a quiz starts. Also pre-set by `/review` command (`bot/commands.py`) before `execute_llm_response` to ensure the anchor is present from the first turn.
 - **Durably backed** by `scheduled_review_reminders`: manual `/review`, shared chat review, and scheduler sends all register the same typed reminder row after successful delivery. This lets late single-concept answers recover even if `quiz_anchor_concept_id` was cleared by staleness or process drift, without needing a mirrored session blob.
-- **Protected** in `pipeline.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
+- **Protected** in `services/llm_runtime.py` fetch loop: when `quiz_anchor_concept_id` or `active_concept_ids` is set, the fetch loop does NOT update `active_concept_id` at all, preventing the quizzed concept from being displaced by enrichment fetches.
 - **Fallback chain** in `_handle_assess()` in `tools_assess.py`: when the LLM-provided `concept_id` is not found in DB, recovers via `quiz_anchor_concept_id` (Fallback 1), then `active_concept_id` (Fallback 2), then chat history regex (Fallback 3). Ensures the assessment reaches the correct concept even if the LLM provided a stale or invalid ID.
 - **Injected** by `_append_active_quiz_context()` in `context.py`: anchor takes priority over `active_concept_id` for the context block the LLM sees, and the exact question text now prefers volatile `last_quiz_question` before falling back to the typed reminder row. That keeps the first post-delivery answer turn grounded even when the reminder fallback path has not been used yet.
 - **Recovered** by `restore_pending_review_context()` in `services/review_state.py`: when an `assess` arrives with no active quiz keys but an unresolved typed reminder row exists, the guard restores `active_concept_id`, `quiz_anchor_concept_id`, and `last_quiz_question` before dispatching the real assess handler.
@@ -325,7 +325,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - `quiz.md`: assess docs changed to "Always use the concept_id from the 'Active Quiz Context' section" — removes ambiguous "unless conversation moved" language.
 - `core.md`: added "Confused answer rule" under Intent Detection — confused answers that touch related concepts still count as quiz answers; assess or clarify, don't pivot.
 
-**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`, `skip_quiz`), `services/review_state.py` (`get_pending_review`, `restore_pending_review_context`, `register_interactive_review_delivery`, `set_scheduler_reminder`, `resolve_scheduler_reminder`), `services/pipeline.py` (fetch loop guard, `_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_quiz`, `_check_reviews`), `db/review_reminders.py`, `bot/commands.py` (`/review` anchor pre-set), `services/chat_session.py` (shared chat review delivery registration), `scripts/agent.py` (assess guard parity), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`, `tests/test_review_fallback.py`.
+**Key files:** `services/tools_assess.py` (`_handle_quiz`, `_handle_assess`, `skip_quiz`), `services/review_state.py` (`get_pending_review`, `restore_pending_review_context`, `register_interactive_review_delivery`, `set_scheduler_reminder`, `resolve_scheduler_reminder`), `services/llm_runtime.py` (fetch loop guard), `services/pipeline.py` (`_QUIZ_CLEARING_ACTIONS`, `is_quiz_active`, assess guard), `services/context.py` (`_append_active_quiz_context`), `services/scheduler.py` (`_send_review_quiz`, `_check_reviews`), `db/review_reminders.py`, `bot/commands.py` (`/review` anchor pre-set), `services/chat_session.py` (shared chat review delivery registration), `scripts/agent.py` (assess guard parity), `data/skills/quiz.md`, `data/skills/core.md`, `tests/test_quiz_anchor.py`, `tests/test_assess_no_quiz_guard.py`, `tests/test_review_fallback.py`.
 
 ---
 
@@ -372,7 +372,7 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **Why there is no DB-backed proposal:** this flow still does not create a durable proposal row, but Discord no longer owns the approval write path itself. `/preference` now routes through `services.chat_session.handle_chat_message()` to emit the same `pending_confirm` envelope used by chat/API, and `PreferenceUpdateView` delegates Apply/Reject through `confirm_chat_action()` / `decline_chat_action()` rather than carrying an ad hoc callback with raw proposed content. Unlike maintenance or dedup proposals, this still edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
 
-**Key files:** `bot/commands.py` (`/preference` delegates to shared chat-session pending confirms), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/pipeline.py` (`SKILL_SETS["preference-edit"]`, `_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/chat_session.py` (`preference_update` confirm/decline ownership), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
+**Key files:** `bot/commands.py` (`/preference` delegates to shared chat-session pending confirms), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/context.py` (`SKILL_SETS["preference-edit"]`, `_get_base_prompt`, `PREFERENCES_MD_PATH`), `services/pipeline.py` (`_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/chat_session.py` (`preference_update` confirm/decline ownership), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
 
 ---
 
@@ -387,13 +387,13 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - `api/auth.py` now owns request-scope binding for the FastAPI surface. `X-Learning-User` is optional and validated there; missing values fall back to `LEARN_LOCAL_USER_ID`.
 - `services.state.begin_interactive_turn()` centralizes the shared pre-turn work: durable activity heartbeat plus `quiz_answered` reset. Do not duplicate that preamble in adapters.
 - `services.chat_session.py` now owns outer serialization for FastAPI chat, confirm, decline, and chat-action flows. Routes should call the shared controller directly rather than wrapping `pipeline_serialized()` themselves.
-- Runtime provider conversation sessions in `services/pipeline.py` are now keyed by current user, so one scoped user does not inherit another scoped user's provider session.
+- Runtime provider conversation sessions in `services/llm_runtime.py` are now keyed by current user, so one scoped user does not inherit another scoped user's provider session.
 - `services.chat_actions.py` now owns the lightweight confirm/decline executor for `add_concept` and `suggest_topic`. Keep those actions lightweight and same-turn; do not widen them into durable proposal flows unless the product semantics change.
 - `skip_quiz` in the shared chat-action path now uses `state.get_current_user()` rather than the adapter display author, so browser/API skip actions hit the correct scoped user.
 
 **Design rule:** for local-first runtime behavior, identity, serialization, and turn-entry bookkeeping should each be bound once at the owning boundary. Avoid reintroducing route-level or view-level copies of those rules.
 
-**Key files:** `config.py`, `services/state.py`, `api/auth.py`, `api/routes/chat.py`, `services/chat_session.py`, `services/chat_actions.py`, `bot/commands.py`, `bot/events.py`, `services/views.py`, `services/pipeline.py`, `tests/test_user_context_entrypoints.py`, `tests/test_pipeline_sessions.py`.
+**Key files:** `config.py`, `services/state.py`, `api/auth.py`, `api/routes/chat.py`, `services/chat_session.py`, `services/chat_actions.py`, `bot/commands.py`, `bot/events.py`, `services/views.py`, `services/llm_runtime.py`, `tests/test_user_context_entrypoints.py`, `tests/test_pipeline_sessions.py`.
 
 ---
 

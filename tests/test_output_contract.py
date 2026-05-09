@@ -5,7 +5,7 @@ import pytest
 
 from services.parser import CONTROLLED_FORMAT_FAILURE_MESSAGE
 from services.chat_session import _response
-from services.pipeline import (
+from services.llm_runtime import (
     _append_structured_output_hint,
     _main_response_format,
     _validate_or_retry_llm_output,
@@ -116,17 +116,17 @@ async def test_valid_output_does_not_retry_or_clear_session():
 
 
 def test_main_response_format_uses_json_object_in_auto_mode():
-    with patch("services.pipeline.config.LLM_OUTPUT_MODE", "auto"):
+    with patch("services.llm_runtime.config.LLM_OUTPUT_MODE", "auto"):
         assert _main_response_format() == {"type": "json_object"}
 
 
 def test_main_response_format_can_force_legacy_mode():
-    with patch("services.pipeline.config.LLM_OUTPUT_MODE", "legacy"):
+    with patch("services.llm_runtime.config.LLM_OUTPUT_MODE", "legacy"):
         assert _main_response_format() is None
 
 
 def test_main_response_format_can_use_json_schema_mode():
-    with patch("services.pipeline.config.LLM_OUTPUT_MODE", "json_schema"):
+    with patch("services.llm_runtime.config.LLM_OUTPUT_MODE", "json_schema"):
         response_format = _main_response_format()
 
     assert response_format["type"] == "json_schema"
@@ -154,7 +154,7 @@ def test_chat_response_blocks_machine_artifacts():
 async def test_invalid_output_writes_private_failure_log(tmp_path):
     provider = FakeProvider(["<think>still invalid</think>"])
 
-    with patch("services.pipeline.config.LLM_FAILURE_LOG_DIR", tmp_path):
+    with patch("services.llm_runtime.config.LLM_FAILURE_LOG_DIR", tmp_path):
         result = await _validate_or_retry_llm_output(
             provider=provider,
             raw="<think>bad raw</think>",

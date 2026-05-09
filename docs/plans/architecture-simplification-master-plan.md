@@ -84,7 +84,7 @@ The core runtime path to protect during simplification is:
 
 1. One transport entrypoint receives user input.
 2. `services.learn_turn.run_learn_turn()` resolves command versus reply mode.
-3. `services.pipeline.call_with_fetch_loop()` and `services.pipeline.execute_llm_response()` handle LLM orchestration.
+3. `services.llm_runtime.call_with_fetch_loop()` handles prompt/runtime/fetch-loop orchestration, and `services.pipeline.execute_llm_response()` handles parse-and-execute orchestration.
 4. `services.tools` and `services.tools_assess` execute actions.
 5. `db` modules persist knowledge, review, and session state.
 
@@ -114,7 +114,7 @@ operator workflow, or optional enhancement.
 | Confirmed review and proposal execution ownership | Third target completed: confirmed `maintenance_review` and `taxonomy_review` execution now lives in `services/chat_admin.py` instead of `services/chat_session.py` |
 | Discord confirm and preference ownership | Later Phase 5 slices moved reply confirms, button confirms, and `/preference` approval onto shared confirm and pending-action surfaces instead of adapter-owned callbacks |
 | Discord quiz follow-up ownership | Later Phase 5 slices moved skip execution and quiz follow-up dispatch onto shared `chat_quiz` / `chat_session` action owners, with Discord rebuilding quiz views from shared action payloads |
-| Oversized gateway behavior in `services/pipeline.py` | LLM orchestration, fetch loop, contract retry, admin loops, and preference edit all live in one module |
+| Remaining orchestration hotspot in `services/pipeline.py` | Parse-and-execute orchestration, admin loops, and preference edit still live together even after fetch loop, contract retry, and review-specific helpers moved into shared owners |
 
 ## Validation Policy
 

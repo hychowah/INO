@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import db
 from api.auth import verify_token
 from api.schemas import PersonaRequest
-from services import pipeline
+from services import context as ctx, llm_runtime
 
 router = APIRouter()
 
@@ -51,7 +51,7 @@ async def set_persona_endpoint(req: PersonaRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    pipeline.invalidate_prompt_cache()
-    pipeline.reset_conversation_session()
+    ctx.invalidate_prompt_cache()
+    llm_runtime.reset_conversation_session()
 
     return {"current": db.get_persona(), "message": f"Switched to {req.name} persona."}

@@ -202,7 +202,7 @@ def test_taxonomy_loop_reuses_session_and_records_created_topic(monkeypatch):
     async def fake_execute_action(_action_data):
         return "REPLY: ok"
 
-    monkeypatch.setattr(pipeline, "call_with_fetch_loop", fake_call_with_fetch_loop)
+    monkeypatch.setattr(pipeline, "_runtime_call_with_fetch_loop", fake_call_with_fetch_loop)
     monkeypatch.setattr(pipeline, "execute_action", fake_execute_action)
     monkeypatch.setattr(
         pipeline.db,

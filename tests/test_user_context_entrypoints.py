@@ -44,7 +44,7 @@ async def test_handle_user_message_sets_context_from_explicit_user_id(test_db):
 
     with (
         patch.object(handler, "_ensure_db", return_value=None),
-        patch("bot.handler.pipeline.call_with_fetch_loop", new=AsyncMock(side_effect=fake_fetch_loop)),
+        patch("bot.handler.call_with_fetch_loop", new=AsyncMock(side_effect=fake_fetch_loop)),
         patch("bot.handler.parse_llm_response", return_value=("REPLY", "raw", None)),
         patch("bot.handler.pipeline.execute_llm_response", new=AsyncMock(return_value="REPLY: done")),
         patch("bot.handler.process_output", return_value=("reply", "done")),

@@ -30,13 +30,14 @@ async def test_check_reviews_sends_reminder_before_fetching_new_review(test_db):
 
     try:
         with (
+            patch("services.scheduler._is_within_review_quiet_hours", return_value=False),
             patch("services.scheduler._send_review_reminder", new=AsyncMock()) as reminder_mock,
-            patch("services.scheduler.pipeline.handle_review_check") as handle_review_check_mock,
+            patch("services.scheduler._get_scheduled_review_payload") as payload_mock,
         ):
             await scheduler._check_reviews()
 
         reminder_mock.assert_awaited_once()
-        handle_review_check_mock.assert_not_called()
+        payload_mock.assert_not_called()
     finally:
         state.last_activity_at = original_last_activity
 
@@ -55,6 +56,7 @@ async def test_check_reviews_resends_after_two_hours_when_unanswered(test_db):
 
     try:
         with (
+            patch("services.scheduler._is_within_review_quiet_hours", return_value=False),
             patch("services.scheduler._send_review_reminder", new=AsyncMock()) as reminder_mock,
             patch("services.scheduler._get_scheduled_review_payload") as payload_mock,
         ):
@@ -86,6 +88,7 @@ async def test_check_reviews_reminds_after_unanswered_interactive_delivery(test_
 
     try:
         with (
+            patch("services.scheduler._is_within_review_quiet_hours", return_value=False),
             patch("services.scheduler._send_review_reminder", new=AsyncMock()) as reminder_mock,
             patch("services.scheduler._get_scheduled_review_payload") as payload_mock,
         ):

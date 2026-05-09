@@ -15,7 +15,7 @@ from bot.handler import (
 )
 from bot.messages import send_discord_result, send_long, send_long_with_view
 from services import backup as backup_service
-from services import chat_session, pipeline, state
+from services import chat_session, context as prompt_ctx, llm_runtime, pipeline, state
 from services.parser import parse_llm_response
 from services.review_flow import generate_review_quiz_from_payload
 from services.views import (
@@ -208,8 +208,8 @@ async def persona_command(ctx, *, name: str = ""):
     try:
         async with state.pipeline_serialized():
             db.set_persona(target)
-            pipeline.invalidate_prompt_cache()
-            pipeline.reset_conversation_session()
+            prompt_ctx.invalidate_prompt_cache()
+            llm_runtime.reset_conversation_session()
     except ValueError:
         await ctx.send(f"Unknown persona `{target}`. Available: {', '.join(available)}")
         return

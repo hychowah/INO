@@ -75,7 +75,7 @@ def test_set_persona_validates():
 
 def test_build_system_prompt(test_db):
     """build_system_prompt returns different content per persona."""
-    from services.pipeline import build_system_prompt
+    from services.context import build_system_prompt
 
     prompts = {}
     for name in ["mentor", "coach", "buddy"]:

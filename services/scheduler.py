@@ -21,7 +21,7 @@ import config
 import db
 from bot.messages import send_review_question
 from services import backup as backup_service
-from services import pipeline, state
+from services import pipeline, review_flow, state
 from services.dedup import format_dedup_suggestions, handle_dedup_check
 from services.formatting import truncate_for_discord
 from services.review_flow import generate_review_quiz_from_payload
@@ -35,6 +35,8 @@ from services.review_state import (
 from services.views import DedupConfirmView
 
 logger = logging.getLogger("scheduler")
+
+build_review_payload = review_flow.build_review_payload
 
 # Module-level state set by start()
 _bot = None
@@ -114,7 +116,7 @@ def _update_pending_reminder(pending: dict) -> None:
 def _get_scheduled_review_payload() -> str | None:
     """Build a scheduler review payload from overdue concepts only.
 
-    Unlike pipeline.handle_review_check(), this path never falls back to the
+    Unlike review_flow.handle_review_check(), this path never falls back to the
     next upcoming concept because scheduled reminders should only fire for
     concepts that are already due.
     """
@@ -123,7 +125,7 @@ def _get_scheduled_review_payload() -> str | None:
         return None
 
     concept = due[0]
-    payload = pipeline.build_review_payload(int(concept["id"]))
+    payload = build_review_payload(int(concept["id"]))
     if not payload:
         return None
 

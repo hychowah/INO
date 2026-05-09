@@ -136,7 +136,10 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/pipeline.py` | ~1010 | Core orchestrator — context → LLM → validate/retry → parse → execute, with fetch loop + session isolation; includes isolated `preference-edit` flow and compatibility aliases for prompt helpers now implemented in `services/context.py` |
+| `services/context.py` | ~920 | Prompt-context assembly and skill loading — dynamic context, fetch-result formatting, skill-set mapping, prompt caching, and system-prompt composition |
+| `services/llm_runtime.py` | ~330 | Shared LLM runtime owner — conversation sessions, fetch loop, output-contract retry/logging, structured-output hinting, and raw provider call helpers |
+| `services/review_flow.py` | ~275 | Shared review owner — canonical review payload/check helpers, structured quiz generation, deterministic delivery formatting, and review fallback orchestration |
+| `services/pipeline.py` | ~480 | Remaining orchestrator — parse/execute flow, quiz guards, maintenance/taxonomy action loops, taxonomy context entrypoints, and isolated `preference-edit` execution |
 | `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter, structured-output fallback when `response_format` is rejected, and reasoning-provider selection |
 | `services/parser.py` | ~180 | LLM output boundary and presentation guard — `validate_llm_output`, `parse_llm_response`, `process_output`, `extract_llm_action`, `guard_user_message` |
 | `services/action_contracts.py` | ~290 | Lightweight LLM action schema/validation — required params, param-type checks, action JSON schema for structured output mode |
@@ -223,9 +226,9 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
         │      ├── active quiz / pending reminder → "reply"
         │      └── otherwise → "command"
         ▼
-      pipeline.call_with_fetch_loop(mode, text, author)          ← async
+      llm_runtime.call_with_fetch_loop(mode, text, author)       ← async
          │
-        ├─── context.build_prompt_context(text, mode)        ← direct call
+        ├─── context.build_prompt_context(text, mode)            ← direct call
          │         │
          │         ├── db.get_hierarchical_topic_map()
          │         ├── db.get_due_concepts(limit=5)
@@ -238,7 +241,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │         └── _preload_mentioned_concept()  (exact title match → concept detail + relations)
          │
          ├─── Assemble prompt:
-         │      build_system_prompt(mode)
+         │      context.build_system_prompt(mode)
          │      → loads data/skills/* + active persona + runtime preferences.md
          │      + dynamic context (topics, due, chat history)
          │      + "User said: <text>"
@@ -248,7 +251,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          │         ├── openai_compat: sends assembled prompt directly in API messages
          │         └── if endpoint rejects response_format, retries once without it
          │
-         ├─── parser.validate_llm_output(raw_output)
+         ├─── llm_runtime._validate_or_retry_llm_output(...)
          │         ├── validates prefix/action envelope before execution/history/display
          │         └── invalid output → private log + clear contaminated session + one hidden retry
          │
@@ -329,7 +332,7 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
          ▼
   ┌─ P1 generation + deterministic delivery (with fallback) ──┐
   │                                                            │
-  │  P1: pipeline.generate_quiz_question(concept_id)           │
+  │  P1: review_flow.generate_quiz_question(concept_id)        │
   │    Provider: REASONING_LLM_* (or main provider fallback)   │
   │    System prompt: quiz_generator.md + Active Persona +      │
   │                   runtime preferences.md                    │
@@ -340,12 +343,12 @@ The code is intentionally "dumb" — it provides CRUD primitives and a pipeline,
   │    Cached in: concepts.last_quiz_generator_output          │
   │                       │                                    │
   │                       ▼                                    │
-  │  Delivery: pipeline.format_quiz_action(p1_result)          │
+  │  Delivery: review_flow.format_quiz_action(p1_result)       │
   │    Deterministic formatter                                 │
   │    Input: P1 JSON                                          │
   │    Output: REPLY string using formatted_question           │
   │                                                            │
-  │  Fallback: If P1 fails → pipeline.call_with_fetch_loop()   │
+  │  Fallback: If P1 fails → llm_runtime.call_with_fetch_loop()│
   │            mode="review-check" single-prompt flow          │
   └────────────────────────────────────────────────────────────┘
          │
@@ -626,22 +629,22 @@ Current product posture is still single-user-first, but the shipped local-first 
 | `none` / `reply` | `_handle_none` | Passthrough |
 
 ### services/pipeline.py — Orchestrator
-The core brain of the system. Coordinates everything:
+The remaining orchestration core. It now focuses on parse/execute flow and the operator-only loops that still justify living together:
 
-1. **`call_with_fetch_loop(mode, text, author)`** — Main entry point. Builds context, calls the active LLM provider, handles fetch loop (up to 3 iterations), returns final LLM response string.
-2. **`execute_llm_response(user_input, llm_response, mode)`** — Parses the LLM response, executes any action, saves chat history. Returns prefixed result string.
-3. **`_call_llm(mode, text, author, extra_context)`** — Assembles the prompt (file refs + dynamic context), requests structured output when configured, calls `provider.send()`, and validates the raw completion before execution/history/display.
-4. **`_validate_or_retry_llm_output(...)`** — Contract boundary for raw provider completions. Invalid outputs are written to `data/llm_failures/`, provider session history is cleared, one hidden retry is attempted, and repeated failures become a controlled user-visible formatting error.
-5. **`_main_response_format()` / `_append_structured_output_hint(...)`** — Runtime structured-output controls for the main interactive path. Support `LEARN_LLM_OUTPUT_MODE=auto|json_object|json_schema|legacy`; `json_schema` is built from `services/action_contracts.py`.
-6. **`handle_review_check()`** — Direct DB read for due concepts. Returns formatted review payload strings.
-7. **`handle_maintenance()`** — Direct DB diagnostics. Returns context string or None.
-8. **Parsing utilities** — `validate_llm_output()`, `parse_llm_response()`, `extract_llm_action()`, `process_output()`, `guard_user_message()`.
-9. **`is_quiz_active()`** — Authoritative volatile quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session. Used as the first guard in `execute_action`.
-10. **`execute_action` assess guard** — Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_active()`. If no quiz is active, `assess` first attempts `restore_pending_review_context()` from the typed scheduled reminder row written after successful review delivery. Only when no active quiz exists and no reminder row can be restored does the action short-circuit, leaving scores/logs untouched and returning `REPLY: (assessment skipped -- no active quiz)`. `multi_assess` remains strict because multi-quiz recovery is not implemented. The CLI helper in `scripts/agent.py` mirrors the same single-quiz recovery logic.
-11. **`call_action_loop(mode, safe_actions, max_actions, context, preamble, continuation_context_limit=1500, action_journal=None)`** — Generic LLM action loop shared by maintenance and taxonomy modes. Iterates up to `max_actions` rounds; auto-executes safe actions, collects unsafe actions as proposals, and can optionally append structured entries into `action_journal` for operator workflows such as taxonomy shadow rebuild. Taxonomy mode also injects a stable isolated session into `call_with_fetch_loop()` so all action-loop turns stay in the same taxonomy session.
-12. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode: uses `SAFE_MAINTENANCE_ACTIONS` and `MAX_MAINTENANCE_ACTIONS = 5`.
-13. **`call_taxonomy_loop(taxonomy_context, max_actions=15, continuation_context_limit=1500, action_journal=None, operator_directive=None)`** — Thin wrapper around `call_action_loop()` for taxonomy mode (`"taxonomy-mode"` skill set): uses `SAFE_TAXONOMY_ACTIONS`, supports larger operator-controlled action budgets, can journal replayable actions for the shadow rebuild script, and can inject a script-only operator directive without changing the base taxonomy skill file.
-14. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context string, or `None` if no topics exist.
+1. **`execute_llm_response(user_input, llm_response, mode)`** — Parses the final LLM response, executes any action, saves chat history, and returns the prefixed result string.
+2. **`execute_action(action_data)`** — Dispatches actions through `services.tools`, retains the quiz-state guard for `assess` / `multi_assess`, and clears quiz state after non-quiz terminal actions.
+3. **`is_quiz_active()`** — Authoritative volatile quiz-state check. Returns `True` when either `quiz_anchor_concept_id` (single-quiz) or `active_concept_ids` (multi-quiz) is set in session.
+4. **`handle_maintenance()`** — Direct DB diagnostics. Returns maintenance context or `None`.
+5. **`call_action_loop(...)`** — Generic LLM action loop shared by maintenance and taxonomy modes. It now delegates the actual LLM call/fetch-loop work to `services.llm_runtime.call_with_fetch_loop()`.
+6. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode.
+7. **`call_taxonomy_loop(...)`** — Thin wrapper around `call_action_loop()` for taxonomy mode, including the stable isolated taxonomy session.
+8. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context or `None` if no topics exist.
+9. **`call_preference_edit(user_text)` / `execute_preference_update(content)`** — Special-case isolated `/preference` edit path that bypasses the normal action/fetch runtime and writes the live preferences file after confirmation.
+
+### services/context.py + services/llm_runtime.py + services/review_flow.py — Prompt, Runtime, and Review Owners
+- `services/context.py` owns skill-set mapping, prompt caching, prompt assembly, dynamic context building, and fetch-result formatting.
+- `services/llm_runtime.py` owns conversation session lifecycle, output-contract retry/logging, structured-output hinting, raw provider calls, and the shared fetch loop used by chat, review fallback, and operator loops.
+- `services/review_flow.py` owns canonical review payload/check helpers, the structured quiz-generator P1 flow, deterministic delivery formatting, and the shared review fallback orchestration used by scheduler, chat, and Discord review entrypoints.
 
 ### services/llm.py — Provider Integration
 - Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by structured review-quiz P1 generation

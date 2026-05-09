@@ -33,10 +33,10 @@ async def test_send_review_quiz_attaches_skip_button_for_eligible_concept(test_d
         patch.object(scheduler, "_authorized_user_id", 123),
         patch("services.tools.set_action_source"),
         patch(
-            "services.pipeline.generate_quiz_question",
+            "services.review_flow.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
+        patch("services.review_flow.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: What is eligible?"),
@@ -78,10 +78,10 @@ async def test_send_review_quiz_omits_skip_button_for_ineligible_concept(test_db
         patch.object(scheduler, "_authorized_user_id", 123),
         patch("services.tools.set_action_source"),
         patch(
-            "services.pipeline.generate_quiz_question",
+            "services.review_flow.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),
         ),
-        patch("services.review_flow.pipeline.format_quiz_action", return_value="QUIZ"),
+        patch("services.review_flow.format_quiz_action", return_value="QUIZ"),
         patch(
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: What is new?"),
@@ -108,9 +108,9 @@ async def test_check_reviews_skips_when_pipeline_lock_is_busy(test_db):
     state.PIPELINE_LOCK.acquire()
 
     try:
-        with patch("services.scheduler.pipeline.handle_review_check") as mock_handle:
+        with patch("services.scheduler._get_scheduled_review_payload") as payload_mock:
             await scheduler._check_reviews()
-        mock_handle.assert_not_called()
+        payload_mock.assert_not_called()
     finally:
         if state.PIPELINE_LOCK.locked():
             state.PIPELINE_LOCK.release()
@@ -160,6 +160,7 @@ async def test_check_reviews_clears_stale_review_in_progress_and_continues(test_
     try:
         with (
             patch("services.scheduler.state.get_last_user_activity", return_value=None),
+            patch("services.scheduler._is_within_review_quiet_hours", return_value=False),
             patch(
                 "services.scheduler.db.get_session_updated_at",
                 side_effect=lambda key, **_: "2026-04-27 08:00:00"

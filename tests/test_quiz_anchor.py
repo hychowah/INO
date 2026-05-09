@@ -30,15 +30,15 @@ def _run_pipeline_action(action_data: dict) -> str:
 
 
 def _run_fetch_loop(fetch_concept_id: int) -> str:
-    from services import pipeline
+    from services import llm_runtime
 
     fetch_response = f'{{"action":"fetch","params":{{"concept_id":{fetch_concept_id}}}}}'
     with (
-        patch("services.pipeline._call_llm", new=AsyncMock(return_value=fetch_response)),
-        patch("services.pipeline._call_llm_followup", new=AsyncMock(return_value="REPLY: done")),
+        patch.object(llm_runtime, "_call_llm", new=AsyncMock(return_value=fetch_response)),
+        patch.object(llm_runtime, "_call_llm_followup", new=AsyncMock(return_value="REPLY: done")),
     ):
         return _run(
-            pipeline.call_with_fetch_loop(
+            llm_runtime.call_with_fetch_loop(
                 mode="command",
                 text="Need more context",
                 author="test-user",

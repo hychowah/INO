@@ -1,7 +1,7 @@
 # AGENTS.md — Learning Agent System Prompt
 
 <!-- DEV NOTE: This file is the TABLE OF CONTENTS. Full instructions are assembled
-     from data/skills/ at runtime by pipeline.py. Edit the source files there.
+     from data/skills/ at runtime by services/context.py. Edit the source files there.
      Copilot/coding assistants: read docs/DEVNOTES.md before editing code.
      Runtime LLM instructions belong in data/skills/*.md, not this file. -->
 

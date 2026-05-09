@@ -37,20 +37,20 @@ sys.path.insert(0, str(ROOT))
 import config  # noqa: E402
 import db  # noqa: E402
 from services import tools  # noqa: E402
+from services.context import build_system_prompt  # noqa: E402
 from services.llm import get_provider  # noqa: E402
+from services.llm_runtime import (  # noqa: E402
+    _append_structured_output_hint,
+    _main_response_format,
+    _validate_or_retry_llm_output,
+    call_with_fetch_loop,
+)
 from services.parser import (  # noqa: E402
     CONTROLLED_FORMAT_FAILURE_MESSAGE,
     guard_user_message,
     looks_like_machine_artifact,
     parse_llm_response,
     validate_llm_output,
-)
-from services.pipeline import (  # noqa: E402
-    _append_structured_output_hint,
-    _main_response_format,
-    _validate_or_retry_llm_output,
-    build_system_prompt,
-    call_with_fetch_loop,
 )
 
 SEP = "=" * 80

@@ -6,7 +6,8 @@ from datetime import datetime
 import config
 import db
 from services import backup as backup_service
-from services import pipeline, state
+from services import context as ctx
+from services import llm_runtime, pipeline, review_flow, state
 from services import chat_admin
 from services.chat_actions import (
     CHAT_CONFIRMABLE_ACTIONS,
@@ -30,6 +31,10 @@ from services.parser import parse_llm_response, process_output
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import get_pending_review, register_interactive_review_delivery
 from services.tools import execute_action, set_action_source
+
+call_with_fetch_loop = llm_runtime.call_with_fetch_loop
+handle_review_check = review_flow.handle_review_check
+
 _db_initialized = False
 
 
@@ -45,6 +50,11 @@ def _record_exchange(user_text: str, assistant_text: str) -> None:
         db.add_chat_message("user", user_text)
     if assistant_text:
         db.add_chat_message("assistant", assistant_text)
+
+
+def _response(output: str) -> dict:
+    msg_type, message = process_output(output)
+    return build_chat_payload(message, msg_type=msg_type)
 
 
 def _split_command(text: str) -> tuple[str, str]:
@@ -102,7 +112,7 @@ async def _handle_learn_message(text: str, author: str = "chat", source: str = "
         text,
         author,
         source=source,
-        call_with_fetch_loop=pipeline.call_with_fetch_loop,
+        call_with_fetch_loop=call_with_fetch_loop,
         parse_response=parse_llm_response,
         execute_response=pipeline.execute_llm_response,
         process_output=process_output,
@@ -134,7 +144,7 @@ async def _handle_review_request(
     _ensure_db()
     state.begin_interactive_turn()
 
-    review_lines = pipeline.handle_review_check()
+    review_lines = handle_review_check()
     if not review_lines:
         return None
 
@@ -272,8 +282,8 @@ async def _handle_chat_message(text: str, author: str = "chat", source: str = "c
                 _record_exchange(text, message)
                 return build_chat_payload(message, msg_type="error")
 
-            pipeline.invalidate_prompt_cache()
-            pipeline.reset_conversation_session()
+            ctx.invalidate_prompt_cache()
+            llm_runtime.reset_conversation_session()
             message = f"Switched to {target.title()} persona. Next message will use the new style."
             _record_exchange(text, message)
             return build_chat_payload(message)

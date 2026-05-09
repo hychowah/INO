@@ -6,11 +6,13 @@ from datetime import datetime
 import discord
 
 import db
-from services import pipeline, state
+from services import llm_runtime, pipeline, state
 from services.learn_turn import run_learn_turn
 from services.parser import parse_llm_response, process_output
 
 logger = logging.getLogger("bot")
+
+call_with_fetch_loop = llm_runtime.call_with_fetch_loop
 
 # Maps message_id → (action_data, View) for add_concept and suggest_topic
 _pending_confirmations: dict[int, tuple[dict, discord.ui.View]] = {}
@@ -69,7 +71,7 @@ async def _handle_user_message(
                 text,
                 author,
                 source="discord",
-                call_with_fetch_loop=pipeline.call_with_fetch_loop,
+                call_with_fetch_loop=call_with_fetch_loop,
                 parse_response=parse_llm_response,
                 execute_response=pipeline.execute_llm_response,
                 process_output=process_output,
