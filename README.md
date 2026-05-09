@@ -1,80 +1,38 @@
 # Learning Agent
 
-An LLM-first spaced repetition system where **all learning intelligence lives in the prompt, not in code**. The codebase provides thin CRUD plumbing and a small shared runtime core: interactive turns resolve through shared chat and review owners, `services.llm_runtime.py` runs the fetch loop, `services.pipeline.py` parses and executes the final action, and the LLM decides what to teach, when to quiz, and how to adapt.
+A personal AI tutor that remembers what you've learned, quizzes you at the right time, and adapts to how well you know each concept.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+## What it does
+
+You chat with it naturally — ask it to explain something, have it quiz you, or just explore a topic. It builds a knowledge base from your conversations, schedules review reminders when you're likely to forget, and scores your recall to decide when each concept needs another look.
+
 ## Features
 
-- **LLM-driven pedagogy** — Topic/concept extraction, quiz generation, and knowledge assessment are all handled by the LLM via a modular prompt system with hot-reloadable skill files
-- **Score-based spaced repetition** — Asymmetric 0–100 scoring with exponential intervals (custom algorithm, not SM-2)
-- **Quiz skip button** — After 2+ reviews, eligible quiz questions show an `I know this` button that scores confident recall without forcing a typed answer; each fresh review delivery re-arms the button for the new question
-- **Hybrid search** — Qdrant vector store (768-dim, `all-mpnet-base-v2`) + SQLite FTS5, with graceful degradation if Qdrant is unavailable
-- **Multi-concept synthesis quizzes** — Semantically clusters related concepts for cross-topic questions
-- **Self-improving remarks** — The LLM writes and reads its own persistent notes per concept, creating a feedback loop across sessions
-- **Multiple interfaces** — Discord bot, FastAPI REST API, and the FastAPI-served React browser UI share the same learning pipeline and data stores
-- **Knowledge graph** — DAG-based topic hierarchy with many-to-many concept mapping
-- **Desktop-first browser shell** — FastAPI serves a React SPA organized around Dashboard, Chat, Knowledge, and Progress, with an Activity drawer, compatibility routes, a shell command palette, and resizable Knowledge detail panels
-- **Background automation** — Persisted scheduler for review delivery, taxonomy cleanup, backups, proposal cleanup, and optional maintenance/dedup jobs
-- **Automated data backup** — Independent daily snapshot of both databases and the vector store into timestamped subdirectories; `/backup` slash command for on-demand backup with pruning of snapshots older than the configured retention window
-- **Editable user preferences** — `/preference` shows or updates the runtime `preferences.md` file through an isolated LLM edit flow with explicit Apply/Reject confirmation
-- **Configurable personas** — Buddy / Coach / Mentor presets loaded from Markdown files
-- **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
+- **Spaced repetition** — Automatically schedules review quizzes based on how well you know each concept; stronger recall earns longer gaps before the next review
+- **Smart quiz generation** — Generates quiz questions tailored to what you've been learning, including multi-concept questions that connect related ideas
+- **Quiz skip button** — After a couple of reviews, a question you're confident about shows an "I know this" button so you don't have to type out the answer every time
+- **Scheduled review reminders** — Sends you a review quiz automatically when a concept is due, with quiet hours and cooldown so it isn't disruptive
+- **Knowledge graph** — Organizes everything you've learned into topics and concepts, browsable in a visual graph
+- **Self-adapting notes** — The AI maintains its own running notes per concept, improving how it explains and quizzes you over time
+- **Editable preferences** — `/preference` lets you read or update how the AI behaves; changes go through an explicit confirm/reject step before applying
+- **Personas** — Switch between Buddy, Coach, and Mentor communication styles
+- **Automatic backups** — Daily snapshots of your knowledge base; `/backup` triggers one on demand
+- **Multiple interfaces** — Discord bot, browser UI, and a REST API all share the same knowledge base
 
-## Architecture
+## Interfaces
 
-The current protected runtime path is: transport entrypoint -> `services.learn_turn.py` or another shared chat/review owner -> `services.llm_runtime.py` for provider calls and fetch-loop behavior -> `services.pipeline.py` for parse and execute -> `services.tools.py`, `services.tools_assess.py`, and `db/` for execution and persistence. The diagram below is still a simplified overview; prefer this path when reasoning about ownership.
+**Discord bot** — Chat directly in a DM or server channel. Use slash commands like `/review`, `/backup`, `/preference`, and `/reorganize`. The bot also delivers scheduled review reminders.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  User Interfaces                                                │
-│  Discord bot     REST/API routes     Browser UI                 │
-└──────────────┬──────────────┬────────────────────┬──────────────┘
-            │              │                    │
-            └──────────────┴─────────────┬──────┘
-                                    ▼
-   Shared entry owners: learn_turn.py · chat_session.py
-          review_flow.py · chat_admin.py
-                                    │
-                                    ▼
-       llm_runtime.py (provider calls + fetch loop)
-                                    │
-                                    ▼
-    pipeline.py (parse/execute core + operator wrappers)
-                                    │
-                                    ▼
-    tools.py · tools_assess.py · db/ persistence
-```
+**Browser UI** — Open `http://localhost:8080` after starting `api.py`. Includes a chat panel, knowledge browser, concept/topic detail views, a knowledge graph, and a progress/forecast view.
 
-Discord views and browser page/controller composition remain transport-local above this shared core.
-
-The **fetch loop** is the key architectural pattern: `services.llm_runtime.py` can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before `services.pipeline.py` parses and executes the final response. This keeps the LLM in control of what data it needs, without sending everything upfront.
-
-Current runtime behavior is still single-user end-to-end: Discord access is gated by one `LEARN_AUTHORIZED_USER_ID`, the REST API uses one bearer token, and the Web UI is local-only. The DB layer still contains dormant per-user scaffolding (`user_id` columns, `users` table, ContextVar-based lookup), but the shipped local-first runtime now binds Discord/API/browser flows to a canonical local alias via `LEARN_LOCAL_USER_ID`. API and browser requests may still override request scope with `X-Learning-User` when needed.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture documentation with data flow diagrams, schema definitions, and module responsibilities.
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Language | Python 3.10+ |
-| Databases | SQLite (WAL mode) × 2 |
-| Vector Store | Qdrant (embedded mode) |
-| Embeddings | sentence-transformers (`all-mpnet-base-v2`, 768-dim) |
-| LLM Backend | OpenAI-compatible chat completions (Grok, DeepSeek, OpenAI, …) |
-| Discord | discord.py |
-| REST API | FastAPI + Uvicorn |
-| Web UI | FastAPI-served React/TypeScript/Vite SPA + Tailwind CSS + local UI primitives |
-
-> **Note:** `sentence-transformers` pulls in PyTorch (~2 GB download). For CPU-only installs:
-> `pip install torch --index-url https://download.pytorch.org/whl/cpu` before installing requirements.
+**REST API** — The same backend is available as a REST API on port 8080 for programmatic access. See [docs/API.md](docs/API.md).
 
 ## Quick Start
 
 ```bash
-# Clone and set up
 git clone https://github.com/hychowah/INO.git
 cd INO
 python -m venv venv
@@ -84,49 +42,34 @@ source venv/bin/activate          # Linux / macOS
 venv\Scripts\activate             # Windows (cmd)
 .\venv\Scripts\Activate.ps1       # Windows (PowerShell)
 
-# Install dependencies
 pip install -r requirements.txt
 
-# Configure
-cp .env.example .env              # Linux / macOS  (Windows: copy .env.example .env)
+cp .env.example .env              # Windows: copy .env.example .env
 ```
 
-Edit `.env` with your LLM provider settings:
+> **Note:** `sentence-transformers` pulls in PyTorch (~2 GB). For a CPU-only install, run `pip install torch --index-url https://download.pytorch.org/whl/cpu` before `pip install -r requirements.txt`.
+
+Edit `.env` with at minimum:
 
 ```dotenv
-LEARN_LLM_PROVIDER=openai_compat
-LEARN_LLM_BASE_URL=https://api.x.ai/v1    # or any OpenAI-compatible endpoint
+LEARN_LLM_BASE_URL=https://api.x.ai/v1    # any OpenAI-compatible endpoint
 LEARN_LLM_API_KEY=your_api_key_here
 LEARN_LLM_MODEL=grok-3
+LEARN_BOT_TOKEN=your_discord_bot_token     # Discord bot only
 LEARN_AUTHORIZED_USER_ID=your_discord_user_id
-LEARN_LOCAL_USER_ID=default
 ```
-
-If you omit `LEARN_LLM_PROVIDER`, the app defaults to `openai_compat`. You still need to set `LEARN_LLM_BASE_URL`, `LEARN_LLM_API_KEY`, and `LEARN_LLM_MODEL`.
 
 Then run:
 
 ```bash
-python bot.py          # Discord bot
-python api.py          # FastAPI app on http://localhost:8080
-make build-ui          # Optional: rebuild the React SPA assets before running api.py
-make dev-ui            # Optional: Vite dev server for SPA development on :5173
-make dev-all           # API + Vite dev server + Discord bot together
+python bot.py      # Discord bot
+python api.py      # Browser UI + REST API at http://localhost:8080
+make dev-all       # Both together, plus the Vite dev server
 ```
 
-Current web runtime notes:
-
-- `python api.py` serves the API plus the built web UI at `http://127.0.0.1:8080/`.
-- The Discord bot always owns scheduled review DMs. Maintenance, taxonomy, dedup, backup, and proposal cleanup run through a DB-backed owner lock, so either `bot.py` or `api.py` can host the shared background jobs without double-running them.
-- Scheduled review DMs now select overdue concepts only, persist one active typed reminder row per user in `scheduled_review_reminders`, recover late single-concept answers from that row, cancel deleted reminder concepts automatically, resend unresolved reminders after the configured cooldown, and suppress sends during quiet hours, recent user activity, or active manual review generation.
-- If `frontend/dist/` exists, FastAPI serves the built React SPA for any HTML request outside `/api`, `/assets`, and `/static`; otherwise those routes return a simple HTML response instructing you to run `make build-ui`.
-- Canonical browser routes are `/`, `/chat`, `/knowledge`, `/knowledge/concepts`, `/knowledge/graph`, `/progress`, `/progress/forecast`, `/topic/{topic_id}`, and `/concept/{concept_id}`. Legacy `/topics`, `/concepts`, `/graph`, `/reviews`, and `/forecast` paths remain as SPA compatibility redirects, and `/actions` remains available as a standalone compatibility route even though Activity normally opens in a drawer.
-- `make dev-ui` starts the React/Vite development server on `http://127.0.0.1:5173/`; React Router owns the SPA routes there, while only `/api`, `/assets`, and `/static` are proxied to the FastAPI app on port 8080.
-- `make dev-all` starts `api.py`, `npm run dev`, and `bot.py` together for a full local development stack.
+For the full setup walkthrough (frontend build, Node.js dependencies, `.env` reference): see [docs/SETUP.md](docs/SETUP.md).
 
 ## Discord Bot Setup
-
-To use the Discord bot interface:
 
 1. Create a new application at the [Discord Developer Portal](https://discord.com/developers/applications)
 2. Go to **Bot** → **Privileged Gateway Intents** → enable **Message Content Intent**
@@ -137,117 +80,34 @@ To use the Discord bot interface:
 
 ## Configuration
 
-All settings are via environment variables (see [.env.example](.env.example) for the full list).
-
-**Required (for `bot.py`):**
+All settings are environment variables in `.env`. The required ones are:
 
 | Variable | Purpose |
 |----------|---------|
-| `LEARN_BOT_TOKEN` | Discord bot token |
-| `LEARN_AUTHORIZED_USER_ID` | Your Discord user ID (current runtime remains single-user at the interface layer) |
+| `LEARN_LLM_BASE_URL` | Your LLM provider endpoint (any OpenAI-compatible URL) |
+| `LEARN_LLM_API_KEY` | LLM API key |
+| `LEARN_LLM_MODEL` | Model name (e.g. `grok-3`, `deepseek-chat`) |
+| `LEARN_BOT_TOKEN` | Discord bot token (Discord bot only) |
+| `LEARN_AUTHORIZED_USER_ID` | Your Discord user ID (Discord bot only) |
 
-**Required (LLM provider):**
-
-| Variable | Example |
-|----------|---------|
-| `LEARN_LLM_PROVIDER` | `openai_compat` |
-| `LEARN_LLM_BASE_URL` | `https://api.x.ai/v1` |
-| `LEARN_LLM_API_KEY` | Your API key |
-| `LEARN_LLM_MODEL` | `grok-3`, `deepseek-chat`, etc. |
-
-**Optional** (sensible defaults):
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `LEARN_API_HOST` | `0.0.0.0` | REST API bind host |
-| `LEARN_API_PORT` | `8080` | REST API port |
-| `LEARN_API_SECRET_KEY` | _(empty)_ | API authentication secret (for `api.py`) |
-| `LEARN_LOCAL_USER_ID` | `default` | Canonical local-first user alias used when no `X-Learning-User` request header is provided |
-| `LEARN_DB_PATH` | `data/knowledge.db` | Path to the main knowledge database |
-| `LEARN_CHAT_DB_PATH` | `data/chat_history.db` | Path to the chat/session database |
-| `LEARN_LLM_TEMPERATURE` | _(provider default)_ | LLM sampling temperature |
-| `LEARN_LLM_MAX_TOKENS` | `4096` | Max output tokens requested from the main LLM |
-| `LEARN_LLM_MAX_HISTORY_TOKENS` | `40000` | Max chat history tokens sent to LLM |
-| `LEARN_LLM_THINKING` | _(model default)_ | Optional thinking-mode override for models that support it |
-| `LEARN_LLM_OUTPUT_MODE` | `auto` | Main interactive output mode: `auto`, `json_object`, `json_schema`, or `legacy` |
-| `LEARN_LLM_FAILURE_LOG_DIR` | `data/llm_failures` | Private malformed-output log directory |
-| `LEARN_LLM_LOG_FAILURE_RAW` | `1` | Store full malformed provider output in private logs (`0` stores snippets only) |
-| `LEARN_QUIZ_STALENESS_TIMEOUT` | `15` | Minutes before stale active quiz context is auto-cleared |
-| `LEARN_REVIEW_REMINDER_MAX` | `3` | Max unanswered review reminders before moving to the next concept |
-| `LEARN_REVIEW_NAG_COOLDOWN_HOURS` | `2` | Hours before the scheduler re-sends an unanswered scheduled reminder |
-| `LEARN_REVIEW_QUIET_HOURS_START_HOUR` | `23` | Quiet-hours start for scheduled review DMs (UTC+8 wall clock) |
-| `LEARN_REVIEW_QUIET_HOURS_END_HOUR` | `7` | Quiet-hours end for scheduled review DMs (UTC+8 wall clock) |
-| `LEARN_MAX_GRAPH_NODES` | `500` | Max concept nodes returned by graph views/endpoints before filtering |
-| `LEARN_SR_INTERVAL_EXPONENT` | `0.075` | Exponent for spaced-repetition interval growth |
-| `LEARN_EMBEDDING_MODEL` | `all-mpnet-base-v2` | Sentence-transformers model |
-| `LEARN_VECTOR_SEARCH_LIMIT` | `10` | Default vector-search result count |
-| `LEARN_SIM_DEDUP` | `0.92` | Cosine threshold for duplicate blocking |
-| `LEARN_SIM_RELATION` | `0.5` | Cosine threshold for relation suggestions/search enrichment |
-| `LEARN_ENABLE_MAINTENANCE` | `0` | Enable scheduled maintenance runs and the `/maintain` command |
-| `LEARN_ENABLE_DEDUP` | `0` | Enable scheduled dedup proposal scans |
-| `LEARN_MAINTENANCE_INTERVAL_HOURS` | `168` | Cadence for maintenance diagnostics and repair loop |
-| `LEARN_TAXONOMY_INTERVAL_HOURS` | `168` | Cadence for taxonomy reorganization runs |
-| `LEARN_DEDUP_INTERVAL_HOURS` | `168` | Cadence for duplicate-detection proposal scans |
-| `LEARN_BACKUP_INTERVAL_HOURS` | `24` | Cadence for automatic backup snapshots |
-| `LEARN_PROPOSAL_CLEANUP_INTERVAL_HOURS` | `24` | Cadence for expired proposal cleanup |
-| `LEARN_BACKUP_DIR` | `backups/` _(project root)_ | Directory for backup snapshots |
-| `LEARN_BACKUP_RETENTION_DAYS` | `14` | Days to retain backups (min: 1) |
-| `LEARN_VECTOR_STORE_PATH` | `data/vectors/` | Embedded Qdrant storage path |
-| `LOG_LEVEL` | `INFO` | Application log verbosity (set `DEBUG` for quiz/pipeline trace logs) |
-
-See [.env.example](.env.example) for the full optional configuration list, including vector-search and review-cycle tuning knobs.
-
-**Optional (Reasoning model for review-quiz P1):**
-
-If configured, scheduler-triggered reviews, manual `/review`, and shared chat review all use the same structured generation flow: P1 (reasoning model) receives concept detail plus Active Persona and User Preferences, returns JSON including `question`, `formatted_question`, `question_type`, `target_facet`, and `concept_ids`, and a deterministic formatter delivers the final question text. If the reasoning model is unavailable or fails, the system falls back to the single-prompt `review-check` flow.
-
-| Variable | Example | Purpose |
-|----------|---------|--------|
-| `LEARN_REASONING_LLM_BASE_URL` | `https://api.x.ai/v1` | Reasoning model endpoint |
-| `LEARN_REASONING_LLM_API_KEY` | Your key | Reasoning model API key |
-| `LEARN_REASONING_LLM_MODEL` | `grok-4-1-fast-reasoning` | Reasoning model name |
-| `LEARN_REASONING_LLM_THINKING` | `enabled` | Reasoning model thinking mode |
+For the full list of optional settings (review timing, backup retention, quiet hours, vector search tuning, etc.): see [docs/SETUP.md](docs/SETUP.md) or [.env.example](.env.example).
 
 ## Testing
 
 ```bash
 make test
-make test-ui
-make test-e2e
-
-# Fast unit-only subset
-make test-fast
-
-# Direct pytest invocation uses pyproject defaults
-pytest tests/
 ```
 
-`pytest` now defaults to `-n 4 --dist loadfile --tb=short` via `pyproject.toml`, so parallel execution is the standard path rather than an opt-in flag. Use `make test-fast` for the unit-marked subset when you want quicker feedback.
+See [docs/SETUP.md](docs/SETUP.md) for frontend and end-to-end test instructions.
 
-The React frontend has its own focused test paths:
+## Documentation
 
-```bash
-make test-ui
-# or:
-cd frontend && npm run test
-
-make test-e2e
-# or:
-cd frontend && npm run test:e2e
-```
-
-For live provider validation after switching models/providers, use the manual smoke script:
-
-```bash
-python scripts/live_output_contract_smoke.py
-python scripts/live_output_contract_smoke.py --show-raw
-```
-
-It uses your local `.env`, exercises the structured-output path plus malformed-output retry handling, and verifies the full pipeline does not leak raw action JSON or internal reasoning to the user surface.
-
-`npm run test:e2e` builds the SPA and runs the Playwright Chromium smoke suite against the preview server. On a fresh machine, install the browser once with `cd frontend && npx playwright install chromium`.
-
-Tests cover the DB layer, API endpoints, parser edge cases, score guards, dedup, cycle detection, embedding service, and more. Frontend coverage now includes Vitest page tests plus Playwright browser smoke tests. Tests use isolated temporary databases and mock all external dependencies (LLM, vector store).
+| Doc | Contents |
+|-----|---------|
+| [docs/SETUP.md](docs/SETUP.md) | Full install guide, all config variables, frontend build |
+| [docs/API.md](docs/API.md) | Discord commands and REST API reference |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow, and module map |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 `make test` injects safe defaults for `LEARN_LLM_PROVIDER` and `LEARN_AUTHORIZED_USER_ID` if your shell does not already provide them.
 
@@ -286,66 +146,6 @@ Requirements:
 
 For the full operator workflow, examples, rollback steps, and Windows/OneDrive troubleshooting, see [docs/TAXONOMY_REBUILD.md](docs/TAXONOMY_REBUILD.md).
 
-## Project Structure
-
-```
-├── bot.py                  # Discord bot entry point (thin wrapper)
-├── bot/
-│   ├── app.py              # Bot client setup and shared app state
-│   ├── handler.py          # Core message handler (returns response, pending_action, assess_meta, quiz_meta)
-│   ├── commands.py         # Slash command implementations
-│   ├── events.py           # Discord event handlers
-│   ├── messages.py         # Message splitting, Discord quiz-view projection, and shared delivery helpers
-│   └── auth.py             # Authorization helpers
-├── api.py                  # Thin FastAPI launcher for local development
-├── api/                    # FastAPI app package
-│   ├── app.py              # App factory, lifespan, middleware, static mounts
-│   ├── auth.py             # Bearer-token and localhost auth rules
-│   ├── schemas.py          # Request/response models
-│   └── routes/             # API and page routers
-├── config.py               # Environment-based configuration
-├── frontend/               # React/Vite SPA frontend
-│   ├── src/                # React routes, pages, UI primitives, API client, styles, frontend tests
-│   ├── e2e/                # Playwright browser smoke tests
-│   ├── dist/               # Built SPA assets served by FastAPI when present
-│   ├── vite.config.ts      # Dev server and proxy config
-│   └── playwright.config.ts # Browser smoke-test runner config
-├── services/
-│   ├── pipeline.py         # Core orchestrator (context → LLM → parse → execute)
-│   ├── context.py          # Prompt/context construction
-│   ├── tools.py            # Action executor (LLM JSON → DB calls)
-│   ├── tools_assess.py     # Quiz/assess handlers (extracted from tools.py)
-│   ├── llm.py              # LLM provider abstraction
-│   ├── parser.py           # LLM response parsing
-│   ├── embeddings.py       # Sentence-transformers singleton
-│   ├── dedup.py            # Duplicate detection (vector + fuzzy)
-│   ├── backup.py           # Snapshot backup service (DB + vectors)
-│   ├── chat_session.py     # Shared chat/action controller used by FastAPI browser/API routes and thin Discord adapters
-│   ├── chat_quiz.py        # Shared quiz action owner for browser/API and Discord follow-up/skip flows
-│   └── ...
-├── db/                     # Database package (SQLite + Qdrant)
-│   ├── core.py             # Connections, schema init
-│   ├── migrations.py       # Schema migrations (extracted from core.py)
-│   ├── topics.py           # Topic CRUD + hierarchy
-│   ├── concepts.py         # Concept CRUD + search
-│   ├── vectors.py          # Qdrant wrapper
-│   └── ...
-├── data/
-│   ├── skills/             # Modular LLM skill files (hot-reloadable)
-│   ├── preferences.template.md  # Tracked default copied to runtime preferences.md on first bot startup
-│   ├── preferences.md      # Runtime preferences file (local, git-ignored)
-│   └── personas/           # Persona presets (buddy, coach, mentor)
-├── backups/                # Timestamped backup snapshots (git-ignored)
-├── scripts/                # Operator/admin scripts and test harnesses
-│   ├── taxonomy_shadow_rebuild.py  # Manual taxonomy preview/apply workflow
-│   └── ...
-├── tests/                  # pytest test suite
-└── docs/
-    ├── ARCHITECTURE.md     # Full architecture documentation
-    ├── DEVNOTES.md         # Bug history & architectural decisions
-    ├── TAXONOMY_REBUILD.md # Manual operator guide for topic rebuilds
-    └── index.md            # Knowledge base map
-```
 
 ## Documentation
 
@@ -354,10 +154,3 @@ For the full operator workflow, examples, rollback steps, and Windows/OneDrive t
 - [docs/DEVNOTES.md](docs/DEVNOTES.md) — Bug stories with root causes, multi-layer fixes, and design rationale
 - [docs/TAXONOMY_REBUILD.md](docs/TAXONOMY_REBUILD.md) — Manual trigger guide for taxonomy preview/apply runs
 
-## Development Approach
-
-This project was built with LLM-assisted development — used deliberately for implementation velocity while keeping architecture decisions, quality standards, and debugging human-driven. The [CODING.md](CODING.md) onboarding guide and [DEVNOTES.md](docs/DEVNOTES.md) institutional memory document the engineering thinking behind the code.
-
-## License
-
-[MIT](LICENSE)
