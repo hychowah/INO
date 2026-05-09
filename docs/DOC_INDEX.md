@@ -49,16 +49,13 @@ Do not edit these casually — every word affects bot behaviour.
 | `docs/SETUP.md` | Step-by-step local development setup guide |
 | `docs/CHAT_FLOW_HARNESS.md` | Manual operator guide for the scripted real-pipeline conversation harness (`scripts/test_chat_flow.py`) |
 | `CHANGELOG.md` | Key changes, newest first |
-| `docs/plans/` | Active implementation plan files for in-flight work, including the architecture simplification plan and tracker |
+| `docs/plans/` | Active implementation plan files for in-flight work; currently empty |
 | `docs/TAXONOMY_REBUILD.md` | Manual operator guide for previewing and applying taxonomy rebuilds — preview vs apply, aggressive vs conservative, rollback, Windows/OneDrive troubleshooting |
 | `.github/workflows/tests.yml` | Python CI workflow — dependency install, pytest collection guard, full matrix run |
 | `.github/workflows/lint.yml` | Ruff CI workflow |
 | `.github/workflows/frontend.yml` | Frontend CI workflow — typecheck, Vitest, Playwright |
 
-Active in-repo implementation plan files:
-
-- `docs/plans/architecture-simplification-master-plan.md` — canonical architecture simplification strategy, metrics, and phase plan
-- `docs/plans/architecture-simplification-progress.md` — active progress tracker for baseline metrics, current status, and next actions
+Active in-repo implementation plan files: none currently.
 
 ---
 

@@ -24,61 +24,29 @@ The diagram below is intentionally simplified. When it conflicts with ownership 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         User Interfaces                              │
-│   ┌──────────────┐              ┌──────────────────────────────┐    │
-│   │  Discord Bot  │              │  Browser UI                  │    │
-│   │  (bot.py)     │              │  (FastAPI + React / Vite)    │    │
-│   └──────┬───────┘              └──────────────┬───────────────┘    │
-│          │                                      │                    │
-├──────────┼──────────────────────────────────────┼────────────────────┤
-│          │ Pipeline Layer                       │                    │
-│          ▼                                      ▼                    │
-│   ┌──────────────────────┐                      │                    │
-│   │  pipeline.py         │                      │                    │
-│   │  (orchestrator)      │                      │                    │
-│   │  context → LLM →     │                      │                    │
-│   │  parse → execute     │                      │                    │
-│   └──┬─────────┬────┬───┘                      │                    │
-│      │         │    │                            │                    │
-│      │         │    ▼                            │                    │
-│      │         │  ┌──────────────┐               │                    │
-│      │         │  │   llm.py     │               │                    │
-│      │         │  │ (providers)  │               │                    │
-│      │         │  └──────┬───────┘               │                    │
-│      │         │         │                       │                    │
-│      │         │         ▼                       │                    │
-│      │         │  ┌──────────────┐               │                    │
-│      │         │  │ OpenAI compat│               │                    │
-│      │         │  │ backend      │               │                    │
-│      │         │  │ (main +      │               │                    │
-│      │         │  │ reasoning)   │               │                    │
-│      │         │  └──────────────┘               │                    │
-│      │         │                                 │                    │
-│      ▼         ▼                                 │                    │
-│   ┌────────┐ ┌───────────┐                       │                    │
-│   │context │ │  tools.py  │                      │                    │
-│   │  .py   │ │  (action   │                      │                    │
-│   │(prompt)│ │  executor) │                      │                    │
-│   └───┬────┘ └─────┬─────┘                      │                    │
-│       │             │                            │                    │
-├───────┼─────────────┼────────────────────────────┼────────────────────┤
-│       │    Data Layer│                            │                    │
-│       ▼             ▼                            ▼                    │
-│   ┌────────────────────────────────────────────────────┐             │
-│   │                  db/ package                               │      │
-│   │  core.py · migrations.py · topics.py · concepts.py        │      │
-│   │  reviews.py · chat.py · diagnostics.py · relations.py     │      │
-│   │  proposals.py · action_log.py · preferences.py            │      │
-│   └──────────┬────────────────────────┬────────────────┘             │
-│              ▼                        ▼                              │
-│   ┌──────────────────┐   ┌───────────────────┐  ┌────────────────┐  │
-│   │  knowledge.db    │   │  chat_history.db   │  │  Qdrant        │  │
-│   │  (topics,        │   │  (conversations,   │  │  (embedded)    │  │
-│   │   concepts,      │   │   session state)   │  │  data/vectors/ │  │
-│   │   reviews,       │   │                    │  │  768-dim       │  │
-│   │   remarks)       │   │                    │  │  embeddings    │  │
-│   └──────────────────┘   └───────────────────┘  └────────────────┘  │
-└──────────────────────────────────────────────────────────────────────┘
+│  Discord bot        REST/API routes        Browser UI                │
+└──────────────┬──────────────┬──────────────────────┬─────────────────┘
+               │              │                      │
+               └──────────────┴──────────────┬───────┘
+                                             ▼
+       Shared entry owners: learn_turn.py · chat_session.py
+                review_flow.py · chat_admin.py
+                                             │
+                                             ▼
+         llm_runtime.py (provider calls + fetch loop)
+                         │
+                         ▼
+     pipeline.py (parse/execute core + operator wrappers)
+                         │
+                         ▼
+      tools.py · tools_assess.py · db/ persistence boundary
+                         │
+                         ▼
+             knowledge.db · chat_history.db · Qdrant
 ```
+
+This view intentionally collapses Discord view lifecycles and browser page/controller
+composition into the transport layer so the protected shared owners stay visible.
 
 The fetch loop remains the key runtime pattern: `services.llm_runtime.py` can issue invisible `fetch` actions to gather only the topic, concept, or review data a turn needs before the final reply is parsed and executed.
 
@@ -87,6 +55,9 @@ The fetch loop remains the key runtime pattern: `services.llm_runtime.py` can is
 ---
 
 ## File Map
+
+Line counts are approximate source-only counts refreshed on 2026-05-09. Treat them as
+scale markers, not contracts.
 
 | File | Lines | Role |
 |:-----|------:|:-----|
@@ -104,33 +75,18 @@ The fetch loop remains the key runtime pattern: `services.llm_runtime.py` can is
 | `bot/app.py` | ~40 | Bot client setup and shared application instance |
 | `bot/auth.py` | ~20 | Authorization decorator that gates Discord commands to the configured user |
 | `bot/handler.py` | ~110 | Core Discord message handler — delegates interactive turns to `services/learn_turn.py` and returns adapter-ready `(response, pending_action, assess_meta, quiz_meta)` tuples |
-| `bot/commands.py` | ~545 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
+| `bot/commands.py` | ~386 | Slash command implementations (`/learn`, `/review`, `/maintain`, `/backup`, `/reorganize`, `/preference`, etc.) |
 | `bot/events.py` | ~220 | Discord event handlers (`on_message`, startup hooks, command errors); plain-message turns now bind the same local user alias scope as slash commands and scheduler review state |
 | `bot/messages.py` | ~120 | Shared Discord delivery helpers — message splitting, review-question delivery, quiz/navigation view attachment, and the unified non-pending sender |
 | `api/app.py` | ~55 | FastAPI app assembly and route registration |
 | `api/auth.py` | ~25 | Bearer-token dependency for REST endpoints; localhost requests on `API_PORT` bypass token checks; optional `X-Learning-User` request scoping falls back to `LEARN_LOCAL_USER_ID`; `/api/health` is always public |
 | `api/schemas.py` | ~60 | Pydantic request and response models used by REST routes |
 | `config.py` | ~80 | Tokens, paths, timeouts, intervals, and the canonical local-first runtime user alias |
-| `services/context.py` | ~920 | Prompt/context construction plus skill loading, prompt caching, and system-prompt composition for runtime LLM calls |
-| `services/tools.py` | ~550 | Action executor — maps LLM verbs → DB calls; quiz/assess handlers extracted to `tools_assess.py` |
-| `services/tools_assess.py` | ~360 | Assessment and quiz action handlers (`_handle_quiz`, `_handle_assess`, etc.) extracted from `tools.py` |
-| `services/review_state.py` | ~120 | Shared typed reminder-state owner for delayed-answer recovery, resend cadence, and reminder resolution |
-| `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
-| `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
-| `services/chat_payload.py` | ~20 | Single owner of browser/API chat envelope shaping and message guarding for `ChatResponse` payloads |
-| `services/chat_admin.py` | ~300 | Shared maintenance, taxonomy, and proposal-review orchestration for browser/API chat actions and review blocks |
-| `services/chat_quiz.py` | ~120 | Shared quiz action owner for browser/API and Discord: question actions, assess follow-up actions, typed quiz-followup dispatch, skip execution payloads, and Discord quiz-view derivation |
-| `services/chat_session.py` | ~325 | Shared chat/action controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; also reused by thin Discord adapters for confirms and typed quiz follow-up actions |
-| `services/learn_turn.py` | ~95 | Interactive-turn DTO seam — resolves `command` vs `reply`, captures quiz/navigation metadata, and projects one result into Discord or browser/API adapters |
-| `services/review_flow.py` | ~125 | Shared review-quiz generation seam used by scheduler, Discord `/review`, and shared chat review; projects quiz results into browser/API payloads or Discord delivery tuples |
-| `services/views.py` | ~560 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
-| `db/` | ~2715 | Database package — see submodules below |
+| `services/` | ~7140 | Shared runtime owners, orchestration seams, and transport-agnostic helpers — see submodules below |
+| `db/` | ~4020 | Database package — see submodules below |
+| `frontend/src/` | ~6570 | React browser UI — see frontend section below |
+| `frontend/e2e/` | — | Playwright smoke coverage for the browser UI |
 | `scripts/agent.py` | ~310 | CLI entry point for standalone testing (not used by the bot at runtime) |
-| `frontend/src/api.ts` | ~? | Typed frontend API client for JSON and SSE browser calls |
-| `frontend/src/routes.tsx` | ~? | Route ownership for the React browser shell |
-| `frontend/src/pages/` | | Route components for dashboard, chat, topics, concepts, graph, reviews, forecast, and activity |
-| `frontend/src/components/` | | Shared React layout and UI components |
-| `frontend/e2e/` | | Playwright smoke coverage for the browser UI |
 | **db/ package** | | |
 | `db/core.py` | ~230 | Connection helpers, `init_databases()`, datetime utils |
 | `db/migrations.py` | ~265 | Schema migration blocks extracted from `core.py` |
@@ -147,20 +103,31 @@ The fetch loop remains the key runtime pattern: `services.llm_runtime.py` can is
 | `db/vectors.py` | ~210 | Qdrant wrapper — upsert/delete/search for concepts+topics, `find_nearest_concepts`, `reindex_all`, `close_client` |
 | `db/__init__.py` | ~120 | Re-exports all public functions; `VECTORS_AVAILABLE` flag for graceful degradation |
 | **services/** | | |
-| `services/context.py` | ~920 | Prompt-context assembly and skill loading — dynamic context, fetch-result formatting, skill-set mapping, prompt caching, and system-prompt composition |
-| `services/llm_runtime.py` | ~330 | Shared LLM runtime owner — conversation sessions, fetch loop, output-contract retry/logging, structured-output hinting, and raw provider call helpers |
-| `services/review_flow.py` | ~275 | Shared review owner — canonical review payload/check helpers, structured quiz generation, deterministic delivery formatting, and review fallback orchestration |
+| `services/context.py` | ~937 | Prompt-context assembly and skill loading — dynamic context, fetch-result formatting, skill-set mapping, prompt caching, and system-prompt composition |
+| `services/llm_runtime.py` | ~334 | Shared LLM runtime owner — conversation sessions, fetch loop, output-contract retry/logging, structured-output hinting, and raw provider call helpers |
+| `services/review_flow.py` | ~273 | Shared review owner — canonical review payload/check helpers, structured quiz generation, deterministic delivery formatting, and review fallback orchestration |
 | `services/preferences_flow.py` | ~35 | Shared isolated preference-edit owner — fenced-output parsing, prompt dispatch, live preferences write, and prompt-cache invalidation |
-| `services/pipeline.py` | ~415 | Remaining orchestrator — parse/execute flow, quiz guards, and maintenance/taxonomy action loops plus taxonomy context entrypoints |
+| `services/pipeline.py` | ~414 | Remaining orchestrator — parse/execute flow, quiz guards, and maintenance/taxonomy action loops plus taxonomy context entrypoints |
 | `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter, structured-output fallback when `response_format` is rejected, and reasoning-provider selection |
 | `services/parser.py` | ~180 | LLM output boundary and presentation guard — `validate_llm_output`, `parse_llm_response`, `process_output`, `extract_llm_action`, `guard_user_message` |
 | `services/action_contracts.py` | ~290 | Lightweight LLM action schema/validation — required params, param-type checks, action JSON schema for structured output mode |
 | `services/repair.py` | ~90 | Action-name repair sub-agent (ephemeral isolated LLM session) |
 | `services/dedup.py` | ~140 | Dedup check and merge execution |
 | `services/backup.py` | ~185 | Backup service — SQLite online-backup + Qdrant copytree snapshots; `perform_backup`, `prune_old_backups`, `get_latest_backup_datetime`, `run_backup_cycle` |
-| `services/scheduler.py` | ~520 | Persisted background scheduler — bot-owned overdue review reminders plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
+| `services/scheduler.py` | ~613 | Persisted background scheduler — bot-owned overdue review reminders plus shared taxonomy/backup/proposal-cleanup jobs with optional maintenance/dedup passes |
 | `services/state.py` | ~80 | Hybrid runtime coordination — lease-backed turn gateway, same-process mutex helpers, canonical local-user helpers, shared interactive-turn preamble, durable user-activity heartbeat accessors, and ContextVar-based current-user identity |
 | `services/embeddings.py` | ~80 | Embedding service — lazy-loaded `all-mpnet-base-v2` singleton, `embed_text`, `embed_batch` |
+| `services/tools.py` | ~582 | Action executor — maps LLM verbs to DB calls; quiz and assess handlers live in `tools_assess.py` |
+| `services/tools_assess.py` | ~463 | Assessment and quiz action handlers plus shared scoring and persistence helpers |
+| `services/review_state.py` | ~120 | Shared typed reminder-state owner for delayed-answer recovery, resend cadence, and reminder resolution |
+| `services/formatting.py` | ~80 | Discord message formatting — `truncate_for_discord`, `truncate_with_suffix`, `format_quiz_metadata` |
+| `services/chat_actions.py` | ~100 | Shared confirmation helpers, lightweight confirm/decline executors, and action whitelists reused by browser/API and Discord confirmation flows |
+| `services/chat_payload.py` | ~20 | Single owner of browser/API chat envelope shaping and message guarding for `ChatResponse` payloads |
+| `services/chat_admin.py` | ~448 | Shared maintenance, taxonomy, and proposal-review orchestration for browser/API chat actions and review blocks |
+| `services/chat_quiz.py` | ~183 | Shared quiz action owner for browser/API and Discord: question actions, assess follow-up actions, typed quiz-followup dispatch, skip execution payloads, and Discord quiz-view derivation |
+| `services/chat_session.py` | ~338 | Shared chat/action controller for `/api/chat`, `/stream`, `/confirm`, `/decline`, and `/action`; also reused by thin Discord adapters for confirms and typed quiz follow-up actions |
+| `services/learn_turn.py` | ~95 | Interactive-turn DTO seam — resolves `command` vs `reply`, captures quiz/navigation metadata, and projects one result into Discord or browser/API adapters |
+| `services/views.py` | ~646 | Persistent Discord UI views for confirmations, quiz navigation, skip buttons, and preference edits |
 | `scripts/taxonomy_shadow_rebuild.py` | ~400 | Operator workflow — preview taxonomy rebuilds on shadow copies, replay safe actions on live data after backup, export before/after structure snapshots |
 | `scripts/dev_all.py` | ~120 | Cross-platform dev launcher — starts `api.py`, `npm run dev` in `frontend/`, and `bot.py`; `--no-bot` and `--no-ui` flags |
 | `scripts/migrate_vectors.py` | ~90 | Bulk reindex script — reads all SQLite concepts/topics, writes into Qdrant |
