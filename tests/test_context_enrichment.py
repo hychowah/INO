@@ -360,6 +360,28 @@ class TestQuizGeneratorEnrichment:
         ctx = build_quiz_generator_context(cid1)
         assert "    Note: A and B are often confused" in ctx
 
+    def test_primary_concept_review_metadata_and_remark_summary_included(self, two_concepts):
+        cid1, _, _ = two_concepts
+        db.add_remark(cid1, "Focus on how node splits propagate upward.")
+        db.add_review(
+            cid1,
+            question_asked="Why do B-Trees stay shallow?",
+            user_response="Because they keep a high branching factor.",
+            llm_assessment="Good answer.",
+            quality=4,
+            question_type="explanation",
+            target_facet="performance",
+            question_difficulty=42,
+        )
+
+        ctx = build_quiz_generator_context(cid1)
+
+        assert ctx is not None
+        assert "Remark summary" in ctx or "Remarks (latest 3):" in ctx
+        assert "Recent reviews:" in ctx
+        assert "Quality: 4/5 — Good answer." in ctx
+        assert "Metadata: type=explanation, facet=performance, difficulty=42" in ctx
+
     def test_nonexistent_concept_returns_none(self):
         assert build_quiz_generator_context(99999) is None
 

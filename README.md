@@ -1,6 +1,6 @@
 # Learning Agent
 
-An LLM-first spaced repetition system where **all learning intelligence lives in the prompt, not in code**. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user, LLM, and database — the LLM decides what to teach, when to quiz, and how to adapt.
+An LLM-first spaced repetition system where **all learning intelligence lives in the prompt, not in code**. The codebase provides thin CRUD plumbing and a small shared runtime core: interactive turns resolve through shared chat and review owners, `services.llm_runtime.py` runs the fetch loop, `services.pipeline.py` parses and executes the final action, and the LLM decides what to teach, when to quiz, and how to adapt.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -23,6 +23,8 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 - **Defense-in-depth** — Prompt rules + code guards + temptation reduction to prevent score inflation, phantom adds, and duplicates
 
 ## Architecture
+
+The current protected runtime path is: transport entrypoint -> `services.learn_turn.py` or another shared chat/review owner -> `services.llm_runtime.py` for provider calls and fetch-loop behavior -> `services.pipeline.py` for parse and execute -> `services.tools.py`, `services.tools_assess.py`, and `db/` for execution and persistence. The diagram below is still a simplified overview; prefer this path when reasoning about ownership.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -61,7 +63,7 @@ An LLM-first spaced repetition system where **all learning intelligence lives in
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The **fetch loop** is the key architectural pattern: the LLM can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before composing its response. This keeps the LLM in control of what data it needs, without sending everything upfront.
+The **fetch loop** is the key architectural pattern: `services.llm_runtime.py` can issue up to 3 invisible `fetch` actions per user turn to gather context (topic lists, concept details, review history) before `services.pipeline.py` parses and executes the final response. This keeps the LLM in control of what data it needs, without sending everything upfront.
 
 Current runtime behavior is still single-user end-to-end: Discord access is gated by one `LEARN_AUTHORIZED_USER_ID`, the REST API uses one bearer token, and the Web UI is local-only. The DB layer still contains dormant per-user scaffolding (`user_id` columns, `users` table, ContextVar-based lookup), but the shipped local-first runtime now binds Discord/API/browser flows to a canonical local alias via `LEARN_LOCAL_USER_ID`. API and browser requests may still override request scope with `X-Learning-User` when needed.
 

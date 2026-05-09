@@ -1,5 +1,7 @@
 """Direct tests for context builder helpers not covered by enrichment tests."""
 
+from unittest.mock import patch
+
 import db
 from db import action_log
 from services.context import build_maintenance_context, build_taxonomy_context, format_fetch_result
@@ -31,6 +33,53 @@ def test_format_fetch_result_topic_payload_includes_hierarchy_and_concepts(test_
         "  - [concept:8] B-Tree (score 55/100, next: 2026-04-16 09:00:00 | "
         "Solid on branching factor)"
     ) in rendered
+
+
+def test_format_fetch_result_concept_payload_includes_remark_reviews_and_relations(test_db):
+    concept_payload = {
+        "concept_detail": {
+            "id": 5,
+            "title": "B-Tree",
+            "description": "Balanced search tree",
+            "mastery_level": 55,
+            "interval_days": 7,
+            "review_count": 3,
+            "topics": [{"title": "Databases"}],
+            "next_review_at": "2026-04-20 09:00:00",
+            "remark_summary": "Needs a cleaner explanation of split propagation.",
+            "remark_updated_at": "2026-04-15 08:30:00",
+            "recent_reviews": [
+                {
+                    "question_asked": "What problem does a B-Tree solve?",
+                    "user_response": "It keeps index operations efficient on disk.",
+                    "quality": 4,
+                    "llm_assessment": "Correct core idea.",
+                }
+            ],
+        }
+    }
+
+    with patch.object(
+        db,
+        "get_relations",
+        return_value=[
+            {
+                "relation_type": "builds_on",
+                "other_concept_id": 9,
+                "other_title": "Indexes",
+                "other_mastery": 72,
+            }
+        ],
+    ):
+        rendered = format_fetch_result(concept_payload)
+
+    assert "### Concept: B-Tree (#5)" in rendered
+    assert "Remark summary (updated 2026-04-15 08:30:00):" in rendered
+    assert "Needs a cleaner explanation of split propagation." in rendered
+    assert "Recent reviews:" in rendered
+    assert "Quality: 4/5 — Correct core idea." in rendered
+    assert "Related Concepts:" in rendered
+    assert "[concept:9] Indexes (score 72/100)" in rendered
 
 
 def test_build_maintenance_context_renders_detected_issue_sections(test_db):

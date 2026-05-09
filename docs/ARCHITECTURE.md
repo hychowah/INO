@@ -1,16 +1,25 @@
 # Learning Agent — Architecture Documentation
 
-> Last updated: 2026-05-07
+> Last updated: 2026-05-09
 
 ## Overview
 
-The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase provides thin CRUD plumbing and a pipeline that shuttles messages between user ↔ LLM ↔ database. Browser access is now centered on a React/TypeScript/Vite frontend under `frontend/`, organized around a nested `AppShell` with Dashboard, Chat, Knowledge, and Progress as the primary surfaces. FastAPI serves the built SPA through an HTML catch-all for non-reserved paths on port 8080, while the Vite dev server serves the same client-routed app on port 5173 during local development.
+The Learning Agent is a Discord and web-based spaced repetition system where **all learning intelligence lives in modular runtime skill files** under `data/skills/`, not in code. The codebase no longer centers on one monolithic orchestrator. The current protected runtime path is shared across a small set of owners: `services.learn_turn.py` resolves interactive turn mode, `services.llm_runtime.py` owns prompt-call and fetch-loop runtime behavior, `services.pipeline.py` owns parse-and-execute orchestration plus the remaining operator wrappers, `services.review_flow.py` owns shared review generation, and `services.chat_session.py` owns the shared browser/API chat surface. Browser access is now centered on a React/TypeScript/Vite frontend under `frontend/`, organized around a nested `AppShell` with Dashboard, Chat, Knowledge, and Progress as the primary surfaces. FastAPI serves the built SPA through an HTML catch-all for non-reserved paths on port 8080, while the Vite dev server serves the same client-routed app on port 5173 during local development.
 
 **Entry points:**
 - `bot.py` is a thin wrapper that starts the Discord bot
 - `bot/` contains the actual Discord bot logic (`app.py`, `handler.py`, `commands.py`, `events.py`, `messages.py`)
 - `api.py` is a thin wrapper for the FastAPI app defined in `api/app.py`
 - `api/routes/` contains the REST route modules registered by `api/app.py`
+
+**Canonical runtime path:**
+- Transport entrypoints reach shared turn owners rather than reimplementing workflow locally.
+- `services.learn_turn.py` resolves command versus reply mode for interactive turns.
+- `services.llm_runtime.py` owns provider calls and the fetch loop.
+- `services.pipeline.py` parses final LLM output, executes actions, and retains the remaining shared operator wrappers.
+- `services.tools.py`, `services.tools_assess.py`, and `db/` remain the durable execution and persistence boundary.
+
+The diagram below is intentionally simplified. When it conflicts with ownership notes elsewhere in this document, prefer the runtime path above.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -70,6 +79,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 │   └──────────────────┘   └───────────────────┘  └────────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+The fetch loop remains the key runtime pattern: `services.llm_runtime.py` can issue invisible `fetch` actions to gather only the topic, concept, or review data a turn needs before the final reply is parsed and executed.
 
 **LLM provider note:** the system prompt is assembled from `data/skills/*.md`, the active persona, and the runtime `data/preferences.md` file. That runtime file is git-ignored and auto-copied from tracked `data/preferences.template.md` on first bot startup. The runtime now uses OpenAI-compatible chat completions only, so the fully assembled prompt is sent directly in the API request.
 

@@ -388,32 +388,46 @@ async def _check_maintenance():
 
 async def _send_maintenance_report(diagnostic_context: str):
     """Send diagnostic context to the LLM for triage, then DM the report."""
-    try:
-        final_result, proposed_actions = await pipeline.call_maintenance_loop(diagnostic_context)
-        await _send_mode_report(
-            mode_label="Knowledge Base Maintenance",
-            icon="🔧",
-            final_result=final_result,
-            proposed_actions=proposed_actions,
-            proposal_type="maintenance",
-        )
-    except Exception as e:
-        logger.error(f"Error in maintenance pipeline: {e}", exc_info=True)
+    await _run_mode_loop_and_report(
+        loop_call=pipeline.call_maintenance_loop,
+        context=diagnostic_context,
+        mode_label="Knowledge Base Maintenance",
+        icon="🔧",
+        proposal_type="maintenance",
+    )
 
 
 async def _send_taxonomy_report(taxonomy_context: str):
     """Send taxonomy context to the LLM for reorganization, then DM the report."""
+    await _run_mode_loop_and_report(
+        loop_call=pipeline.call_taxonomy_loop,
+        context=taxonomy_context,
+        mode_label="Weekly Taxonomy Reorganization",
+        icon="🌿",
+        proposal_type="taxonomy",
+    )
+
+
+async def _run_mode_loop_and_report(
+    *,
+    loop_call: Callable[[str], Awaitable[tuple[str, list[dict]]]],
+    context: str,
+    mode_label: str,
+    icon: str,
+    proposal_type: str,
+):
+    """Run an operator loop and forward the result through the shared report sender."""
     try:
-        final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+        final_result, proposed_actions = await loop_call(context)
         await _send_mode_report(
-            mode_label="Weekly Taxonomy Reorganization",
-            icon="🌿",
+            mode_label=mode_label,
+            icon=icon,
             final_result=final_result,
             proposed_actions=proposed_actions,
-            proposal_type="taxonomy",
+            proposal_type=proposal_type,
         )
     except Exception as e:
-        logger.error(f"Error in taxonomy pipeline: {e}", exc_info=True)
+        logger.error("Error in %s pipeline: %s", proposal_type, e, exc_info=True)
 
 
 async def _check_taxonomy():

@@ -74,6 +74,56 @@ class _ProposalDecisionView(discord.ui.View):
             pass
         self.stop()
 
+    def _initialize_decisions(self, item_count: int) -> None:
+        self.decisions: dict[int, bool | None] = {i: None for i in range(item_count)}
+
+    def _add_indexed_decision_buttons(
+        self,
+        *,
+        item_count: int,
+        custom_id_prefix: str,
+        on_single_decide: Callable[[discord.Interaction, int, bool], Awaitable[None]],
+        on_bulk_decide: Callable[[discord.Interaction, bool], Awaitable[None]],
+    ) -> None:
+        self.add_item(_BulkDecisionButton(True, on_decide=on_bulk_decide))
+        self.add_item(_BulkDecisionButton(False, on_decide=on_bulk_decide))
+
+        max_items = min(item_count, 10)
+        for index in range(max_items):
+            row = min(4, (index // 2) + 1)
+            approve = _IndexedDecisionButton(
+                index,
+                True,
+                custom_id=f"{custom_id_prefix}_approve_{index}",
+                row=row,
+                on_decide=on_single_decide,
+            )
+            reject = _IndexedDecisionButton(
+                index,
+                False,
+                custom_id=f"{custom_id_prefix}_reject_{index}",
+                row=row,
+                on_decide=on_single_decide,
+            )
+            approve.counterpart = reject
+            reject.counterpart = approve
+            self.add_item(approve)
+            self.add_item(reject)
+
+    def _pending_decisions(self) -> list[int]:
+        return [index for index, decision in self.decisions.items() if decision is None]
+
+    def _decision_item_ids(self, prefix: str, *, approved: bool) -> list[str]:
+        return [
+            f"{prefix}-{index}"
+            for index, decision in self.decisions.items()
+            if decision is approved
+        ]
+
+    def _set_all_decisions(self, approved: bool) -> None:
+        for index in self.decisions:
+            self.decisions[index] = approved
+
 
 class DedupConfirmView(_ProposalDecisionView):
     """View with per-group approve/reject buttons plus bulk actions."""
@@ -81,40 +131,20 @@ class DedupConfirmView(_ProposalDecisionView):
     def __init__(self, proposal_id: int, groups: list[dict]):
         super().__init__(proposal_id)
         self.groups = groups
-        self.decisions: dict[int, bool | None] = {i: None for i in range(len(groups))}
-
-        self.add_item(_BulkDecisionButton(True, on_decide=self._apply_all_group_decisions))
-        self.add_item(_BulkDecisionButton(False, on_decide=self._apply_all_group_decisions))
-
-        max_groups = min(len(groups), 10)
-        for i in range(max_groups):
-            row = min(4, (i // 2) + 1)
-            approve = _IndexedDecisionButton(
-                i,
-                True,
-                custom_id=f"dedup_approve_{i}",
-                row=row,
-                on_decide=self._apply_group_decision,
-            )
-            reject = _IndexedDecisionButton(
-                i,
-                False,
-                custom_id=f"dedup_reject_{i}",
-                row=row,
-                on_decide=self._apply_group_decision,
-            )
-            approve.counterpart = reject
-            reject.counterpart = approve
-            self.add_item(approve)
-            self.add_item(reject)
+        self._initialize_decisions(len(groups))
+        self._add_indexed_decision_buttons(
+            item_count=len(groups),
+            custom_id_prefix="dedup",
+            on_single_decide=self._apply_group_decision,
+            on_bulk_decide=self._apply_all_group_decisions,
+        )
 
     async def _finalize(self, interaction: discord.Interaction):
-        pending = [i for i, d in self.decisions.items() if d is None]
-        if pending:
+        if self._pending_decisions():
             return
 
-        approved_ids = [f"dedup-{i}" for i, decision in self.decisions.items() if decision is True]
-        rejected_ids = [f"dedup-{i}" for i, decision in self.decisions.items() if decision is False]
+        approved_ids = self._decision_item_ids("dedup", approved=True)
+        rejected_ids = self._decision_item_ids("dedup", approved=False)
         result_parts = await self._run_decision_payloads(
             approved_payload={
                 "kind": "apply_dedup_groups",
@@ -172,8 +202,7 @@ class DedupConfirmView(_ProposalDecisionView):
         interaction: discord.Interaction,
         approved: bool,
     ):
-        for index in self.decisions:
-            self.decisions[index] = approved
+        self._set_all_decisions(approved)
         await interaction.response.defer()
         await self._finalize(interaction)
 
@@ -239,42 +268,22 @@ class ProposedActionsView(_ProposalDecisionView):
         super().__init__(proposal_id)
         self.actions = actions
         self.source = source
-        self.decisions: dict[int, bool | None] = {i: None for i in range(len(actions))}
+        self._initialize_decisions(len(actions))
         self._finalizing = False
-
-        self.add_item(_BulkDecisionButton(True, on_decide=self._apply_all_action_decisions))
-        self.add_item(_BulkDecisionButton(False, on_decide=self._apply_all_action_decisions))
-
-        max_actions = min(len(actions), 10)
-        for index in range(max_actions):
-            row = min(4, (index // 2) + 1)
-            approve = _IndexedDecisionButton(
-                index,
-                True,
-                custom_id=f"maint_approve_{index}",
-                row=row,
-                on_decide=self._apply_action_decision,
-            )
-            reject = _IndexedDecisionButton(
-                index,
-                False,
-                custom_id=f"maint_reject_{index}",
-                row=row,
-                on_decide=self._apply_action_decision,
-            )
-            approve.counterpart = reject
-            reject.counterpart = approve
-            self.add_item(approve)
-            self.add_item(reject)
+        self._add_indexed_decision_buttons(
+            item_count=len(actions),
+            custom_id_prefix="maint",
+            on_single_decide=self._apply_action_decision,
+            on_bulk_decide=self._apply_all_action_decisions,
+        )
 
     async def _finalize(self, interaction: discord.Interaction):
-        pending = [i for i, d in self.decisions.items() if d is None]
-        if pending or self._finalizing:
+        if self._pending_decisions() or self._finalizing:
             return
         self._finalizing = True
 
-        approved_ids = [f"{self.source}-{i}" for i, decision in self.decisions.items() if decision is True]
-        rejected_ids = [f"{self.source}-{i}" for i, decision in self.decisions.items() if decision is False]
+        approved_ids = self._decision_item_ids(self.source, approved=True)
+        rejected_ids = self._decision_item_ids(self.source, approved=False)
         result_parts = await self._run_decision_payloads(
             approved_payload={
                 "kind": "apply_maintenance_actions",
@@ -314,8 +323,7 @@ class ProposedActionsView(_ProposalDecisionView):
         interaction: discord.Interaction,
         approved: bool,
     ):
-        for index in self.decisions:
-            self.decisions[index] = approved
+        self._set_all_decisions(approved)
         await interaction.response.defer()
         await self._finalize(interaction)
 

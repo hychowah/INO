@@ -55,6 +55,93 @@ def _stash_last_assess_result(concept_id: int, quality: int) -> None:
     db.set_session("last_assess_quality", str(quality))
 
 
+def _normalize_question_difficulty(
+    current_score: int, quality: int, question_difficulty: Any
+) -> int:
+    """Normalize or estimate question difficulty using the shared assess rules."""
+    if question_difficulty is not None:
+        return max(0, min(100, int(question_difficulty)))
+
+    if quality >= 4:
+        return min(100, current_score + 10)
+    if quality == 3:
+        return current_score
+    return min(100, current_score + 15)
+
+
+def _calculate_score_update(
+    current_score: int, quality: int, question_difficulty: int
+) -> tuple[int, int]:
+    """Apply the shared score-delta and spacing rules for an assessment."""
+    gap = question_difficulty - current_score
+
+    if quality >= 3:
+        base_gain = {3: 2, 4: 4, 5: 7}[quality]
+        if gap > 0:
+            delta = base_gain + gap * 0.15
+        else:
+            delta = max(1, base_gain * 0.5)
+        new_score = min(100, round(current_score + delta))
+    else:
+        base_loss = {0: 5, 1: 3, 2: 1}[quality]
+        if gap > 0:
+            delta = 0
+        else:
+            delta = base_loss + abs(gap) * 0.2
+        new_score = max(0, round(current_score - delta))
+
+    new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
+    return new_score, new_interval
+
+
+def _apply_assessment_update(
+    concept_id: int,
+    concept: dict[str, Any],
+    *,
+    quality: int,
+    question_difficulty: Any,
+    question: str,
+    user_response: str,
+    assessment: str,
+    remark: str | None = None,
+    review_kwargs: dict[str, Any] | None = None,
+) -> tuple[int, int, int]:
+    """Persist the shared score, spacing, and review updates for one concept."""
+    current_score = concept.get("mastery_level", 0)
+    normalized_difficulty = _normalize_question_difficulty(
+        current_score, quality, question_difficulty
+    )
+    new_score, new_interval = _calculate_score_update(
+        current_score, quality, normalized_difficulty
+    )
+
+    now = datetime.now()
+    next_review = (now + timedelta(days=new_interval)).strftime("%Y-%m-%d %H:%M:%S")
+
+    db.update_concept(
+        concept_id,
+        mastery_level=new_score,
+        interval_days=new_interval,
+        next_review_at=next_review,
+        last_reviewed_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+        review_count=concept.get("review_count", 0) + 1,
+    )
+
+    db.add_review(
+        concept_id,
+        question,
+        user_response,
+        quality,
+        assessment,
+        **(review_kwargs or {}),
+    )
+
+    if remark:
+        db.add_remark(concept_id, remark)
+
+    return current_score, new_score, new_interval
+
+
 def _handle_quiz(params: Dict) -> Tuple[str, Any]:
     """The quiz action is special: the LLM generates the question text itself.
     This action just records that a quiz was started and returns metadata
@@ -155,54 +242,16 @@ def _handle_multi_assess(params: Dict) -> Tuple[str, Any]:
             results.append(f"Concept #{cid} not found")
             continue
 
-        current_score = concept.get("mastery_level", 0)
-
-        if question_difficulty is not None:
-            question_difficulty = max(0, min(100, int(question_difficulty)))
-        else:
-            if quality >= 4:
-                question_difficulty = min(100, current_score + 10)
-            elif quality == 3:
-                question_difficulty = current_score
-            else:
-                question_difficulty = min(100, current_score + 15)
-
-        # Score delta calculation (same formula as single assess)
-        gap = question_difficulty - current_score
-
-        if quality >= 3:
-            base_gain = {3: 2, 4: 4, 5: 7}[quality]
-            if gap > 0:
-                delta = base_gain + gap * 0.15
-            else:
-                delta = max(1, base_gain * 0.5)
-            new_score = min(100, round(current_score + delta))
-        else:
-            base_loss = {0: 5, 1: 3, 2: 1}[quality]
-            if gap > 0:
-                delta = 0
-            else:
-                delta = base_loss + abs(gap) * 0.2
-            new_score = max(0, round(current_score - delta))
-
-        new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
-
-        now = datetime.now()
-        next_review = (now + timedelta(days=new_interval)).strftime("%Y-%m-%d %H:%M:%S")
-
-        db.update_concept(
+        current_score, new_score, new_interval = _apply_assessment_update(
             cid,
-            mastery_level=new_score,
-            interval_days=new_interval,
-            next_review_at=next_review,
-            last_reviewed_at=now.strftime("%Y-%m-%d %H:%M:%S"),
-            review_count=concept.get("review_count", 0) + 1,
+            concept,
+            quality=quality,
+            question_difficulty=question_difficulty,
+            question=question,
+            user_response=user_response,
+            assessment=llm_assessment,
+            remark=entry.get("remark"),
         )
-
-        db.add_review(cid, question, user_response, quality, llm_assessment)
-
-        if entry.get("remark"):
-            db.add_remark(cid, entry["remark"])
 
         score_change = new_score - current_score
         sign = "+" if score_change >= 0 else ""
@@ -261,60 +310,6 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
     if not concept or cid is None:
         return ("error", f"Concept #{params.get('concept_id')} not found")
 
-    current_score = concept.get("mastery_level", 0)
-
-    # If LLM didn't provide question_difficulty, estimate from current score
-    # and quality: good answer → question was near their level,
-    # bad answer → question was somewhat above their level
-    if question_difficulty is None:
-        if quality >= 4:
-            question_difficulty = min(100, current_score + 10)
-        elif quality == 3:
-            question_difficulty = current_score
-        else:
-            question_difficulty = min(100, current_score + 15)
-
-    # --- Score delta calculation ---
-    gap = question_difficulty - current_score  # positive = above level
-
-    if quality >= 3:
-        # CORRECT — gain points
-        base_gain = {3: 2, 4: 4, 5: 7}[quality]
-        if gap > 0:
-            # Above level: rewarded for stretching
-            delta = base_gain + gap * 0.15
-        else:
-            # At/below level: small reinforcement
-            delta = max(1, base_gain * 0.5)
-        new_score = min(100, round(current_score + delta))
-    else:
-        # WRONG — only penalize if question was at/below user's level
-        base_loss = {0: 5, 1: 3, 2: 1}[quality]
-        if gap > 0:
-            # Above level: NO penalty — LLM probed beyond user's level
-            delta = 0
-        else:
-            # At/below level: proportional regression
-            delta = base_loss + abs(gap) * 0.2
-        new_score = max(0, round(current_score - delta))
-
-    # --- Interval from score: exponential curve ---
-    # score 0→1d, 25→3d, 50→12d, 75→43d, 100→148d  (at default exponent 0.05)
-    new_interval = max(1, round(math.exp(new_score * config.SR_INTERVAL_EXPONENT)))
-
-    now = datetime.now()
-    next_review = (now + timedelta(days=new_interval)).strftime("%Y-%m-%d %H:%M:%S")
-
-    # Update concept (mastery_level stores score 0-100 now)
-    db.update_concept(
-        cid,
-        mastery_level=new_score,
-        interval_days=new_interval,
-        next_review_at=next_review,
-        last_reviewed_at=now.strftime("%Y-%m-%d %H:%M:%S"),
-        review_count=concept.get("review_count", 0) + 1,
-    )
-
     # Stash for QuizNavigationView (bot.py reads these after execute)
     _stash_last_assess_result(cid, quality)
 
@@ -324,21 +319,21 @@ def _handle_assess(params: Dict) -> Tuple[str, Any]:
 
     p1_question_type, p1_target_facet, p1_difficulty = _get_stored_quiz_metadata()
 
-    # Log the review
-    db.add_review(
+    current_score, new_score, new_interval = _apply_assessment_update(
         cid,
-        question,
-        user_response,
-        quality,
-        assessment,
-        question_type=p1_question_type,
-        target_facet=p1_target_facet,
-        question_difficulty=p1_difficulty,
+        concept,
+        quality=quality,
+        question_difficulty=question_difficulty,
+        question=question,
+        user_response=user_response,
+        assessment=assessment,
+        remark=params.get("remark"),
+        review_kwargs={
+            "question_type": p1_question_type,
+            "target_facet": p1_target_facet,
+            "question_difficulty": p1_difficulty,
+        },
     )
-
-    # Add remark if provided
-    if params.get("remark"):
-        db.add_remark(cid, params["remark"])
 
     # Auto-create concept relationships if LLM identified related concepts
     related_ids = params.get("related_concept_ids")

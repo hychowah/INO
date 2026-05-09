@@ -7,6 +7,7 @@ import pytest
 import db
 from db import action_log
 from services.pipeline import execute_llm_response
+from services import tools
 
 
 @pytest.mark.anyio
@@ -54,3 +55,40 @@ async def test_add_concept_via_execute_llm_response_creates_concept_and_logs(tes
     assert [topic["id"] for topic in detail["topics"]] == [topic_id]
     assert entries[0]["action"] == "add_concept"
     assert '"title": "B-Tree"' in entries[0]["params"]
+
+
+def test_update_concept_resolves_by_title(test_db):
+    concept_id = db.add_concept("B-Tree", "Balanced index")
+
+    msg_type, result = tools.execute_action(
+        "update_concept",
+        {
+            "title": "B-Tree",
+            "description": "Balanced search tree index",
+        },
+    )
+
+    detail = db.get_concept_detail(concept_id)
+    assert msg_type == "reply"
+    assert result == f"Updated concept #{concept_id}"
+    assert detail["description"] == "Balanced search tree index"
+
+
+def test_remark_resolves_by_title(test_db):
+    concept_id = db.add_concept("Hash Index", "Fast lookup structure")
+
+    msg_type, result = tools.execute_action(
+        "remark",
+        {
+            "title": "Hash Index",
+            "content": "Remember the equality-only tradeoff.",
+        },
+    )
+
+    detail = db.get_concept_detail(concept_id)
+    assert msg_type == "reply"
+    assert result == f"Added remark to concept #{concept_id}"
+    assert any(
+        "equality-only tradeoff" in remark["content"]
+        for remark in detail.get("remarks", [])
+    )

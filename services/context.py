@@ -311,18 +311,14 @@ def _append_active_concept_detail(parts: list) -> None:
 
     parts.append(f"## Active Concept Detail: {detail['title']} (#{detail['id']})")
     _append_concept_overview(parts, detail)
-
-    if detail.get("remark_summary"):
-        parts.append(f"Remark: {detail['remark_summary']}")
-
-    if detail.get("recent_reviews"):
-        parts.append("Recent reviews:")
-        for r in detail["recent_reviews"][:3]:
-            q = r.get("question_asked", "") or ""
-            a = r.get("user_response", "") or ""
-            parts.append(f"  - Q: {q[:150]}")
-            parts.append(f"    A: {a[:150]}")
-            parts.append(f"    Quality: {r['quality']}/5")
+    _append_concept_remarks(parts, detail)
+    _append_recent_reviews_section(
+        parts,
+        detail.get("recent_reviews"),
+        limit=3,
+        question_limit=150,
+        answer_limit=150,
+    )
 
     rel_lines = _format_relations_snippet(cid, max_rels=3)
     if rel_lines:
@@ -372,6 +368,71 @@ def _append_concept_overview(parts: list[str], detail: dict[str, Any]) -> None:
         f"Reviews: {detail['review_count']}"
     )
     parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+
+
+def _append_concept_remarks(
+    parts: list[str],
+    detail: dict[str, Any],
+    *,
+    include_updated_at: bool = False,
+    fallback_raw_remarks: bool = False,
+    leading_blank_line: bool = False,
+) -> None:
+    """Append the shared remark block used by concept detail renderers."""
+    prefix = "\n" if leading_blank_line else ""
+    remark_summary = detail.get("remark_summary")
+    if remark_summary:
+        if include_updated_at:
+            parts.append(f"{prefix}Remark summary (updated {detail.get('remark_updated_at', 'N/A')}):")
+            parts.append(f"  {remark_summary}")
+        else:
+            parts.append(f"Remark: {remark_summary}")
+        return
+
+    if fallback_raw_remarks and detail.get("remarks"):
+        parts.append(f"{prefix}Remarks (latest 3):")
+        for remark in detail["remarks"][:3]:
+            parts.append(f"  - [{remark['created_at']}] {remark['content']}")
+
+
+def _append_recent_reviews_section(
+    parts: list[str],
+    recent_reviews: list[dict[str, Any]] | None,
+    *,
+    limit: int | None = None,
+    question_limit: int = 200,
+    answer_limit: int = 200,
+    include_assessment: bool = False,
+    include_metadata: bool = False,
+    leading_blank_line: bool = False,
+) -> None:
+    """Append the shared recent-review block used by concept detail renderers."""
+    if not recent_reviews:
+        return
+
+    prefix = "\n" if leading_blank_line else ""
+    parts.append(f"{prefix}Recent reviews:")
+    reviews = recent_reviews[:limit] if limit is not None else recent_reviews
+    for review in reviews:
+        question = review.get("question_asked", "") or ""
+        answer = review.get("user_response", "") or ""
+        parts.append(f"  - Q: {question[:question_limit]}")
+        parts.append(f"    A: {answer[:answer_limit]}")
+        quality_line = f"    Quality: {review['quality']}/5"
+        if include_assessment:
+            assessment = review.get("llm_assessment", "") or ""
+            quality_line += f" — {assessment[:200]}"
+        parts.append(quality_line)
+        if include_metadata:
+            metadata = []
+            if review.get("question_type"):
+                metadata.append(f"type={review['question_type']}")
+            if review.get("target_facet"):
+                metadata.append(f"facet={review['target_facet']}")
+            if review.get("question_difficulty") is not None:
+                metadata.append(f"difficulty={review['question_difficulty']}")
+            if metadata:
+                parts.append(f"    Metadata: {', '.join(metadata)}")
 
 
 def _append_active_quiz_context(parts: list) -> None:
@@ -537,9 +598,7 @@ def _preload_mentioned_concept(user_message: str) -> str:
         f"## Pre-loaded Concept (matched from message): {detail['title']} (#{detail['id']})"
     )
     _append_concept_overview(parts, detail)
-
-    if detail.get("remark_summary"):
-        parts.append(f"Remark: {detail['remark_summary']}")
+    _append_concept_remarks(parts, detail)
 
     rel_lines = _format_relations_snippet(detail["id"], max_rels=3)
     if rel_lines:
@@ -589,14 +648,13 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
     # --- Primary concept ---
     parts.append(f"## Primary Concept: {detail['title']} (#{detail['id']})")
     _append_concept_overview(parts, detail)
-
-    if detail.get("remark_summary"):
-        parts.append(f"\nRemark summary (updated {detail.get('remark_updated_at', 'N/A')}):")
-        parts.append(f"  {detail['remark_summary']}")
-    elif detail.get("remarks"):
-        parts.append("\nRemarks (latest 3):")
-        for r in detail["remarks"][:3]:
-            parts.append(f"  - [{r['created_at']}] {r['content']}")
+    _append_concept_remarks(
+        parts,
+        detail,
+        include_updated_at=True,
+        fallback_raw_remarks=True,
+        leading_blank_line=True,
+    )
 
     if detail.get("last_quiz_generator_output"):
         try:
@@ -613,24 +671,13 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
         except (TypeError, ValueError, json.JSONDecodeError):
             parts.append("\nLast quiz generation: [unparseable cached output]")
 
-    if detail.get("recent_reviews"):
-        parts.append("\nRecent reviews:")
-        for r in detail["recent_reviews"]:
-            q = r.get("question_asked", "") or ""
-            a = r.get("user_response", "") or ""
-            assess = r.get("llm_assessment", "") or ""
-            parts.append(f"  - Q: {q[:200]}")
-            parts.append(f"    A: {a[:200]}")
-            parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
-            metadata = []
-            if r.get("question_type"):
-                metadata.append(f"type={r['question_type']}")
-            if r.get("target_facet"):
-                metadata.append(f"facet={r['target_facet']}")
-            if r.get("question_difficulty") is not None:
-                metadata.append(f"difficulty={r['question_difficulty']}")
-            if metadata:
-                parts.append(f"    Metadata: {', '.join(metadata)}")
+    _append_recent_reviews_section(
+        parts,
+        detail.get("recent_reviews"),
+        include_assessment=True,
+        include_metadata=True,
+        leading_blank_line=True,
+    )
 
     # --- Related concepts (enriched with description + recent reviews) ---
     relations = db.get_relations(concept_id)
@@ -681,25 +728,19 @@ def format_fetch_result(data: Any) -> str:
             parts.append(f"### Concept: {c['title']} (#{c['id']})")
             _append_concept_overview(parts, c)
             parts.append(f"Next review: {c.get('next_review_at', 'N/A')}")
-
-            if c.get("remark_summary"):
-                parts.append(f"\nRemark summary (updated {c.get('remark_updated_at', 'N/A')}):")
-                parts.append(f"  {c['remark_summary']}")
-            elif c.get("remarks"):
-                # Fallback to raw remarks if summary not yet populated
-                parts.append("\nRemarks (latest 3):")
-                for r in c["remarks"][:3]:  # cap at 3 most recent
-                    parts.append(f"  - [{r['created_at']}] {r['content']}")
-
-            if c.get("recent_reviews"):
-                parts.append("\nRecent reviews:")
-                for r in c["recent_reviews"]:
-                    q = r.get("question_asked", "") or ""
-                    a = r.get("user_response", "") or ""
-                    assess = r.get("llm_assessment", "") or ""
-                    parts.append(f"  - Q: {q[:200]}")
-                    parts.append(f"    A: {a[:200]}")
-                    parts.append(f"    Quality: {r['quality']}/5 — {assess[:200]}")
+            _append_concept_remarks(
+                parts,
+                c,
+                include_updated_at=True,
+                fallback_raw_remarks=True,
+                leading_blank_line=True,
+            )
+            _append_recent_reviews_section(
+                parts,
+                c.get("recent_reviews"),
+                include_assessment=True,
+                leading_blank_line=True,
+            )
 
             # Cross-concept relationships
             relations = db.get_relations(c["id"])

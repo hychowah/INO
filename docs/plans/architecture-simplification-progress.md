@@ -4,10 +4,10 @@
 
 | Field | Value |
 |---|---|
-| Overall status | In progress |
-| Active phase | Phase 7 UI cleanup is still open, but the active slices now move between UI and backend hotspots based on where duplicated workflow still remains meaningful |
-| Current objective | Continue simplification on the plan’s real goal: remove duplicated workflow and clarify ownership where it still matters, using hotspot LOC only as a guardrail rather than the main objective |
-| Next implementation target | Revisit the next real hotspot by evidence: `services.context.py` for prompt/cache bookkeeping or another backend owner with duplicated orchestration; return to UI only if a meaningful duplicated browser/Discord workflow remains |
+| Overall status | Completed |
+| Active phase | Closeout complete |
+| Current objective | Preserve the finished shared-owner shape and require stronger justification before any future hotspot work |
+| Next implementation target | No active slice; any future work must start as a new, separately justified proposal |
 
 ## Baseline Metrics
 
@@ -99,6 +99,18 @@
 | `bot/commands.py` | 386 | -12 | Adapter-only target is thinner after transport flattening |
 | `services/chat_session.py` | 338 | -86 | Shared chat controller shed quiz, review, and preference-specific ownership |
 
+## Remaining Duplication Inventory
+
+Use this table before opening a new slice. If a candidate cannot name a repeated workflow, a target owner, and focused coverage, do not treat it as active simplification work.
+
+| Candidate | Repeated workflow still present | Current owner | Intended owner or outcome | Focused validation needed | Current call |
+|---|---|---|---|---|---|
+| `services/context.py` | Prompt/context bookkeeping only if one helper still formats or resolves the same skill or concept-detail data in multiple paths | `services/context.py` | Keep local unless another helper removes real duplication without reopening the runtime split | `tests/test_skill_loading.py`, `tests/test_context_enrichment.py`, `tests/test_context_builders.py` | Reviewed at checkpoint; the remaining secondary concept-detail formatting currently looks more like local packaging than a strong shared workflow |
+| `frontend/src/pages/ChatPage.tsx` | Browser-only request lifecycle or response shaping only if the same interaction flow is still repeated after the controller extractions | `frontend/src/pages/ChatPage.tsx` | Split only when a leaf or hook becomes a durable owner instead of a local helper move | Stronger page- or hook-level browser coverage than `frontend/src/App.test.tsx` alone | Deferred at closeout; not an active simplification target without a stronger duplicated-flow case |
+| `services/views.py` | Remaining Discord interaction flow only if a new repeated callback lifecycle appears after the shared proposal-decision scaffold move | `services/views.py` | Keep transport-local view logic unless another shared helper removes repeated interaction flow without hiding real behavioral differences | `tests/test_quiz_views.py`, `tests/test_proposals.py`, confirm-view regressions | Deferred at closeout; no active view cleanup remains justified |
+| Maintenance and taxonomy wrappers | Operator loop packaging only | `services/pipeline.py` | Leave in place until the scheduler, chat-admin, and script call graph narrows enough to justify a new owner | `tests/test_pipeline_operator_loops.py`, `tests/test_scheduler_full.py`, `tests/test_taxonomy_shadow_rebuild.py` | Not an active target |
+| Transport investment decision | Parity work across browser and Discord | Roadmap-level decision rather than one file | Keep both transports supported, but treat parity-only cleanup as out of scope unless it also removes named duplication | Product usage evidence or an explicit strategy decision | Resolved at closeout |
+
 ## Phase Tracker
 
 | Phase | Status | Completion signal | Notes |
@@ -109,9 +121,9 @@
 | 3. Transport flattening | Completed | No transport-owned workflow orchestration remains for the targeted maintain, reorganize, review, confirm, preference, and quiz follow-up flows | `/maintain`, `/reorganize`, review request orchestration, `/preference`, confirm flows, and quiz follow-up behavior now route through shared chat-session, chat-admin, chat-action, and review-flow owners; Discord is now a thin transport adapter with local delivery and view lifecycle responsibilities |
 | 4. Pipeline split | Completed | `services/pipeline.py` responsibilities reduced without behavior drift and its durable core is explicit | Prompt loading and prompt-cache ownership moved into `services/context.py`; runtime fetch-loop and session ownership moved into `services/llm_runtime.py`; `services/pipeline.py` now holds the durable parse/execute core plus the intentionally retained maintenance/taxonomy wrappers |
 | 5. Review and proposal ownership | Completed | Shared services own the behavior; transports only render it | `services/review_flow.py` owns canonical review payload/check and quiz-generation helpers, `services/chat_admin.py` owns confirmed review and proposal-action execution, and Discord/browser flows now consume shared confirm and chat-action payloads instead of transport-owned orchestration |
-| 6. Optional subsystem boundaries | In progress | Remaining optional and operator concerns are either justified by distinct behavior or clearly called non-goals | Scheduler keeps its local due-only review selector as an intentional behavior fork from manual review, canonical DB bootstrap now lives directly in `db.init_databases()`, transport-local lazy DB guards remain lightweight shims rather than a new shared helper, and maintenance/taxonomy wrappers remain intentionally retained because scheduler, chat-admin, and script callers still share one real operator call graph |
-| 7. UI hotspot cleanup | In progress | Discord and frontend hotspot files either shrink or gain a durable split with focused regression coverage | Early ChatPage cleanup clarified local ownership without shrinking the file; Phase 7 now continues by removing duplicated UI interaction flow, using file splits only where they create a durable boundary |
-| 8. Transport and framework fit review | Not started | Browser-primary versus keep-both investment revisited only if product usage or duplicated transport logic justifies it | |
+| 6. Optional subsystem boundaries | Completed | Remaining optional and operator concerns are either justified by distinct behavior or clearly called non-goals | Scheduler keeps its local due-only review selector as an intentional behavior fork from manual review, canonical DB bootstrap now lives directly in `db.init_databases()`, transport-local lazy DB guards remain lightweight shims rather than a new shared helper, and maintenance/taxonomy wrappers remain intentionally retained because scheduler, chat-admin, and script callers still share one real operator call graph |
+| 7. UI hotspot cleanup | Completed | Each accepted slice removes named duplicated interaction flow and lands with focused regression coverage for that flow; the phase closes when no remaining candidate still clears that bar | ChatPage and Discord view work stopped at the point where the remaining candidates looked like packaging or parity cleanup instead of strong duplicated workflows |
+| 8. Transport and framework fit review | Completed | Browser-primary versus keep-both investment is decided before more parity cleanup that lacks clear duplication payoff | Decision: keep both Discord and browser as supported surfaces, but do not authorize parity-only cleanup inside this simplification program |
 
 ## Implementation Log
 
@@ -157,7 +169,16 @@
 | Prompt-cache bookkeeping consolidation | Moved shared skill-path and mtime resolution into helper functions in `services/context.py` and slimmed the system-prompt cache to the fields it actually uses, so prompt ownership no longer repeats the same skill-file bookkeeping across base and system prompt builders |
 | Lightweight-context due-section consolidation | Moved repeated due-concept line rendering in `build_lightweight_context()` into shared `_format_due_concept_line()` and `_append_due_concepts_section()` helpers, while keeping relation snippets disabled in `REVIEW-CHECK` mode |
 | Concept-overview formatting consolidation | Moved repeated concept description/score/interval/reviews/topics rendering into `_append_concept_overview()` and reused it across active concept detail, preloaded concept detail, quiz-generator context, fetched concept detail, and concept-cluster rendering |
+| Context concept-detail section consolidation | Moved repeated remark and recent-review rendering for active concept detail, preloaded concept detail, and fetched concept detail into shared `services/context.py` helpers, then added a direct fetch-detail regression test to keep that shared rendering pinned |
+| Quiz-generator primary concept consolidation | Reused the shared context remark and recent-review helpers inside `build_quiz_generator_context()`, preserving quiz-generator metadata lines while removing another hand-rolled primary concept detail block |
+| Scheduler operator report-loop consolidation | Moved the repeated maintenance and taxonomy "run loop then forward result through `_send_mode_report()`" flow into one shared helper while keeping the thin scheduler wrappers and their public test seams intact |
+| Assess scoring and persistence consolidation | Moved the shared single- and multi-assess difficulty normalization, score calculation, scheduling update, and review persistence policy into `services/tools_assess.py` helpers while leaving quiz-state, reminder, and relation-specific behavior in the owning handlers |
+| Tools concept-resolution consolidation | Moved repeated concept lookup-by-`concept_id` or title from `update_concept` and `remark` onto one shared `services/tools.py` helper and added direct handler coverage for both title-based paths |
+| Proposal view indexed-decision scaffold consolidation | Moved the repeated proposal-view decision map, bulk/indexed button setup, decision-item ID collection, and bulk decision application into shared `services/views.py` base helpers while leaving dedup-specific status rendering and proposed-action finalization guards local |
+| Checkpoint re-rank after proposal-view slice | Re-read the strongest remaining backend candidate in `services/context.py`, compared the suspected secondary concept-detail seam with neighboring renderers, and explicitly declined another slice because the remaining overlap does not yet clear the plan's duplicated-workflow bar |
 | Scheduler mode-check consolidation | Moved the duplicated serialized maintenance/taxonomy scheduler check flow into shared `_run_mode_check()` and added `_send_taxonomy_report()` so each scheduled operator job now owns only its context builder, messages, and report sender |
+| Plan and architecture-doc rebaseline | Tightened the master plan's Phase 7 gate, added a duplication inventory to the tracker, and re-centered the next slice decision on named duplicated workflow instead of hotspot size alone |
+| Final transport-strategy closeout | Closed phases 6 through 8 by explicitly keeping both Discord and browser as supported surfaces, blessing the remaining operator boundaries as intentional, and ending the program once no remaining hotspot candidate still cleared the duplicated-workflow bar |
 
 ## Validation Log
 
@@ -202,11 +223,19 @@
 | Prompt-cache bookkeeping consolidation | `python -m pytest tests/test_skill_loading.py -q` passed after simplifying duplicated skill-path bookkeeping in `services/context.py`: 23 passed |
 | Lightweight-context due-section consolidation | `python -m pytest tests/test_context_enrichment.py tests/test_concept_confirm.py -k "DueConceptRelations or review_check_mode_uses_concept_prefix or concept_prefix_in_due_list" -q` passed: 4 passed |
 | Concept-overview formatting consolidation | `python -m pytest tests/test_context_enrichment.py -k "ActiveConceptDetail or PreloadMentionedConcept or QuizGeneratorEnrichment" -q` passed: 17 passed; `python -m pytest tests/test_context_builders.py -q` passed: 3 passed |
+| Context concept-detail section consolidation | `python -m pytest tests/test_context_enrichment.py tests/test_context_builders.py -q` passed after extracting shared remark/recent-review helpers and adding direct fetch-detail coverage: 34 passed |
+| Quiz-generator primary concept consolidation | `python -m pytest tests/test_context_enrichment.py tests/test_context_builders.py -q` passed after moving quiz-generator primary concept remark/review rendering onto the shared helpers and adding direct metadata coverage: 35 passed |
+| Scheduler operator report-loop consolidation | `python -m pytest tests/test_scheduler_full.py -k "maintenance or taxonomy" -q` passed after extracting the shared maintenance/taxonomy loop-report helper: 4 passed |
+| Assess scoring and persistence consolidation | `python -m pytest tests/test_assess_no_quiz_guard.py tests/test_multi_quiz.py tests/test_assess_relations.py -q` passed after extracting the shared assess scoring and persistence helpers: 32 passed |
+| Tools concept-resolution consolidation | `python -m pytest tests/test_tools_handlers.py tests/test_score_guard.py -q` passed after extracting the shared concept ID resolver for `update_concept` and `remark`: 39 passed |
+| Proposal view indexed-decision scaffold consolidation | `python -m pytest tests/test_proposals.py -q` passed after extracting the shared indexed proposal-decision scaffold in `services/views.py`: 11 passed |
+| Checkpoint re-rank after proposal-view slice | Read-only review of `services/context.py` plus focused context tests as anchors; no code change because the suspected seam was not strong enough to justify another extraction |
 | Scheduler mode-check consolidation | `python -m pytest tests/test_scheduler_full.py -k "maintenance or taxonomy" -q` passed after extracting the shared scheduler helper and adding direct taxonomy sender coverage: 4 passed |
+| Plan and architecture-doc rebaseline | Docs-only slice; validation is consistency review across the master plan, progress tracker, architecture overview, and README |
+| Final transport-strategy closeout | Docs-only closeout; validation is consistency review across the master plan, progress tracker, `docs/ARCHITECTURE.md`, and `README.md` |
 
-## Next Actions
+## Closeout Notes
 
-1. Continue only where the next slice removes real duplicated workflow or clarifies ownership; `services/views.py` and `frontend/src/pages/ChatPage.tsx` now have less obvious transport/browser duplication than before.
-2. Revisit `services/context.py` or another backend hotspot only if prompt/context or operator bookkeeping still repeats enough logic to justify another shared owner helper; avoid bookkeeping-only splits.
-3. Revisit maintenance/taxonomy wrapper extraction only if the scheduler, chat-admin, and script call graph narrows enough to justify a real owner boundary instead of a packaging move.
-4. Revisit transport strategy only if product usage or duplicated transport logic shows that equal investment across browser and Discord is no longer justified.
+1. The simplification program is finished. The protected runtime path, transport-thinning goals, and hotspot acceptance bar now describe the maintained architecture rather than an active refactor queue.
+2. Future work in `frontend/src/pages/ChatPage.tsx`, `services/views.py`, or `services/context.py` should be treated as new proposals, not automatic continuation of this plan.
+3. Keep both Discord and browser supported, but require duplication removal rather than parity alone to justify any future cross-surface cleanup.

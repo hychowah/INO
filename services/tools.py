@@ -421,6 +421,22 @@ def _link_existing_concept(existing: Dict, topic_ids: List[int]) -> str:
         )
 
 
+def _resolve_concept_id_from_params(params: Dict[str, Any]) -> Optional[int]:
+    """Resolve a concept ID directly or from a title lookup."""
+    concept_id = params.get("concept_id")
+    if concept_id:
+        return int(concept_id)
+
+    title = params.get("title")
+    if not title:
+        return None
+
+    matches = db.search_concepts(title, limit=1)
+    if not matches:
+        return None
+    return int(matches[0]["id"])
+
+
 def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
     # Resolve topics first (same as before)
     topic_ids, created_topics = _resolve_topic_ids(params)
@@ -477,14 +493,7 @@ def _handle_add_concept(params: Dict) -> Tuple[str, Any]:
 
 
 def _handle_update_concept(params: Dict) -> Tuple[str, Any]:
-    cid = params.get("concept_id")
-    if not cid:
-        # Try to find by title
-        title = params.get("title")
-        if title:
-            matches = db.search_concepts(title, limit=1)
-            if matches:
-                cid = matches[0]["id"]
+    cid = _resolve_concept_id_from_params(params)
     if not cid:
         return ("error", "update_concept requires concept_id or a matchable title")
 
@@ -525,11 +534,11 @@ def _handle_update_concept(params: Dict) -> Tuple[str, Any]:
         update_fields["title"] = params["new_title"]
 
     if update_fields:
-        db.update_concept(int(cid), **update_fields)
+        db.update_concept(cid, **update_fields)
 
     # Optional remark
     if params.get("remark"):
-        db.add_remark(int(cid), params["remark"])
+        db.add_remark(cid, params["remark"])
 
     return ("reply", f"Updated concept #{cid}")
 
@@ -572,22 +581,14 @@ def _handle_unlink_concept(params: Dict) -> Tuple[str, Any]:
 
 
 def _handle_remark(params: Dict) -> Tuple[str, Any]:
-    cid = params.get("concept_id")
+    cid = _resolve_concept_id_from_params(params)
     content = params.get("content")
-
-    if not cid:
-        # Try by title
-        title = params.get("title")
-        if title:
-            matches = db.search_concepts(title, limit=1)
-            if matches:
-                cid = matches[0]["id"]
     if not cid:
         return ("error", "remark requires concept_id or a matchable title")
     if not content:
         return ("error", "remark requires content")
 
-    db.add_remark(int(cid), content)
+    db.add_remark(cid, content)
     return ("reply", f"Added remark to concept #{cid}")
 
 

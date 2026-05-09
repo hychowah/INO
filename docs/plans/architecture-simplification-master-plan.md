@@ -7,6 +7,11 @@ The goal is to reduce accidental complexity without weakening the core learning 
 LLM safety boundaries, or the shared transport behavior that still earns its keep
 across Discord and the browser.
 
+Status at closeout: the simplification program is now treated as complete. The remaining
+operator boundaries are intentional, no further hotspot slice is currently authorized,
+and transport strategy is now "keep both surfaces, but do not spend more effort on
+parity cleanup unless it removes a named duplicated workflow."
+
 ## Problem Statement
 
 The repository is not primarily suffering from classitis.
@@ -74,7 +79,9 @@ share of the accidental complexity.
 | New files | Allowed only when they retire a hotspot or create a clearer ownership boundary |
 | Temporary LOC increase | Acceptable only inside an active phase that also removes the old path before the phase closes |
 | File splits | Count as success only if duplication drops or ownership becomes materially clearer |
-| Transport strategy | Discord and browser may diverge in investment level, but shared learning behavior should stay transport-agnostic where that still removes duplication |
+| Phase 7 gate | UI or view cleanup is justified only when the slice names one concrete duplicated workflow, the owner that should absorb it, and the focused regression coverage that proves the move |
+| Transport strategy | Keep both Discord and browser as supported product surfaces; shared learning behavior should stay transport-agnostic where that still removes duplication, but parity-only cleanup is no longer a standing simplification goal |
+| Public architecture docs | Rebaseline `docs/ARCHITECTURE.md` and `README.md` whenever shared-owner boundaries change enough that a stale top-level story would point the next refactor at the wrong module |
 | Multi-user groundwork | Keep it dormant and narrow; do not expand it during this effort |
 | Optional subsystems | Treat vector search, taxonomy, maintenance, dedup, and backup as candidates for clearer operator-only boundaries |
 
@@ -101,9 +108,32 @@ operator workflow, or optional enhancement.
 | 3 | Flatten transport orchestration | Discord and browser call shared command services directly for the targeted flows | Completed |
 | 4 | Split `services/pipeline.py` by responsibility | Public behavior preserved while internal ownership is cleaner | Completed |
 | 5 | Consolidate review, quiz, and proposal ownership | Shared services own the behavior; transports only render it | Completed |
-| 6 | Right-size optional runtime subsystems | Remaining optional and operator boundaries are either justified by distinct behavior or explicitly retired | Closeout in progress |
-| 7 | Reduce UI boilerplate and page hotspots | Discord view and browser chat hotspots shrink without behavior loss | In progress |
-| 8 | Reassess transport and framework fit | Browser-primary versus keep-both investment is revisited only if product usage or duplication justifies it | Not started |
+| 6 | Right-size optional runtime subsystems | Remaining optional and operator boundaries are either justified by distinct behavior or explicitly retired | Completed |
+| 7 | Reduce UI boilerplate and page hotspots only where real duplication remains | Each accepted slice names the duplicated workflow removed, the target durable owner, and the focused validation that protects the move; the phase closes when no remaining candidate clears that bar | Completed |
+| 8 | Reassess transport investment level before more parity cleanup | Browser-primary versus keep-both investment is decided once hotspot work no longer removes obvious duplicated workflow | Completed |
+
+## Closeout Criteria
+
+Treat the simplification program as finished only when all of the following are true:
+
+1. The protected runtime path in this document, `docs/ARCHITECTURE.md`, and `README.md` all tell the same ownership story.
+2. No transport-owned workflow orchestration remains for the targeted maintain, reorganize, review, confirm, preference, and quiz follow-up flows.
+3. `services/pipeline.py` is reduced to the durable parse/execute core plus any operator wrappers that were explicitly reviewed and kept.
+4. Remaining hotspots are either backed by one named duplicated workflow with focused coverage or explicitly deferred as packaging-only cleanup.
+5. Transport strategy is explicit: both Discord and browser remain supported, but future cleanup must justify itself through duplication removal rather than parity alone.
+
+These criteria are now considered satisfied by the companion tracker.
+
+## Final Outcome
+
+The architecture simplification effort finished by removing the major duplicated workflow paths,
+thinning transport-owned orchestration, re-establishing the shared runtime core, and refusing
+further hotspot work once the remaining overlap dropped below the plan's own acceptance bar.
+
+The plan does not claim the repository is "small" or that every large file should now be split.
+It claims a narrower, more defensible outcome: the main accidental orchestration spread has been
+reduced, the runtime owners are clearer, and future refactors now need a stronger justification
+than hotspot size alone.
 
 ## First Confirmed Simplification Targets
 
@@ -122,11 +152,12 @@ operator workflow, or optional enhancement.
 |---|---|
 | Transport and service refactor | Focused backend tests for chat, review, and turn routing |
 | Pipeline split | Contract-sensitive tests plus targeted review generation checks |
-| UI cleanup | Relevant Discord regression tests and frontend tests |
+| UI cleanup | Relevant Discord regression tests and frontend tests, plus one written statement of the duplicated interaction flow being removed and the owner that will hold it after the slice |
+| Architecture-doc rebaseline | Re-read the plan, `docs/ARCHITECTURE.md`, and `README.md` together and confirm the same top-level owner story appears in all three places |
 | End of phase | Tracker updated with LOC delta, removed paths, added paths, and regression result |
 
 ## Ownership
 
 This document owns the architecture simplification strategy.
 The companion tracker in `docs/plans/architecture-simplification-progress.md`
-owns baseline numbers, current status, progress deltas, and next actions.
+owns baseline numbers, current status, progress deltas, and closeout notes.
