@@ -139,7 +139,8 @@ The Learning Agent is a Discord and web-based spaced repetition system where **a
 | `services/context.py` | ~920 | Prompt-context assembly and skill loading — dynamic context, fetch-result formatting, skill-set mapping, prompt caching, and system-prompt composition |
 | `services/llm_runtime.py` | ~330 | Shared LLM runtime owner — conversation sessions, fetch loop, output-contract retry/logging, structured-output hinting, and raw provider call helpers |
 | `services/review_flow.py` | ~275 | Shared review owner — canonical review payload/check helpers, structured quiz generation, deterministic delivery formatting, and review fallback orchestration |
-| `services/pipeline.py` | ~480 | Remaining orchestrator — parse/execute flow, quiz guards, maintenance/taxonomy action loops, taxonomy context entrypoints, and isolated `preference-edit` execution |
+| `services/preferences_flow.py` | ~35 | Shared isolated preference-edit owner — fenced-output parsing, prompt dispatch, live preferences write, and prompt-cache invalidation |
+| `services/pipeline.py` | ~415 | Remaining orchestrator — parse/execute flow, quiz guards, and maintenance/taxonomy action loops plus taxonomy context entrypoints |
 | `services/llm.py` | ~330 | LLM provider abstraction — owns the OpenAI-compatible chat-completions adapter, structured-output fallback when `response_format` is rejected, and reasoning-provider selection |
 | `services/parser.py` | ~180 | LLM output boundary and presentation guard — `validate_llm_output`, `parse_llm_response`, `process_output`, `extract_llm_action`, `guard_user_message` |
 | `services/action_contracts.py` | ~290 | Lightweight LLM action schema/validation — required params, param-type checks, action JSON schema for structured output mode |
@@ -639,12 +640,13 @@ The remaining orchestration core. It now focuses on parse/execute flow and the o
 6. **`call_maintenance_loop(diagnostic_context)`** — Thin wrapper around `call_action_loop()` for maintenance mode.
 7. **`call_taxonomy_loop(...)`** — Thin wrapper around `call_action_loop()` for taxonomy mode, including the stable isolated taxonomy session.
 8. **`handle_taxonomy()`** — Entry point called by `scheduler._check_taxonomy()` and `/reorganize`. Returns taxonomy context or `None` if no topics exist.
-9. **`call_preference_edit(user_text)` / `execute_preference_update(content)`** — Special-case isolated `/preference` edit path that bypasses the normal action/fetch runtime and writes the live preferences file after confirmation.
+9. Preference-edit prompting and confirmed preference writes now live in `services/preferences_flow.py`, which keeps the isolated `/preference` edit path out of the shared parse/execute core.
 
-### services/context.py + services/llm_runtime.py + services/review_flow.py — Prompt, Runtime, and Review Owners
+### services/context.py + services/llm_runtime.py + services/review_flow.py + services/preferences_flow.py — Prompt, Runtime, Review, and Preference Owners
 - `services/context.py` owns skill-set mapping, prompt caching, prompt assembly, dynamic context building, and fetch-result formatting.
 - `services/llm_runtime.py` owns conversation session lifecycle, output-contract retry/logging, structured-output hinting, raw provider calls, and the shared fetch loop used by chat, review fallback, and operator loops.
 - `services/review_flow.py` owns canonical review payload/check helpers, the structured quiz-generator P1 flow, deterministic delivery formatting, and the shared review fallback orchestration used by scheduler, chat, and Discord review entrypoints.
+- `services/preferences_flow.py` owns the isolated preference-edit prompt path, fenced-output parsing, confirmed preferences writes, and prompt-cache invalidation for `/preference` edits.
 
 ### services/llm.py — Provider Integration
 - Owns the OpenAI-compatible chat-completions provider and the optional reasoning-provider override used by structured review-quiz P1 generation

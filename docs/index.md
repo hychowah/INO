@@ -53,7 +53,7 @@ TAXONOMY-MODE    → taxonomy       → taxonomy only   (/reorganize, shared sch
 preference-edit  → preference-edit → preferences only   (/preference text edit path)
 ```
 
-Loading logic: `services/context.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. Structured review-quiz delivery no longer uses an LLM packaging stage; `services/review_flow.py` owns `generate_quiz_question()` and `format_quiz_action()`, while `services/llm_runtime.py` owns the shared fetch loop used by the review fallback path. The `/preference` edit path remains the exception: `services/pipeline.py` calls `ctx._get_base_prompt("preference-edit")` directly and bypasses the normal fetch-loop/runtime path.
+Loading logic: `services/context.py` → `_mode_to_skill_set()` → `SKILL_SETS` dict → `_get_base_prompt(skill_set)`. Structured review-quiz delivery no longer uses an LLM packaging stage; `services/review_flow.py` owns `generate_quiz_question()` and `format_quiz_action()`, while `services/llm_runtime.py` owns the shared fetch loop used by the review fallback path. The `/preference` edit path remains the exception, but the live owner is now `services/preferences_flow.py`: it calls `ctx._get_base_prompt("preference-edit")` directly and writes the approved preferences update while the shared chat path routes through that module instead of `services/pipeline.py`.
 
 Next-session reminder note: scheduled review state now lives in `services/review_state.py` and the `scheduled_review_reminders` table only. Read `docs/ARCHITECTURE.md` and `docs/DEVNOTES.md` before changing reminder behavior.
 

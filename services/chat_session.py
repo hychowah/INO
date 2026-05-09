@@ -28,12 +28,10 @@ from services.chat_quiz import (
 from services.dedup import execute_dedup_merges
 from services.learn_turn import run_learn_turn
 from services.parser import parse_llm_response, process_output
+from services.preferences_flow import call_preference_edit, execute_preference_update
 from services.review_flow import generate_review_quiz_from_payload
 from services.review_state import get_pending_review, register_interactive_review_delivery
 from services.tools import execute_action, set_action_source
-
-call_with_fetch_loop = llm_runtime.call_with_fetch_loop
-handle_review_check = review_flow.handle_review_check
 
 _db_initialized = False
 
@@ -112,7 +110,7 @@ async def _handle_learn_message(text: str, author: str = "chat", source: str = "
         text,
         author,
         source=source,
-        call_with_fetch_loop=call_with_fetch_loop,
+        call_with_fetch_loop=llm_runtime.call_with_fetch_loop,
         parse_response=parse_llm_response,
         execute_response=pipeline.execute_llm_response,
         process_output=process_output,
@@ -144,7 +142,7 @@ async def _handle_review_request(
     _ensure_db()
     state.begin_interactive_turn()
 
-    review_lines = handle_review_check()
+    review_lines = review_flow.handle_review_check()
     if not review_lines:
         return None
 
@@ -179,7 +177,7 @@ async def _handle_preference_command(raw_text: str, args: str) -> dict:
         _record_exchange(raw_text, message)
         return build_chat_payload(message)
 
-    preview_text, proposed_content = await pipeline.call_preference_edit(args)
+    preview_text, proposed_content = await call_preference_edit(args)
     message = (
         "Proposed preference update\n\n"
         f"{preview_text}\n\n"
@@ -339,7 +337,7 @@ async def _confirm_chat_action(action_data: dict, source: str = "chat") -> dict:
     set_action_source(source)
 
     if action == "preference_update":
-        result = await pipeline.execute_preference_update(params.get("content", ""))
+        result = await execute_preference_update(params.get("content", ""))
         db.add_chat_message("user", confirmation_history_entry(action_data))
         db.add_chat_message("assistant", result)
         return build_chat_payload(f"{message}\n\n{result}")

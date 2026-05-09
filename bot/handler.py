@@ -12,8 +12,6 @@ from services.parser import parse_llm_response, process_output
 
 logger = logging.getLogger("bot")
 
-call_with_fetch_loop = llm_runtime.call_with_fetch_loop
-
 # Maps message_id → (action_data, View) for add_concept and suggest_topic
 _pending_confirmations: dict[int, tuple[dict, discord.ui.View]] = {}
 
@@ -52,7 +50,7 @@ def _ensure_db():
     """Ensure DB is initialized (idempotent)."""
     global _db_initialized
     if not _db_initialized:
-        pipeline.init_databases()
+        db.init_databases()
         _db_initialized = True
 
 
@@ -71,7 +69,7 @@ async def _handle_user_message(
                 text,
                 author,
                 source="discord",
-                call_with_fetch_loop=call_with_fetch_loop,
+                call_with_fetch_loop=llm_runtime.call_with_fetch_loop,
                 parse_response=parse_llm_response,
                 execute_response=pipeline.execute_llm_response,
                 process_output=process_output,

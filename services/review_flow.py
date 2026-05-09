@@ -34,10 +34,6 @@ _QUIZ_QUESTION_TYPES = {
     "teach-back",
 }
 
-
-call_with_fetch_loop = llm_runtime.call_with_fetch_loop
-
-
 @dataclass(frozen=True)
 class ReviewQuizResult:
     concept_id: int | None
@@ -311,7 +307,7 @@ async def generate_review_quiz_from_payload(
             else:
                 raise LLMError("No concept_id in payload", retryable=True)
         except LLMError:
-            llm_response = await call_with_fetch_loop(
+            llm_response = await llm_runtime.call_with_fetch_loop(
                 mode="review-check",
                 text=review_text,
                 author=author,

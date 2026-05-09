@@ -352,26 +352,69 @@ class TestSkipQuizButtonRegression:
         button = _get_button(view, "I know this")
 
         async def _click():
+            with (
+                patch.object(
+                    quiz_views,
+                    "handle_chat_action",
+                    new=AsyncMock(
+                        return_value={
+                            "type": "reply",
+                            "message": "⏭️ Skipped — score: 10→20, next review in 3d",
+                            "pending_action": None,
+                            "actions": [],
+                        }
+                    ),
+                ) as action_mock,
+                patch("bot.messages.send_discord_result", new=AsyncMock()) as send_mock,
+            ):
+                await button.callback(interaction)
+                action_mock.assert_awaited_once_with(
+                    {"kind": "skip_quiz", "concept_id": cid},
+                    author="test-user",
+                    source="discord",
+                )
+                send_mock.assert_awaited_once_with(
+                    interaction.followup.send,
+                    "⏭️ Skipped — score: 10→20, next review in 3d",
+                    message_handler,
+                    actions=[],
+                )
+
+        asyncio.run(_click())
+
+        assert interaction.followup.calls == []
+
+    def test_skip_button_shared_action_error_uses_followup(self, test_db):
+        cid = db.add_concept("Skip Error", "Desc")
+        db.update_concept(cid, review_count=3)
+
+        async def message_handler(_text, _author, user_id=None):
+            return "unused", None, None, None
+
+        interaction = _MockInteraction()
+        view = quiz_views.QuizQuestionView(
+            concept_id=cid,
+            message_handler=message_handler,
+            show_skip=True,
+        )
+        button = _get_button(view, "I know this")
+
+        async def _click():
             with patch.object(
                 quiz_views,
-                "execute_skip_quiz_action",
-                return_value={
-                    "message": "⏭️ Skipped — score: 10→20, next review in 3d",
-                    "concept_id": cid,
-                    "quality": 5,
-                    "actions": [],
-                },
-            ) as skip_mock:
+                "handle_chat_action",
+                new=AsyncMock(return_value={"type": "error", "message": "blocked", "pending_action": None}),
+            ) as action_mock:
                 await button.callback(interaction)
-                skip_mock.assert_called_once_with(
-                    cid,
-                    user_id=quiz_views._interaction_user_id(interaction),
+                action_mock.assert_awaited_once_with(
+                    {"kind": "skip_quiz", "concept_id": cid},
+                    author="test-user",
                     source="discord",
                 )
 
         asyncio.run(_click())
 
-        assert interaction.followup.calls[0]["content"].startswith("⏭️ Skipped — score:")
+        assert interaction.followup.calls == [{"content": "⚠️ blocked", "view": None}]
 
     def test_skip_quiz_clears_stale_active_concept(self, test_db):
         """Successful skip clears active_concept_id alongside the quiz anchor."""

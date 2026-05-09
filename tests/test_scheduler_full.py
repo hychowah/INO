@@ -146,6 +146,48 @@ async def test_check_maintenance_forwards_nonempty_context(test_db):
 
 
 @pytest.mark.anyio
+async def test_send_maintenance_report_forwards_loop_output_to_mode_report(test_db):
+    with (
+        patch(
+            "services.scheduler.pipeline.call_maintenance_loop",
+            new=AsyncMock(return_value=("REPLY: maintenance summary", [{"action": "update_topic"}])),
+        ) as loop_mock,
+        patch("services.scheduler._send_mode_report", new=AsyncMock()) as report_mock,
+    ):
+        await scheduler._send_maintenance_report("diag")
+
+    loop_mock.assert_awaited_once_with("diag")
+    report_mock.assert_awaited_once_with(
+        mode_label="Knowledge Base Maintenance",
+        icon="🔧",
+        final_result="REPLY: maintenance summary",
+        proposed_actions=[{"action": "update_topic"}],
+        proposal_type="maintenance",
+    )
+
+
+@pytest.mark.anyio
+async def test_send_taxonomy_report_forwards_loop_output_to_mode_report(test_db):
+    with (
+        patch(
+            "services.scheduler.pipeline.call_taxonomy_loop",
+            new=AsyncMock(return_value=("REPLY: taxonomy summary", [{"action": "link_topics"}])),
+        ) as loop_mock,
+        patch("services.scheduler._send_mode_report", new=AsyncMock()) as report_mock,
+    ):
+        await scheduler._send_taxonomy_report("taxonomy")
+
+    loop_mock.assert_awaited_once_with("taxonomy")
+    report_mock.assert_awaited_once_with(
+        mode_label="Weekly Taxonomy Reorganization",
+        icon="🌿",
+        final_result="REPLY: taxonomy summary",
+        proposed_actions=[{"action": "link_topics"}],
+        proposal_type="taxonomy",
+    )
+
+
+@pytest.mark.anyio
 async def test_check_taxonomy_skips_when_no_topics_found(test_db):
     with (
         patch("services.scheduler.pipeline.handle_taxonomy", return_value="") as handle_mock,

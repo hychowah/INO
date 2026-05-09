@@ -103,7 +103,7 @@ class TestChat:
     async def test_chat_normal_reply(self, client):
         with (
             patch(
-                "services.chat_session.call_with_fetch_loop",
+                "services.chat_session.llm_runtime.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
             patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
@@ -125,7 +125,7 @@ class TestChat:
     async def test_chat_stream_returns_status_and_done_events(self, client):
         with (
             patch(
-                "services.chat_session.call_with_fetch_loop",
+                "services.chat_session.llm_runtime.call_with_fetch_loop",
                 new=AsyncMock(return_value="REPLY: raw"),
             ),
             patch("services.chat_session.parse_llm_response", return_value=("REPLY", "raw", None)),
@@ -153,7 +153,7 @@ class TestChat:
         }
         with (
             patch(
-                "services.chat_session.call_with_fetch_loop",
+                "services.chat_session.llm_runtime.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
@@ -184,7 +184,7 @@ class TestChat:
         }
         with (
             patch(
-                "services.chat_session.call_with_fetch_loop",
+                "services.chat_session.llm_runtime.call_with_fetch_loop",
                 new=AsyncMock(return_value="ignored"),
             ),
             patch(
@@ -264,7 +264,7 @@ class TestChat:
                 new=AsyncMock(return_value=["merged duplicate concepts"]),
             ),
             patch(
-                "services.chat_admin.pipeline.execute_approved_actions",
+                "services.chat_admin.execute_approved_actions",
                 new=AsyncMock(return_value=["renamed topic"]),
             ),
         ):
@@ -298,7 +298,7 @@ class TestChat:
         }
 
         with patch(
-            "services.chat_admin.pipeline.execute_approved_actions",
+            "services.chat_admin.execute_approved_actions",
             new=AsyncMock(return_value=["moved topic under parent"]),
         ):
             resp = await client.post("/api/chat/confirm", json={"action_data": action_data})
@@ -340,7 +340,7 @@ class TestChat:
             return ["✅ `link_topics` — moved node"]
 
         with patch(
-            "services.chat_admin.pipeline.execute_approved_actions",
+            "services.chat_admin.execute_approved_actions",
             new=AsyncMock(side_effect=fake_execute),
         ):
             resp = await client.post(

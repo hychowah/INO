@@ -36,8 +36,6 @@ from services.views import DedupConfirmView
 
 logger = logging.getLogger("scheduler")
 
-build_review_payload = review_flow.build_review_payload
-
 # Module-level state set by start()
 _bot = None
 _authorized_user_id = None
@@ -125,7 +123,7 @@ def _get_scheduled_review_payload() -> str | None:
         return None
 
     concept = due[0]
-    payload = build_review_payload(int(concept["id"]))
+    payload = review_flow.build_review_payload(int(concept["id"]))
     if not payload:
         return None
 
@@ -353,22 +351,39 @@ async def _send_mode_report(
         logger.error(f"Error sending {mode_label} report: {e}", exc_info=True)
 
 
-async def _check_maintenance():
-    """Run DB diagnostics and send maintenance report if issues found."""
-    logger.debug("Running maintenance check...")
+async def _run_mode_check(
+    *,
+    mode_name: str,
+    build_context: Callable[[], str],
+    empty_message: str,
+    start_message: str,
+    send_report: Callable[[str], Awaitable[None]],
+):
+    logger.debug("Running %s check...", mode_name)
     with state.pipeline_serialized_nowait() as acquired:
         if not acquired:
-            logger.debug("Skipping maintenance check — pipeline busy")
+            logger.debug("Skipping %s check — pipeline busy", mode_name)
             return
         try:
-            diagnostic_context = pipeline.handle_maintenance()
-            if not diagnostic_context:
-                logger.debug("Maintenance: no issues found")
+            mode_context = build_context()
+            if not mode_context:
+                logger.debug(empty_message)
                 return
-            logger.info("Maintenance issues found, sending to LLM for triage")
-            await _send_maintenance_report(diagnostic_context)
+            logger.info(start_message)
+            await send_report(mode_context)
         except Exception as e:
-            logger.error(f"Error in maintenance check: {e}", exc_info=True)
+            logger.error("Error in %s check: %s", mode_name, e, exc_info=True)
+
+
+async def _check_maintenance():
+    """Run DB diagnostics and send maintenance report if issues found."""
+    await _run_mode_check(
+        mode_name="maintenance",
+        build_context=pipeline.handle_maintenance,
+        empty_message="Maintenance: no issues found",
+        start_message="Maintenance issues found, sending to LLM for triage",
+        send_report=_send_maintenance_report,
+    )
 
 
 async def _send_maintenance_report(diagnostic_context: str):
@@ -386,29 +401,30 @@ async def _send_maintenance_report(diagnostic_context: str):
         logger.error(f"Error in maintenance pipeline: {e}", exc_info=True)
 
 
+async def _send_taxonomy_report(taxonomy_context: str):
+    """Send taxonomy context to the LLM for reorganization, then DM the report."""
+    try:
+        final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
+        await _send_mode_report(
+            mode_label="Weekly Taxonomy Reorganization",
+            icon="🌿",
+            final_result=final_result,
+            proposed_actions=proposed_actions,
+            proposal_type="taxonomy",
+        )
+    except Exception as e:
+        logger.error(f"Error in taxonomy pipeline: {e}", exc_info=True)
+
+
 async def _check_taxonomy():
     """Run taxonomy reorganization and DM the report if there are topics."""
-    logger.debug("Running taxonomy check...")
-    with state.pipeline_serialized_nowait() as acquired:
-        if not acquired:
-            logger.debug("Skipping taxonomy check — pipeline busy")
-            return
-        try:
-            taxonomy_context = pipeline.handle_taxonomy()
-            if not taxonomy_context:
-                logger.debug("Taxonomy: no topics found")
-                return
-            logger.info("Running taxonomy reorganization LLM loop")
-            final_result, proposed_actions = await pipeline.call_taxonomy_loop(taxonomy_context)
-            await _send_mode_report(
-                mode_label="Weekly Taxonomy Reorganization",
-                icon="🌿",
-                final_result=final_result,
-                proposed_actions=proposed_actions,
-                proposal_type="taxonomy",
-            )
-        except Exception as e:
-            logger.error(f"Error in taxonomy check: {e}", exc_info=True)
+    await _run_mode_check(
+        mode_name="taxonomy",
+        build_context=pipeline.handle_taxonomy,
+        empty_message="Taxonomy: no topics found",
+        start_message="Running taxonomy reorganization LLM loop",
+        send_report=_send_taxonomy_report,
+    )
 
 
 async def _check_backup():

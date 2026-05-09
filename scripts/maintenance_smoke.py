@@ -142,7 +142,6 @@ async def main():
     setup_logging(args.verbose)
 
     db.init_databases()
-    pipeline.init_databases()
 
     if args.similarity:
         ok = run_similarity_test()

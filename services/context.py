@@ -46,8 +46,8 @@ def _mode_to_skill_set(mode: str) -> str:
     }.get(mode, "interactive")
 
 
-# Cached system prompt — keyed by (persona, skill_set), with mtimes for hot-reload.
-_system_prompt_cache: dict[tuple[str, str], tuple[str, float, dict[str, float]]] = {}
+# Cached system prompt — keyed by (persona, skill_set), with persona mtime for hot-reload.
+_system_prompt_cache: dict[tuple[str, str], tuple[str, float]] = {}
 
 # Cached base content per skill set — (content, prefs_mtime, {skill_file: mtime})
 _base_prompt_cache: dict[str, tuple[str, float, dict[str, float]]] = {}
@@ -60,16 +60,23 @@ def _read_file(path: Path) -> str:
     return ""
 
 
+def _get_skill_paths(skill_set: str) -> tuple[list[str], dict[str, Path]]:
+    """Resolve the configured skill names and file paths for a skill set."""
+    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
+    return skill_names, {name: SKILLS_DIR / f"{name}.md" for name in skill_names}
+
+
+def _get_path_mtimes(paths: dict[str, Path]) -> dict[str, float]:
+    """Collect mtimes for the provided paths, using 0 for missing files."""
+    return {name: path.stat().st_mtime if path.exists() else 0 for name, path in paths.items()}
+
+
 def _get_base_prompt(skill_set: str = "interactive") -> str:
     """Read skill files for *skill_set* + preferences.md, cached with mtime check."""
     global _base_prompt_cache
 
-    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
-    skill_paths = {name: SKILLS_DIR / f"{name}.md" for name in skill_names}
-
-    current_mtimes: dict[str, float] = {}
-    for name, path in skill_paths.items():
-        current_mtimes[name] = path.stat().st_mtime if path.exists() else 0
+    skill_names, skill_paths = _get_skill_paths(skill_set)
+    current_mtimes = _get_path_mtimes(skill_paths)
     prefs_mtime = PREFERENCES_MD_PATH.stat().st_mtime if PREFERENCES_MD_PATH.exists() else 0
 
     if skill_set in _base_prompt_cache:
@@ -126,7 +133,7 @@ def build_system_prompt(persona: str | None = None, mode: str = "command") -> st
     cache_key = (persona, skill_set)
 
     if cache_key in _system_prompt_cache:
-        cached_prompt, cached_persona_mtime, _cached_skill_mtimes = _system_prompt_cache[cache_key]
+        cached_prompt, cached_persona_mtime = _system_prompt_cache[cache_key]
         if cached_persona_mtime == persona_mtime:
             base = _get_base_prompt(skill_set)
             expected = _compose_prompt(base, persona_content)
@@ -136,13 +143,8 @@ def build_system_prompt(persona: str | None = None, mode: str = "command") -> st
     base = _get_base_prompt(skill_set)
     full_prompt = _compose_prompt(base, persona_content)
 
-    skill_names = SKILL_SETS.get(skill_set, SKILL_SETS["interactive"])
-    skill_mtimes = {}
-    for name in skill_names:
-        path = SKILLS_DIR / f"{name}.md"
-        skill_mtimes[name] = path.stat().st_mtime if path.exists() else 0
-
-    _system_prompt_cache[cache_key] = (full_prompt, persona_mtime, skill_mtimes)
+    skill_names, _skill_paths = _get_skill_paths(skill_set)
+    _system_prompt_cache[cache_key] = (full_prompt, persona_mtime)
     logger.info(
         "System prompt built for persona '%s', skill_set '%s' (%s chars)",
         persona,
@@ -203,20 +205,7 @@ def build_lightweight_context(mode: str = "command", is_new_session: bool = True
     # --- REVIEW-CHECK: minimal context ---
     if mode == "REVIEW-CHECK":
         due = db.get_due_concepts(limit=5)
-        parts.append("## Due for Review (top 5)")
-        if due:
-            for c in due:
-                remark = c.get("latest_remark", "")
-                remark_preview = f" | remark: {remark[:60]}" if remark else ""
-                parts.append(
-                    f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
-                    f"interval {c['interval_days']}d, "
-                    f"reviews: {c['review_count']}, topics: {c.get('topic_ids', [])}"
-                    f"{remark_preview})"
-                )
-        else:
-            parts.append("Nothing due right now.")
-        parts.append("")
+        _append_due_concepts_section(parts, due, header="## Due for Review (top 5)")
         return "\n".join(parts)
 
     # --- COMMAND/REPLY: full context ---
@@ -250,28 +239,7 @@ def build_lightweight_context(mode: str = "command", is_new_session: bool = True
         if total_due > 5
         else "## Due for Review (top 5)"
     )
-    parts.append(due_header)
-    if due:
-        for c in due:
-            topic_ids = c.get("topic_ids", [])
-            remark = c.get("latest_remark", "")
-            remark_preview = f" | remark: {remark[:60]}" if remark else ""
-            parts.append(
-                f"- [concept:{c['id']}] {c['title']} (score {c['mastery_level']}/100, "
-                f"interval {c['interval_days']}d, "
-                f"reviews: {c['review_count']}, topics: {topic_ids}{remark_preview})"
-            )
-            # Show top 2 relations with score + remark snippet
-            relations = db.get_relations(c["id"])
-            for rel in relations[:2]:
-                note_preview = f', "{rel["note"][:60]}"' if rel.get("note") else ""
-                parts.append(
-                    f"  ↳ {rel['relation_type']} #{rel['other_concept_id']} "
-                    f"{rel['other_title']} (score {rel['other_mastery']}/100{note_preview})"
-                )
-    else:
-        parts.append("Nothing due right now.")
-    parts.append("")
+    _append_due_concepts_section(parts, due, header=due_header, relation_count=2)
 
     # Review stats
     parts.append(
@@ -288,6 +256,37 @@ def build_lightweight_context(mode: str = "command", is_new_session: bool = True
     _append_active_quiz_context(parts)
 
     return "\n".join(parts)
+
+
+def _format_due_concept_line(concept: dict[str, Any]) -> str:
+    """Return the common due-concept summary line used across lightweight modes."""
+    remark = concept.get("latest_remark", "")
+    remark_preview = f" | remark: {remark[:60]}" if remark else ""
+    return (
+        f"- [concept:{concept['id']}] {concept['title']} (score {concept['mastery_level']}/100, "
+        f"interval {concept['interval_days']}d, "
+        f"reviews: {concept['review_count']}, topics: {concept.get('topic_ids', [])}"
+        f"{remark_preview})"
+    )
+
+
+def _append_due_concepts_section(
+    parts: list[str],
+    due_concepts: list[dict[str, Any]],
+    *,
+    header: str,
+    relation_count: int = 0,
+) -> None:
+    """Append a formatted due-concepts section, optionally with relation snippets."""
+    parts.append(header)
+    if due_concepts:
+        for concept in due_concepts:
+            parts.append(_format_due_concept_line(concept))
+            if relation_count > 0:
+                parts.extend(_format_relations_snippet(concept["id"], max_rels=relation_count))
+    else:
+        parts.append("Nothing due right now.")
+    parts.append("")
 
 
 def _append_active_concept_detail(parts: list) -> None:
@@ -311,13 +310,7 @@ def _append_active_concept_detail(parts: list) -> None:
         return
 
     parts.append(f"## Active Concept Detail: {detail['title']} (#{detail['id']})")
-    parts.append(f"Description: {detail.get('description', 'N/A')}")
-    parts.append(
-        f"Score: {detail['mastery_level']}/100, "
-        f"Interval: {detail['interval_days']}d, "
-        f"Reviews: {detail['review_count']}"
-    )
-    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+    _append_concept_overview(parts, detail)
 
     if detail.get("remark_summary"):
         parts.append(f"Remark: {detail['remark_summary']}")
@@ -368,6 +361,17 @@ def _format_relations_snippet(concept_id: int, max_rels: int = 2) -> list[str]:
             f"{rel['other_title']} (score {rel['other_mastery']}/100{note_preview})"
         )
     return lines
+
+
+def _append_concept_overview(parts: list[str], detail: dict[str, Any]) -> None:
+    """Append the shared concept overview block used in prompt/context builders."""
+    parts.append(f"Description: {detail.get('description', 'N/A')}")
+    parts.append(
+        f"Score: {detail['mastery_level']}/100, "
+        f"Interval: {detail['interval_days']}d, "
+        f"Reviews: {detail['review_count']}"
+    )
+    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
 
 
 def _append_active_quiz_context(parts: list) -> None:
@@ -532,13 +536,7 @@ def _preload_mentioned_concept(user_message: str) -> str:
     parts.append(
         f"## Pre-loaded Concept (matched from message): {detail['title']} (#{detail['id']})"
     )
-    parts.append(f"Description: {detail.get('description', 'N/A')}")
-    parts.append(
-        f"Score: {detail['mastery_level']}/100, "
-        f"Interval: {detail['interval_days']}d, "
-        f"Reviews: {detail['review_count']}"
-    )
-    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+    _append_concept_overview(parts, detail)
 
     if detail.get("remark_summary"):
         parts.append(f"Remark: {detail['remark_summary']}")
@@ -590,13 +588,7 @@ def build_quiz_generator_context(concept_id: int) -> str | None:
 
     # --- Primary concept ---
     parts.append(f"## Primary Concept: {detail['title']} (#{detail['id']})")
-    parts.append(f"Description: {detail.get('description', 'N/A')}")
-    parts.append(
-        f"Score: {detail['mastery_level']}/100, "
-        f"Interval: {detail['interval_days']}d, "
-        f"Reviews: {detail['review_count']}"
-    )
-    parts.append(f"Topics: {[t['title'] for t in detail.get('topics', [])]}")
+    _append_concept_overview(parts, detail)
 
     if detail.get("remark_summary"):
         parts.append(f"\nRemark summary (updated {detail.get('remark_updated_at', 'N/A')}):")
@@ -687,13 +679,8 @@ def format_fetch_result(data: Any) -> str:
         if "concept_detail" in data:
             c = data["concept_detail"]
             parts.append(f"### Concept: {c['title']} (#{c['id']})")
-            parts.append(f"Description: {c.get('description', 'N/A')}")
-            parts.append(
-                f"Score: {c['mastery_level']}/100, "
-                f"Interval: {c['interval_days']}d, Reviews: {c['review_count']}"
-            )
+            _append_concept_overview(parts, c)
             parts.append(f"Next review: {c.get('next_review_at', 'N/A')}")
-            parts.append(f"Topics: {[t['title'] for t in c.get('topics', [])]}")
 
             if c.get("remark_summary"):
                 parts.append(f"\nRemark summary (updated {c.get('remark_updated_at', 'N/A')}):")
@@ -801,12 +788,7 @@ def format_fetch_result(data: Any) -> str:
                 parts.append(
                     f"#### {'➤ ' if is_primary else '  '}{c['title']} (#{c['id']}){label}{sim_str}"
                 )
-                parts.append(f"Description: {c.get('description', 'N/A')}")
-                parts.append(
-                    f"Score: {c['mastery_level']}/100, "
-                    f"Interval: {c['interval_days']}d, Reviews: {c['review_count']}"
-                )
-                parts.append(f"Topics: {[t['title'] for t in c.get('topics', [])]}")
+                _append_concept_overview(parts, c)
 
                 if c.get("remark_summary"):
                     parts.append(f"Remark summary: {c['remark_summary'][:300]}")

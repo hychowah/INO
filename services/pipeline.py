@@ -12,12 +12,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-import config
 import db
 from services import context as ctx
 from services import llm_runtime
 from services import state, tools
-from services.llm import LLMError, get_provider
+from services.llm import LLMError
 from services.parser import (
     extract_fetch_params,
     parse_llm_response,
@@ -70,20 +69,6 @@ SAFE_TAXONOMY_ACTIONS = frozenset(
         "list_topics",  # read-only
     }
 )
-
-_runtime_call_with_fetch_loop = llm_runtime.call_with_fetch_loop
-
-
-# ============================================================================
-# Initialization
-# ============================================================================
-
-
-def init_databases():
-    """Ensure learning databases are initialised. Direct call, no subprocess."""
-    db.init_databases()
-
-
 # ============================================================================
 # Quiz State Helpers
 # ============================================================================
@@ -293,7 +278,7 @@ async def call_action_loop(
     )
 
     for action_num in range(max_actions):
-        llm_response = await _runtime_call_with_fetch_loop(
+        llm_response = await llm_runtime.call_with_fetch_loop(
             mode=mode,
             text=text,
             author=f"{source}_agent",
@@ -400,7 +385,7 @@ async def call_action_loop(
         + "\n".join(f"{i + 1}. {a}" for i, a in enumerate(actions_taken))
         + "\n\nOutput REPLY: with a concise summary of what you did and what still needs attention."
     )
-    llm_response = await _runtime_call_with_fetch_loop(
+    llm_response = await llm_runtime.call_with_fetch_loop(
         mode=mode,
         text=text,
         author=f"{source}_agent",
@@ -487,58 +472,6 @@ async def call_taxonomy_loop(
     )
 
 
-def _parse_preferences_fence(raw: str) -> str:
-    """Extract the content from a ```preferences fenced block in the LLM response.
-
-    Raises ValueError if no valid block is found or the result is empty.
-    """
-    match = re.search(r"```preferences\s*\n(.*?)\n```", raw, re.DOTALL)
-    if not match:
-        raise ValueError("LLM did not produce a valid preferences block")
-    content = match.group(1).strip()
-    if not content:
-        raise ValueError("LLM produced an empty preferences block")
-    return content
-
-
-async def call_preference_edit(user_text: str) -> tuple[str, str]:
-    """Call the LLM to produce an edited version of preferences.md.
-
-    Uses the 'preference-edit' skill set directly via get_provider().send() —
-    deliberately bypasses _call_llm() because that function injects conversation
-    history and runs extract_llm_action(), both of which corrupt the fenced output.
-
-    Returns (preview_text, proposed_content) where preview_text is the LLM's
-    one-sentence summary of the change, and proposed_content is the full updated
-    file content extracted from the ```preferences fence.
-
-    Raises ValueError if the LLM response cannot be parsed.
-    """
-    system_prompt = ctx._get_base_prompt("preference-edit")
-    provider = get_provider()
-    raw = await provider.send(
-        user_text,
-        system_prompt=system_prompt,
-        timeout=config.COMMAND_TIMEOUT,
-    )
-    proposed_content = _parse_preferences_fence(raw)
-    # Everything before the fence is the LLM's summary sentence
-    fence_start = raw.find("```preferences")
-    preview_text = raw[:fence_start].strip() if fence_start != -1 else "Preferences updated."
-    return preview_text, proposed_content
-
-
-async def execute_preference_update(content: str) -> str:
-    """Write updated content to preferences.md and invalidate the prompt cache.
-
-    Called by PreferenceUpdateView when the user approves a proposed edit.
-    """
-    ctx.PREFERENCES_MD_PATH.write_text(content, encoding="utf-8")
-    ctx.invalidate_prompt_cache()
-    logger.info("preferences.md updated and prompt cache invalidated")
-    return "Preferences updated."
-
-
 def handle_taxonomy() -> str | None:
     """Build taxonomy context. Returns the context string for use in call_taxonomy_loop().
 
@@ -551,25 +484,3 @@ def handle_taxonomy() -> str | None:
     return ctx.build_taxonomy_context()
 
 
-async def execute_approved_actions(actions: list[dict], *, source: str = "maintenance") -> list[str]:
-    """Execute approved actions while preserving their policy source."""
-    tools.set_action_source(source)
-
-    summaries = []
-    for action_data in actions:
-        action_name = action_data.get("action", "unknown")
-        action_msg = action_data.get("message", "")
-        result = await execute_action(action_data)
-
-        result_clean = result
-        for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
-            if result_clean.startswith(pfx):
-                result_clean = result_clean[len(pfx) :]
-                break
-
-        is_error = "\u26a0\ufe0f" in result_clean or result_clean.startswith("\u26a0")
-        status = "❌" if is_error else "✅"
-        summaries.append(f"{status} `{action_name}` — {action_msg[:80]}")
-        logger.info(f"Approved {source} action: {action_name} → {'error' if is_error else 'ok'}")
-
-    return summaries

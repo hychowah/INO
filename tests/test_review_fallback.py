@@ -65,7 +65,7 @@ async def test_scheduler_fallback_uses_review_check_mode(test_db):
             "services.review_flow.generate_quiz_question",
             new=AsyncMock(side_effect=LLMError("boom", retryable=True)),
         ),
-        patch("services.review_flow.call_with_fetch_loop", new=fallback),
+        patch("services.review_flow.llm_runtime.call_with_fetch_loop", new=fallback),
         patch(
             "services.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Fallback question"),
@@ -121,15 +121,13 @@ async def test_chat_review_fallback_uses_review_check_mode(test_db):
     fallback = AsyncMock(return_value="QUIZ")
 
     with (
-        patch(
-            "services.chat_session.handle_review_check", return_value=[f"{cid}|context"]
-        ),
+        patch("services.review_flow.handle_review_check", return_value=[f"{cid}|context"]),
         patch("services.chat_session.set_action_source"),
         patch(
             "services.review_flow.generate_quiz_question",
             new=AsyncMock(side_effect=LLMError("boom", retryable=True)),
         ),
-        patch("services.review_flow.call_with_fetch_loop", new=fallback),
+        patch("services.review_flow.llm_runtime.call_with_fetch_loop", new=fallback),
         patch(
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Fallback question"),
@@ -148,9 +146,7 @@ async def test_chat_review_registers_typed_review_reminder(test_db):
     db.update_concept(cid, review_count=2)
 
     with (
-        patch(
-            "services.chat_session.handle_review_check", return_value=[f"{cid}|context"]
-        ),
+        patch("services.review_flow.handle_review_check", return_value=[f"{cid}|context"]),
         patch("services.chat_session.set_action_source"),
         patch(
             "services.review_flow.generate_quiz_question",
@@ -182,12 +178,12 @@ async def test_bot_review_fallback_uses_review_check_mode(test_db):
     fallback = AsyncMock(return_value="QUIZ")
 
     with (
-        patch("services.chat_session.handle_review_check", return_value=[f"{cid}|context"]),
+        patch("services.review_flow.handle_review_check", return_value=[f"{cid}|context"]),
         patch(
             "services.review_flow.generate_quiz_question",
             new=AsyncMock(side_effect=LLMError("boom", retryable=True)),
         ),
-        patch("services.review_flow.call_with_fetch_loop", new=fallback),
+        patch("services.review_flow.llm_runtime.call_with_fetch_loop", new=fallback),
         patch(
             "services.chat_session.pipeline.execute_llm_response",
             new=AsyncMock(return_value="REPLY: Slash fallback question"),
@@ -209,7 +205,7 @@ async def test_bot_review_does_not_persist_pending_when_send_fails(test_db):
     ctx = _MockCtx()
 
     with (
-        patch("services.chat_session.handle_review_check", return_value=[f"{cid}|context"]),
+        patch("services.review_flow.handle_review_check", return_value=[f"{cid}|context"]),
         patch(
             "services.review_flow.generate_quiz_question",
             new=AsyncMock(return_value={"question": "Q"}),

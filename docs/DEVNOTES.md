@@ -40,6 +40,7 @@
 27. [LLM Output Contract Boundary](#27-llm-output-contract-boundary)
 28. [Local Alias And Shared Chat Entry Boundaries](#28-local-alias-and-shared-chat-entry-boundaries)
 29. [Plan Files Are Active-Only](#29-plan-files-are-active-only)
+30. [Operator Wrappers Stay With the Action Loop Until the Call Graph Shrinks](#30-operator-wrappers-stay-with-the-action-loop-until-the-call-graph-shrinks)
 
 ---
 
@@ -132,7 +133,7 @@ Destructive actions (dedup merges, maintenance `delete_concept`/`unlink_concept`
 
 **Fix (defense-in-depth):**
 1. **Code guard** in `_handle_update_concept` (tools.py): when `action_source='maintenance'`, strip `mastery_level`, `ease_factor`, `interval_days`, `next_review_at`, `last_reviewed_at`, `review_count`
-2. **Action source** set in `execute_approved_actions(..., source="maintenance")` (pipeline.py) so approved proposals also get the guard
+2. **Action source** set in `execute_approved_actions(..., source="maintenance")` (`services/chat_admin.py`) so approved proposals also get the guard before delegating to the shared action executor
 3. **Reduced temptation**: struggling concepts diagnostic hides raw scores, shows `(7 reviews, still building)` instead
 4. **Prompt prohibition** in `maintenance.md`: "NEVER modify score/scheduling fields"
 
@@ -366,13 +367,15 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 
 **What changed:** `/preference` now has two modes. With no arguments it shows the current runtime `data/preferences.md`. With text input it enters a one-shot edit flow that asks the LLM to rewrite the full preferences file, then shows `PreferenceUpdateView` Apply/Reject buttons before any write happens.
 
-**Why it bypasses `_call_llm()`:** `call_preference_edit()` in `services/pipeline.py` talks to the provider directly instead of using the normal `_call_llm()` path. That is deliberate. The normal path injects conversation history and runs the action-extraction logic used for JSON actions; both behaviors corrupt the required fenced ` ```preferences ` output format. The isolated path keeps the response as plain text plus one fenced block so the parser can reliably extract the rewritten file.
+**Why it bypasses `_call_llm()`:** `call_preference_edit()` now lives in `services/preferences_flow.py` and talks to the provider directly instead of using the normal `_call_llm()` path. That is deliberate. The normal path injects conversation history and runs the action-extraction logic used for JSON actions; both behaviors corrupt the required fenced ` ```preferences ` output format. The isolated path keeps the response as plain text plus one fenced block so the parser can reliably extract the rewritten file.
+
+**Ownership boundary (2026-05-09):** The isolated preference-edit helpers were moved out of `services/pipeline.py` into `services/preferences_flow.py`. Keep `pipeline.py` focused on the durable parse/execute core and route `/preference` generation plus approved preference writes through the dedicated owner instead of reintroducing special-case workflow helpers into the pipeline module.
 
 **Template/runtime file split:** The tracked file is now `data/preferences.template.md`. The live file used in prompts remains `data/preferences.md`, but it is git-ignored and copied from the template on first bot startup (`bot/events.py` `on_ready()`). This avoids committing personal preference edits while still giving fresh clones a default file.
 
 **Why there is no DB-backed proposal:** this flow still does not create a durable proposal row, but Discord no longer owns the approval write path itself. `/preference` now routes through `services.chat_session.handle_chat_message()` to emit the same `pending_confirm` envelope used by chat/API, and `PreferenceUpdateView` delegates Apply/Reject through `confirm_chat_action()` / `decline_chat_action()` rather than carrying an ad hoc callback with raw proposed content. Unlike maintenance or dedup proposals, this still edits a single local file for the authorized user, so a DB-backed pending-proposal record would add persistence complexity without providing much safety value.
 
-**Key files:** `bot/commands.py` (`/preference` delegates to shared chat-session pending confirms), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/context.py` (`SKILL_SETS["preference-edit"]`, `_get_base_prompt`, `PREFERENCES_MD_PATH`), `services/pipeline.py` (`_parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/chat_session.py` (`preference_update` confirm/decline ownership), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
+**Key files:** `bot/commands.py` (`/preference` delegates to shared chat-session pending confirms), `bot/events.py` (template bootstrap), `config.py` (`PREFERENCES_TEMPLATE_MD`), `services/context.py` (`SKILL_SETS["preference-edit"]`, `_get_base_prompt`, `PREFERENCES_MD_PATH`), `services/preferences_flow.py` (`parse_preferences_fence`, `call_preference_edit`, `execute_preference_update`), `services/chat_session.py` (`preference_update` confirm/decline ownership), `services/views.py` (`PreferenceUpdateView`), `data/skills/preferences.md`, `data/preferences.template.md`.
 
 ---
 
@@ -390,8 +393,12 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 - Runtime provider conversation sessions in `services/llm_runtime.py` are now keyed by current user, so one scoped user does not inherit another scoped user's provider session.
 - `services.chat_actions.py` now owns the lightweight confirm/decline executor for `add_concept` and `suggest_topic`. Keep those actions lightweight and same-turn; do not widen them into durable proposal flows unless the product semantics change.
 - `skip_quiz` in the shared chat-action path now uses `state.get_current_user()` rather than the adapter display author, so browser/API skip actions hit the correct scoped user.
+- Discord `/preference` should delegate both display and edit modes through `services.chat_session.handle_chat_message()` rather than reading the preferences file directly in the command adapter.
+- Discord quiz skip should route through `services.chat_session.handle_chat_action()` plus shared Discord result rendering instead of calling the skip helper directly in the view callback.
 
 **Design rule:** for local-first runtime behavior, identity, serialization, and turn-entry bookkeeping should each be bound once at the owning boundary. Avoid reintroducing route-level or view-level copies of those rules.
+
+**Compatibility-seam rule (2026-05-09):** retire pure pass-through aliases once tests can patch the real owner directly. `services.chat_session.handle_review_check` and `services.scheduler.build_review_payload` were removed after the review tests were retargeted to `services.review_flow.py`. The same rule later removed the last caller-local fetch-loop aliases from `services.chat_session.py`, `services/review_flow.py`, `services/pipeline.py`, and `bot/handler.py`; focused tests now patch `llm_runtime.call_with_fetch_loop` through the importing module instead of relying on one-line rebinding seams. Keep only boundaries that still encode real behavior differences, not patch convenience alone.
 
 **Key files:** `config.py`, `services/state.py`, `api/auth.py`, `api/routes/chat.py`, `services/chat_session.py`, `services/chat_actions.py`, `bot/commands.py`, `bot/events.py`, `services/views.py`, `services/llm_runtime.py`, `tests/test_user_context_entrypoints.py`, `tests/test_pipeline_sessions.py`.
 
@@ -406,6 +413,36 @@ Before dispatching `assess` or `multi_assess`, `execute_action` calls `is_quiz_a
 **Cleanup requirement:** if `docs/plans/` becomes empty, update `docs/index.md` and `docs/DOC_INDEX.md` to say there is no active in-repo plan file rather than implying historical plans still live there.
 
 **Key files:** `docs/DOC_STANDARD.md`, `docs/index.md`, `docs/DOC_INDEX.md`, `docs/DEVNOTES.md`.
+
+---
+
+## 30. Operator Wrappers Stay With the Action Loop Until the Call Graph Shrinks
+
+**Decision (2026-05-09):** keep `handle_maintenance()`, `call_maintenance_loop()`, `handle_taxonomy()`, and `call_taxonomy_loop()` in `services/pipeline.py` for now.
+
+**Why:** after the preference-edit and approved-action replay moves, those wrappers are the last workflow-specific helpers left in `pipeline.py`, but they still share one real operator-mode call graph with `call_action_loop()` across `services/scheduler.py`, `services/chat_admin.py`, and `scripts/taxonomy_shadow_rebuild.py`. Moving only the thin wrappers would create a packaging boundary without materially simplifying ownership.
+
+**Guardrail:** do not move those wrappers just because they are small. First add or keep direct contract tests that pin wrapper forwarding and the two main runtime consumers. Revisit the extraction only if the operator call graph narrows enough that a new owner would reduce coupling instead of spreading it.
+
+**Current direct coverage:** `tests/test_pipeline_operator_loops.py` pins the maintenance wrapper contract, `tests/test_scheduler_full.py` pins scheduler forwarding into maintenance reporting, and `tests/test_taxonomy_shadow_rebuild.py` already pins the taxonomy wrapper contract and stable-session behavior.
+
+**Key files:** `services/pipeline.py`, `services/scheduler.py`, `services/chat_admin.py`, `scripts/taxonomy_shadow_rebuild.py`, `tests/test_pipeline_operator_loops.py`, `tests/test_scheduler_full.py`, `tests/test_taxonomy_shadow_rebuild.py`.
+
+---
+
+## 31. Canonical DB Bootstrap Lives In `db`, Not `pipeline`
+
+**Decision (2026-05-09):** treat `db.init_databases()` as the canonical bootstrap owner.
+
+**Why:** `db.init_databases()` is the only function that actually creates directories, initializes both SQLite stores, runs migrations, ensures indexes, and boots vectors. `services.pipeline.init_databases()` is only a compatibility pass-through. Transport-local lazy guards may still exist for startup ordering, but they should call the DB owner directly unless they add real policy.
+
+**Current state:** `services.chat_session._ensure_db()` and `bot.handler._ensure_db()` now both initialize through `db.init_databases()`, and the former `services.pipeline.init_databases()` compatibility shim has been removed after API startup, bot startup, and maintenance smoke were retargeted to the DB owner directly.
+
+**Related Phase 6 rule:** scheduler’s overdue-only review selector is a real behavior boundary worth keeping local; thin DB-bootstrap pass-throughs are not. If multiple lazy DB-init guards remain, only consolidate them behind a shared helper if that removes meaningful duplication beyond the callee choice.
+
+**Current Phase 6 call:** do not add a shared DB-init helper right now. The remaining `services.chat_session._ensure_db()` and `bot.handler._ensure_db()` guards are transport-local startup ordering shims with the same direct callee and no extra policy. A shared helper would only rename the guard, not simplify the architecture.
+
+**Key files:** `db/core.py`, `services/chat_session.py`, `bot/handler.py`, `bot/events.py`, `api/app.py`, `scripts/maintenance_smoke.py`, `tests/test_user_context_entrypoints.py`, `tests/test_bot_events.py`.
 
 ---
 

@@ -32,6 +32,20 @@ def test_current_user_scope_restores_previous_user():
     assert state.get_current_user() == previous_user
 
 
+def test_handler_ensure_db_uses_db_owner_once():
+    original = handler._db_initialized
+    handler._db_initialized = False
+    try:
+        with patch("bot.handler.db.init_databases") as init_mock:
+            handler._ensure_db()
+            handler._ensure_db()
+
+        init_mock.assert_called_once_with()
+        assert handler._db_initialized is True
+    finally:
+        handler._db_initialized = original
+
+
 @pytest.mark.anyio
 async def test_handle_user_message_sets_context_from_explicit_user_id(test_db):
     seen = {}
@@ -44,7 +58,7 @@ async def test_handle_user_message_sets_context_from_explicit_user_id(test_db):
 
     with (
         patch.object(handler, "_ensure_db", return_value=None),
-        patch("bot.handler.call_with_fetch_loop", new=AsyncMock(side_effect=fake_fetch_loop)),
+        patch("bot.handler.llm_runtime.call_with_fetch_loop", new=AsyncMock(side_effect=fake_fetch_loop)),
         patch("bot.handler.parse_llm_response", return_value=("REPLY", "raw", None)),
         patch("bot.handler.pipeline.execute_llm_response", new=AsyncMock(return_value="REPLY: done")),
         patch("bot.handler.process_output", return_value=("reply", "done")),
@@ -319,6 +333,34 @@ async def test_discord_preference_command_uses_shared_pending_confirm():
 
 
 @pytest.mark.anyio
+async def test_discord_preference_command_without_args_uses_shared_chat_session():
+    author = SimpleNamespace(__str__=lambda self: "test-author")
+    ctx = SimpleNamespace(
+        interaction=None,
+        author=author,
+        send=AsyncMock(),
+    )
+    payload = {
+        "type": "reply",
+        "message": "Your Preferences\n\n- Keep replies short.",
+        "pending_action": None,
+    }
+
+    with (
+        patch("bot.commands.chat_session.handle_chat_message", new=AsyncMock(return_value=payload)) as handle_mock,
+        patch("bot.commands.send_long", new=AsyncMock()) as send_long_mock,
+    ):
+        await commands.preference_command.callback(ctx, text="")
+
+    handle_mock.assert_awaited_once_with(
+        "/preference",
+        author=str(author),
+        source="discord",
+    )
+    send_long_mock.assert_awaited_once_with(ctx, "Your Preferences\n\n- Keep replies short.")
+
+
+@pytest.mark.anyio
 async def test_preference_view_apply_and_reject_delegate_to_shared_chat_confirm():
     class _Response:
         def __init__(self):
@@ -356,6 +398,38 @@ async def test_preference_view_apply_and_reject_delegate_to_shared_chat_confirm(
         content="Declined.",
         view=reject_view,
     )
+
+
+@pytest.mark.anyio
+async def test_chat_preference_command_uses_shared_preferences_flow():
+    with patch(
+        "services.chat_session.call_preference_edit",
+        new=AsyncMock(return_value=("Preview sentence.", "- Keep replies short.")),
+    ) as edit_mock:
+        payload = await chat_session.handle_chat_message("/preference keep replies short")
+
+    edit_mock.assert_awaited_once_with("keep replies short")
+    assert payload["type"] == "pending_confirm"
+    assert payload["pending_action"]["action"] == "preference_update"
+    assert payload["pending_action"]["params"]["content"] == "- Keep replies short."
+
+
+@pytest.mark.anyio
+async def test_chat_preference_confirm_uses_shared_preferences_flow():
+    action_data = {
+        "action": "preference_update",
+        "message": "Proposed preference update",
+        "params": {"content": "- Keep replies short."},
+    }
+
+    with patch(
+        "services.chat_session.execute_preference_update",
+        new=AsyncMock(return_value="Preferences updated."),
+    ) as update_mock:
+        payload = await chat_session.confirm_chat_action(action_data)
+
+    update_mock.assert_awaited_once_with("- Keep replies short.")
+    assert payload["message"] == "Proposed preference update\n\nPreferences updated."
 
 
 def test_discord_interaction_views_use_local_user_alias():

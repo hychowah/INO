@@ -405,15 +405,13 @@ async def preference_command(ctx, *, text: str = ""):
     """Show current preferences (no args) or edit them via LLM (with args)."""
     is_interaction = ctx.interaction is not None
 
-    _ensure_db()
-
     if not text:
-        # Display mode — no LLM call needed
-        try:
-            content = config.PREFERENCES_MD.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            content = "_(preferences.md not found)_"
-        await send_long(ctx, f"## Your Preferences\n\n```\n{content}\n```")
+        payload = await chat_session.handle_chat_message(
+            "/preference",
+            author=str(ctx.author),
+            source="discord",
+        )
+        await send_long(ctx, payload.get("message", ""))
         return
 
     # Edit mode

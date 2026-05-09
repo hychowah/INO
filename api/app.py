@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from services import pipeline, scheduler
+import db
+from services import scheduler
 
 logger = logging.getLogger("api")
 
@@ -17,7 +18,7 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     """Initialize databases on startup."""
     del app
-    pipeline.init_databases()
+    db.init_databases()
     scheduler.start(owner_label="api")
     logger.info("API started — databases initialized")
     try:

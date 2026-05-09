@@ -6,6 +6,7 @@ import db
 from services import pipeline
 from services.chat_payload import build_chat_payload
 from services.dedup import execute_dedup_merges, format_dedup_suggestions, handle_dedup_check
+from services.tools import set_action_source
 
 _PROPOSAL_ITEM_ID_KEY = "_proposal_item_id"
 
@@ -324,6 +325,31 @@ def _format_applied_changes(label: str, summaries: list[str]) -> str:
     return f"No {label} changes were applied."
 
 
+async def execute_approved_actions(
+    actions: list[dict], *, source: str = "maintenance"
+) -> list[str]:
+    """Execute approved proposal actions while preserving their policy source."""
+    set_action_source(source)
+
+    summaries = []
+    for action_data in actions:
+        action_name = action_data.get("action", "unknown")
+        action_msg = action_data.get("message", "")
+        result = await pipeline.execute_action(action_data)
+
+        result_clean = result
+        for pfx in ("REPLY: ", "REPLY:", "FETCH: "):
+            if result_clean.startswith(pfx):
+                result_clean = result_clean[len(pfx) :]
+                break
+
+        is_error = "⚠️" in result_clean or result_clean.startswith("⚠")
+        status = "❌" if is_error else "✅"
+        summaries.append(f"{status} `{action_name}` — {action_msg[:80]}")
+
+    return summaries
+
+
 async def execute_confirmed_review(action: str, params: dict) -> str:
     normalized_action = str(action).lower().strip()
 
@@ -338,7 +364,7 @@ async def execute_confirmed_review(action: str, params: dict) -> str:
                 parts.append(_format_applied_changes("dedup", dedup_summaries))
 
         if proposed_actions:
-            maintenance_summaries = await pipeline.execute_approved_actions(
+            maintenance_summaries = await execute_approved_actions(
                 proposed_actions,
                 source="maintenance",
             )
@@ -348,7 +374,7 @@ async def execute_confirmed_review(action: str, params: dict) -> str:
         return "\n\n".join(parts) if parts else "No maintenance changes were applied."
 
     if normalized_action == "taxonomy_review":
-        taxonomy_summaries = await pipeline.execute_approved_actions(
+        taxonomy_summaries = await execute_approved_actions(
             params.get("proposed_actions", []),
             source="taxonomy",
         )
@@ -470,13 +496,13 @@ async def handle_proposal_action(action: dict) -> dict | None:
                 action,
                 expected_type=_proposal_type_from_source(action_source),
             )
-            summaries = await pipeline.execute_approved_actions(actions, source=action_source)
+            summaries = await execute_approved_actions(actions, source=action_source)
             _store_remaining_proposal_items(proposal, remaining_actions)
         else:
             actions = action.get("actions", [])
             if not actions:
                 raise ValueError("apply_maintenance_actions requires actions")
-            summaries = await pipeline.execute_approved_actions(actions, source=action_source)
+            summaries = await execute_approved_actions(actions, source=action_source)
         summary = _format_applied_changes(action_source.lower(), summaries)
         return build_chat_payload(summary)
 

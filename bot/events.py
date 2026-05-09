@@ -30,7 +30,7 @@ logger = logging.getLogger("bot")
 
 @bot.event
 async def on_ready():
-    pipeline.init_databases()
+    db.init_databases()
 
     if not config.PREFERENCES_MD.exists() and config.PREFERENCES_TEMPLATE_MD.exists():
         shutil.copy(config.PREFERENCES_TEMPLATE_MD, config.PREFERENCES_MD)

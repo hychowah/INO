@@ -6,7 +6,7 @@ import pytest
 
 import db
 from bot import commands as bot_commands
-from services import state
+from services import chat_admin, state
 from services.views import DedupConfirmView, ProposedActionsView
 
 
@@ -231,6 +231,56 @@ async def test_maintain_command_uses_shared_maintenance_request_for_proposals(te
 
 
 @pytest.mark.anyio
+async def test_handle_maintenance_command_strips_reply_prefix_and_persists_proposals(test_db):
+    exchanges = []
+
+    with (
+        patch.object(chat_admin.config, "MAINTENANCE_MODE_ENABLED", True),
+        patch("services.chat_admin.pipeline.handle_maintenance", return_value="diag") as handle_mock,
+        patch(
+            "services.chat_admin.pipeline.call_maintenance_loop",
+            new=AsyncMock(
+                return_value=(
+                    "REPLY: Triaged issues and proposed one rename.",
+                    [{"action": "update_topic", "message": "Rename topic", "params": {"topic_id": 1}}],
+                )
+            ),
+        ) as loop_mock,
+        patch("services.chat_admin.handle_dedup_check", new=AsyncMock(return_value=[])) as dedup_mock,
+    ):
+        payload = await chat_admin.handle_maintenance_command(
+            "/maintain",
+            record_exchange=lambda user_text, assistant_text: exchanges.append((user_text, assistant_text)),
+        )
+
+    handle_mock.assert_called_once_with()
+    loop_mock.assert_awaited_once_with("diag")
+    dedup_mock.assert_awaited_once_with()
+    assert payload["message"] == (
+        "Maintenance\nTriaged issues and proposed one rename.\n\nDedup — no duplicates found."
+    )
+    assert payload["pending_action"] is None
+    assert payload["actions"][0]["type"] == "proposal_review"
+    assert exchanges == [
+        (
+            "/maintain",
+            "Maintenance\nTriaged issues and proposed one rename.\n\nDedup — no duplicates found.",
+        )
+    ]
+
+    proposal = db.get_pending_proposal("maintenance")
+    assert proposal is not None
+    assert proposal["payload"] == [
+        {
+            "action": "update_topic",
+            "message": "Rename topic",
+            "params": {"topic_id": 1},
+            "_proposal_item_id": "maintenance-0",
+        }
+    ]
+
+
+@pytest.mark.anyio
 async def test_reorganize_command_uses_shared_reorganize_request_for_proposals(test_db):
     ctx = _MockCtx()
     proposal_id = db.save_proposal(
@@ -265,3 +315,28 @@ async def test_reorganize_command_uses_shared_reorganize_request_for_proposals(t
     send_long_mock.assert_awaited_once_with(ctx, "Shared taxonomy summary")
     ctx.send.assert_awaited_once()
     assert isinstance(ctx.send.await_args.kwargs["view"], ProposedActionsView)
+
+
+@pytest.mark.anyio
+async def test_execute_approved_actions_preserves_source_and_formats_results(test_db):
+    with (
+        patch("services.chat_admin.set_action_source") as set_source_mock,
+        patch(
+            "services.chat_admin.pipeline.execute_action",
+            new=AsyncMock(side_effect=["REPLY: ok", "REPLY: ⚠️ failed"]),
+        ) as execute_mock,
+    ):
+        summaries = await chat_admin.execute_approved_actions(
+            [
+                {"action": "link_topics", "message": "Move topic", "params": {"parent_id": 1}},
+                {"action": "update_topic", "message": "Rename topic", "params": {"topic_id": 2}},
+            ],
+            source="taxonomy",
+        )
+
+    set_source_mock.assert_called_once_with("taxonomy")
+    assert execute_mock.await_count == 2
+    assert summaries == [
+        "✅ `link_topics` — Move topic",
+        "❌ `update_topic` — Rename topic",
+    ]

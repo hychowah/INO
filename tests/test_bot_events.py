@@ -36,7 +36,7 @@ async def test_on_ready_initializes_databases_before_scheduler_start(tmp_path):
         patch.object(bot_events.config, "AUTHORIZED_USER_ID", 999),
         patch.object(bot_events.config, "print_config"),
         patch.object(
-            bot_events.pipeline,
+            bot_events.db,
             "init_databases",
             side_effect=lambda: calls.append("init"),
         ),

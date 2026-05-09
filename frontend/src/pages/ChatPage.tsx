@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { PageIntro } from '@/components/PageIntro';
@@ -257,6 +257,119 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
+function ActionButtons({
+  buttons,
+  busy,
+  onClick,
+  className = 'flex flex-wrap gap-2'
+}: {
+  buttons: ButtonAction[];
+  busy: boolean;
+  onClick: (button: ButtonAction) => void;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      {buttons.map((button, buttonIndex) => (
+        <Button
+          disabled={busy}
+          key={buttonIndex}
+          onClick={() => onClick(button)}
+          size="sm"
+          type="button"
+          variant={actionButtonVariant(button.style)}
+        >
+          {button.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function PendingConfirmationPanel({
+  pendingAction,
+  pendingError,
+  requestInFlight,
+  onResolve,
+}: {
+  pendingAction: PendingAction;
+  pendingError: string;
+  requestInFlight: boolean;
+  onResolve: (confirm: boolean) => void;
+}) {
+  return (
+    <Card className="shrink-0 border-amber-400/25 bg-amber-400/8">
+      <CardContent className="space-y-4 py-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-100">Pending confirmation</div>
+          <Badge className="border-amber-300/20 bg-amber-300/10 text-amber-50" variant="outline">
+            Action required
+          </Badge>
+        </div>
+        <div className="rounded-[22px] border border-border/70 bg-background/45 px-4 py-3">
+          <RichTextContent content={pendingAction.message || 'Resolve the pending action before continuing.'} tone="pending" />
+        </div>
+        {pendingError ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{pendingError}</div>
+        ) : null}
+        <div className="flex flex-wrap gap-3">
+          <Button disabled={requestInFlight} onClick={() => onResolve(true)}>
+            Confirm
+          </Button>
+          <Button disabled={requestInFlight} onClick={() => onResolve(false)} variant="secondary">
+            Decline
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommandPalette({
+  commands,
+  requestInFlight,
+  onInsertCommand,
+}: {
+  commands: Array<{ label: string; command: string }>;
+  requestInFlight: boolean;
+  onInsertCommand: (command: string) => void;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-4 py-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Commands</div>
+          <span className="text-xs text-muted-foreground">Click or drag into the input</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {commands.map((item) => (
+            <Button
+              key={item.command}
+              variant="secondary"
+              size="sm"
+              className="rounded-full"
+              disabled={requestInFlight}
+              draggable
+              onClick={() => onInsertCommand(item.command)}
+              onDragStart={(event) => {
+                if (requestInFlight) {
+                  event.preventDefault();
+                  return;
+                }
+                event.dataTransfer.setData('text/plain', item.command);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+            >
+              {item.label}
+            </Button>
+          ))}
+          {!commands.length ? <p className="text-sm text-muted-foreground">No suggested commands right now.</p> : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ActionRenderer({ actions, busy, onRun }: { actions: ActionBlock[]; busy: boolean; onRun: (action: ButtonAction['action']) => Promise<boolean> }) {
   const [hiddenBlocks, setHiddenBlocks] = useState<Set<number>>(() => new Set());
   const [hiddenItems, setHiddenItems] = useState<Set<string>>(() => new Set());
@@ -289,20 +402,7 @@ function ActionRenderer({ actions, busy, onRun }: { actions: ActionBlock[]; busy
           return (
             <div className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/65 p-4" key={`group-${index}`}>
               {block.title ? <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">{block.title}</div> : null}
-              <div className="flex flex-wrap gap-2">
-                {block.buttons.map((button, buttonIndex) => (
-                  <Button
-                    disabled={busy}
-                    key={buttonIndex}
-                    onClick={() => void handleActionClick(button, index)}
-                    size="sm"
-                    type="button"
-                    variant={actionButtonVariant(button.style)}
-                  >
-                    {button.label}
-                  </Button>
-                ))}
-              </div>
+              <ActionButtons busy={busy} buttons={block.buttons} onClick={(button) => void handleActionClick(button, index)} />
             </div>
           );
         }
@@ -322,38 +422,21 @@ function ActionRenderer({ actions, busy, onRun }: { actions: ActionBlock[]; busy
                   <div className="space-y-3 rounded-[22px] border border-white/8 bg-slate-950/55 p-4" key={item.id}>
                     <div className="text-sm font-medium text-slate-100">{item.label}</div>
                     {item.detail ? <div className="text-sm text-slate-400">{item.detail}</div> : null}
-                    <div className="flex flex-wrap gap-2">
-                      {item.buttons.map((button, buttonIndex) => (
-                        <Button
-                          disabled={busy}
-                          key={buttonIndex}
-                          onClick={() => void handleActionClick(button, index, item.id)}
-                          size="sm"
-                          type="button"
-                          variant={actionButtonVariant(button.style)}
-                        >
-                          {button.label}
-                        </Button>
-                      ))}
-                    </div>
+                    <ActionButtons
+                      busy={busy}
+                      buttons={item.buttons}
+                      onClick={(button) => void handleActionClick(button, index, item.id)}
+                    />
                   </div>
                 ))}
               </div>
               {block.bulk_buttons?.length ? (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {block.bulk_buttons.map((button, buttonIndex) => (
-                    <Button
-                      disabled={busy}
-                      key={buttonIndex}
-                      onClick={() => void handleActionClick(button, index)}
-                      size="sm"
-                      type="button"
-                      variant={actionButtonVariant(button.style)}
-                    >
-                      {button.label}
-                    </Button>
-                  ))}
-                </div>
+                <ActionButtons
+                  busy={busy}
+                  buttons={block.bulk_buttons}
+                  className="flex flex-wrap gap-2 pt-1"
+                  onClick={(button) => void handleActionClick(button, index)}
+                />
               ) : null}
             </div>
           );
@@ -362,20 +445,7 @@ function ActionRenderer({ actions, busy, onRun }: { actions: ActionBlock[]; busy
         return (
           <div className="space-y-3 rounded-[24px] border border-white/10 bg-slate-900/65 p-4" key={`choice-${index}`}>
             {block.title ? <div className="text-sm font-semibold text-white">{block.title}</div> : null}
-            <div className="flex flex-wrap gap-2">
-              {block.choices.map((choice, choiceIndex) => (
-                <Button
-                  disabled={busy}
-                  key={choiceIndex}
-                  onClick={() => void handleActionClick(choice, index)}
-                  size="sm"
-                  type="button"
-                  variant={actionButtonVariant(choice.style)}
-                >
-                  {choice.label}
-                </Button>
-              ))}
-            </div>
+            <ActionButtons busy={busy} buttons={block.choices} onClick={(button) => void handleActionClick(button, index)} />
           </div>
         );
       })}
@@ -383,7 +453,109 @@ function ActionRenderer({ actions, busy, onRun }: { actions: ActionBlock[]; busy
   );
 }
 
-export function ChatPage() {
+function ChatThread({
+  messages,
+  requestInFlight,
+  onRunAction,
+  threadRef,
+}: {
+  messages: Message[];
+  requestInFlight: boolean;
+  onRunAction: (action: ButtonAction['action']) => Promise<boolean>;
+  threadRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <Card className="min-h-0 flex-1 overflow-hidden">
+      <CardContent className="h-full p-0">
+        <div ref={threadRef} className="app-scrollbar flex h-full min-h-0 flex-col gap-4 overflow-y-auto bg-background/35 p-4 sm:p-5">
+          {messages.length ? (
+            messages.map((message) => (
+              <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} key={message.id}>
+                <div className="space-y-2">
+                  <MessageBubble message={message} />
+                  {message.role === 'assistant' && message.actions?.length ? (
+                    <ActionRenderer actions={message.actions} busy={requestInFlight} onRun={onRunAction} />
+                  ) : null}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-[24px] border border-dashed border-border bg-secondary/20 px-4 py-6 text-sm text-muted-foreground">
+              No chat history yet. Start the conversation below.
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ComposerPanel({
+  draft,
+  dragActive,
+  inputRef,
+  requestInFlight,
+  status,
+  onComposerDrop,
+  onComposerKeyDown,
+  onDragActiveChange,
+  onDraftChange,
+  onSubmit,
+}: {
+  draft: string;
+  dragActive: boolean;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  requestInFlight: boolean;
+  status: string;
+  onComposerDrop: (event: DragEvent<HTMLTextAreaElement>) => void;
+  onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onDragActiveChange: (active: boolean) => void;
+  onDraftChange: (nextDraft: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Card className="shrink-0">
+      <CardContent className="space-y-4 py-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Composer</div>
+          <span className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline</span>
+        </div>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <textarea
+            ref={inputRef}
+            className={`min-h-[3.5rem] w-full resize-none rounded-3xl border border-border bg-background/70 px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20${dragActive ? ' border-primary/60 ring-2 ring-primary/20' : ''}`}
+            disabled={requestInFlight}
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            onKeyDown={onComposerKeyDown}
+            onDragOver={(event) => {
+              event.preventDefault();
+              onDragActiveChange(true);
+            }}
+            onDragLeave={() => onDragActiveChange(false)}
+            onDrop={onComposerDrop}
+            rows={1}
+            placeholder="Ask a question, request a quiz, or tell the agent what you want to learn..."
+          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-h-5 text-sm text-muted-foreground">{status}</span>
+            <Button disabled={requestInFlight} type="submit">
+              {requestInFlight ? 'Working...' : 'Send'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function useChatPageController() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [commands, setCommands] = useState<Array<{ label: string; command: string }>>([]);
   const [draft, setDraft] = useState('');
@@ -450,18 +622,6 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
-    try {
-      if (pendingAction) {
-        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(pendingAction));
-      } else {
-        window.sessionStorage.removeItem(STORAGE_KEY);
-      }
-    } catch {
-      // Ignore session storage failures in the browser.
-    }
-  }, [pendingAction]);
-
-  useEffect(() => {
     const thread = threadRef.current;
     if (!thread) {
       return;
@@ -474,29 +634,98 @@ export function ChatPage() {
     setRequestInFlight(isBusy);
   }
 
+  function focusComposer() {
+    inputRef.current?.focus();
+  }
+
+  function appendErrorMessage(error: unknown) {
+    appendMessage({ role: 'assistant', content: (error as Error).message, variant: 'error' });
+  }
+
+  async function runRequest<T>({
+    startStatus,
+    onError,
+    task,
+  }: {
+    startStatus: string;
+    onError: (error: unknown) => T;
+    task: () => Promise<T>;
+  }): Promise<T> {
+    setStatus(startStatus);
+    setBusy(true);
+    try {
+      return await task();
+    } catch (error) {
+      return onError(error);
+    } finally {
+      setBusy(false);
+      setStatus('');
+      focusComposer();
+    }
+  }
+
+  function storePendingAction(nextPendingAction: PendingAction | null) {
+    setPendingAction(nextPendingAction);
+    try {
+      if (nextPendingAction) {
+        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextPendingAction));
+      } else {
+        window.sessionStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {
+      // Ignore session storage failures in the browser.
+    }
+  }
+
   function insertCommand(command: string) {
     setDraft((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}${command}`);
-    inputRef.current?.focus();
+    focusComposer();
+  }
+
+  function clearConversationState() {
+    setMessages([]);
+    storePendingAction(null);
+    setPendingError('');
+  }
+
+  function responseVariant(response: ChatEnvelope): 'default' | 'error' {
+    return response.type === 'error' ? 'error' : 'default';
+  }
+
+  function appendAssistantResponse(response: ChatEnvelope, content: string) {
+    if (!content) {
+      return;
+    }
+
+    appendMessage({
+      role: 'assistant',
+      content,
+      variant: responseVariant(response),
+      actions: response.actions,
+    });
+  }
+
+  function syncPendingState(response: ChatEnvelope) {
+    if (response.type === 'pending_confirm' && response.pending_action) {
+      storePendingAction(response.pending_action as PendingAction);
+      setPendingError('');
+      return;
+    }
+
+    storePendingAction(null);
+    setPendingError('');
   }
 
   async function applyResponse(response: ChatEnvelope) {
     if (response.clear_history) {
-      setMessages([]);
-      setPendingAction(null);
-      setPendingError('');
+      clearConversationState();
     }
 
     if (response.message) {
-      appendMessage({ role: 'assistant', content: response.message, variant: response.type === 'error' ? 'error' : 'default', actions: response.actions });
+      appendAssistantResponse(response, response.message);
     }
 
-    if (response.type === 'pending_confirm' && response.pending_action) {
-      setPendingAction(response.pending_action as PendingAction);
-      setPendingError('');
-    } else {
-      setPendingAction(null);
-      setPendingError('');
-    }
+    syncPendingState(response);
   }
 
   async function handleSend() {
@@ -513,10 +742,13 @@ export function ChatPage() {
     }
     appendMessage({ role: 'user', content: message });
     setDraft('');
-    setStatus('Connecting to the learning agent...');
     setPendingError('');
-    setBusy(true);
-    try {
+    await runRequest({
+      startStatus: 'Connecting to the learning agent...',
+      onError: (error) => {
+        appendErrorMessage(error);
+      },
+      task: async () => {
       const response = await streamChat(message, {
         onStatus: (nextStatus) => {
           if (nextStatus) {
@@ -526,41 +758,28 @@ export function ChatPage() {
       });
 
       if (response.clear_history) {
-        setMessages([]);
-        setPendingAction(null);
-        setPendingError('');
+        clearConversationState();
       }
 
       if (response.message) {
         const assistantMessage = createMessage({
           role: 'assistant',
           content: '',
-          variant: response.type === 'error' ? 'error' : 'default'
+          variant: responseVariant(response)
         });
         setMessages((current) => (response.clear_history ? [assistantMessage] : current.concat(assistantMessage)));
         setStatus('Streaming reply...');
         await replayAssistantMessage(
           assistantMessage.id,
           response.message,
-          response.type === 'error' ? 'error' : 'default',
+          responseVariant(response),
           response.actions
         );
       }
 
-      if (response.type === 'pending_confirm' && response.pending_action) {
-        setPendingAction(response.pending_action as PendingAction);
-        setPendingError('');
-      } else {
-        setPendingAction(null);
-        setPendingError('');
-      }
-    } catch (error) {
-      appendMessage({ role: 'assistant', content: (error as Error).message, variant: 'error' });
-    } finally {
-      setBusy(false);
-      setStatus('');
-      inputRef.current?.focus();
-    }
+      syncPendingState(response);
+      },
+    });
   }
 
   async function handleAction(action: ButtonAction['action']) {
@@ -571,30 +790,31 @@ export function ChatPage() {
       return true;
     }
 
-    setStatus('Running action...');
-    setBusy(true);
-    try {
-      const response = await runChatAction(action);
-      await applyResponse(response);
-      return true;
-    } catch (error) {
-      appendMessage({ role: 'assistant', content: (error as Error).message, variant: 'error' });
-      return false;
-    } finally {
-      setBusy(false);
-      setStatus('');
-      inputRef.current?.focus();
-    }
+    return runRequest({
+      startStatus: 'Running action...',
+      onError: (error) => {
+        appendErrorMessage(error);
+        return false;
+      },
+      task: async () => {
+        const response = await runChatAction(action);
+        await applyResponse(response);
+        return true;
+      },
+    });
   }
 
   async function handlePending(confirm: boolean) {
     if (!pendingAction || requestInFlightRef.current) {
       return;
     }
-    setStatus(confirm ? 'Confirming action...' : 'Declining action...');
     setPendingError('');
-    setBusy(true);
-    try {
+    await runRequest({
+      startStatus: confirm ? 'Confirming action...' : 'Declining action...',
+      onError: (error) => {
+        setPendingError((error as Error).message || 'Could not resolve the pending action.');
+      },
+      task: async () => {
       const current = pendingAction;
       const response = confirm ? await confirmPending(current) : await declinePending(current);
 
@@ -603,31 +823,26 @@ export function ChatPage() {
       if (confirm) {
         const followup = extractFollowupMessage(response.message || '', current.message);
         if (followup) {
-          appendMessage({ role: 'assistant', content: followup, variant: response.type === 'error' ? 'error' : 'default', actions: response.actions });
+          appendAssistantResponse(response, followup);
         }
       } else {
-        appendMessage({ role: 'assistant', content: response.message || 'Declined.', variant: response.type === 'error' ? 'error' : 'default', actions: response.actions });
+        appendAssistantResponse(response, response.message || 'Declined.');
       }
 
-      setPendingAction(null);
+      storePendingAction(null);
       setPendingError('');
-    } catch (error) {
-      setPendingError((error as Error).message || 'Could not resolve the pending action.');
-    } finally {
-      setBusy(false);
-      setStatus('');
-      inputRef.current?.focus();
-    }
+      },
+    });
   }
 
-  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void handleSend();
     }
   }
 
-  function handleComposerDrop(event: React.DragEvent<HTMLTextAreaElement>) {
+  function handleComposerDrop(event: DragEvent<HTMLTextAreaElement>) {
     event.preventDefault();
     setDragActive(false);
     const command = event.dataTransfer.getData('text/plain').trim();
@@ -635,6 +850,50 @@ export function ChatPage() {
       insertCommand(command);
     }
   }
+
+  return {
+    commands,
+    draft,
+    dragActive,
+    handleAction,
+    handleComposerDrop,
+    handleComposerKeyDown,
+    handlePending,
+    handleSend,
+    inputRef,
+    insertCommand,
+    messages,
+    pendingAction,
+    pendingError,
+    requestInFlight,
+    setDraft,
+    setDragActive,
+    status,
+    threadRef,
+  };
+}
+
+export function ChatPage() {
+  const {
+    commands,
+    draft,
+    dragActive,
+    handleAction,
+    handleComposerDrop,
+    handleComposerKeyDown,
+    handlePending,
+    handleSend,
+    inputRef,
+    insertCommand,
+    messages,
+    pendingAction,
+    pendingError,
+    requestInFlight,
+    setDraft,
+    setDragActive,
+    status,
+    threadRef,
+  } = useChatPageController();
 
   return (
     <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
@@ -652,107 +911,33 @@ export function ChatPage() {
 
         <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="flex min-h-0 flex-col gap-4">
-            <Card className="min-h-0 flex-1 overflow-hidden">
-              <CardContent className="h-full p-0">
-                <div ref={threadRef} className="app-scrollbar flex h-full min-h-0 flex-col gap-4 overflow-y-auto bg-background/35 p-4 sm:p-5">
-            {messages.length ? messages.map((message) => (
-              <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} key={message.id}>
-                <div className="space-y-2">
-                  <MessageBubble message={message} />
-                  {message.role === 'assistant' && message.actions?.length ? (
-                    <ActionRenderer actions={message.actions} busy={requestInFlight} onRun={handleAction} />
-                  ) : null}
-                </div>
-              </div>
-            )) : <div className="rounded-[24px] border border-dashed border-border bg-secondary/20 px-4 py-6 text-sm text-muted-foreground">No chat history yet. Start the conversation below.</div>}
-                </div>
-              </CardContent>
-            </Card>
+            <ChatThread messages={messages} onRunAction={handleAction} requestInFlight={requestInFlight} threadRef={threadRef} />
 
             {pendingAction ? (
-              <Card className="shrink-0 border-amber-400/25 bg-amber-400/8">
-                <CardContent className="space-y-4 py-6">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold uppercase tracking-[0.24em] text-amber-100">Pending confirmation</div>
-                    <Badge className="border-amber-300/20 bg-amber-300/10 text-amber-50" variant="outline">Action required</Badge>
-                  </div>
-                  <div className="rounded-[22px] border border-border/70 bg-background/45 px-4 py-3">
-                    <RichTextContent content={pendingAction.message || 'Resolve the pending action before continuing.'} tone="pending" />
-                  </div>
-                  {pendingError ? <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">{pendingError}</div> : null}
-                  <div className="flex flex-wrap gap-3">
-                    <Button disabled={requestInFlight} onClick={() => void handlePending(true)}>Confirm</Button>
-                    <Button variant="secondary" disabled={requestInFlight} onClick={() => void handlePending(false)}>Decline</Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <PendingConfirmationPanel
+                onResolve={(confirm) => void handlePending(confirm)}
+                pendingAction={pendingAction}
+                pendingError={pendingError}
+                requestInFlight={requestInFlight}
+              />
             ) : null}
 
-            <Card className="shrink-0">
-              <CardContent className="space-y-4 py-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Composer</div>
-                  <span className="text-xs text-muted-foreground">Enter to send, Shift+Enter for newline</span>
-                </div>
-                <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleSend(); }}>
-                  <textarea
-                    ref={inputRef}
-                    className={`min-h-[3.5rem] w-full resize-none rounded-3xl border border-border bg-background/70 px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20${dragActive ? ' border-primary/60 ring-2 ring-primary/20' : ''}`}
-                    disabled={requestInFlight}
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={handleComposerKeyDown}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setDragActive(true);
-                    }}
-                    onDragLeave={() => setDragActive(false)}
-                    onDrop={handleComposerDrop}
-                    rows={1}
-                    placeholder="Ask a question, request a quiz, or tell the agent what you want to learn..."
-                  />
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="min-h-5 text-sm text-muted-foreground">{status}</span>
-                    <Button disabled={requestInFlight} type="submit">{requestInFlight ? 'Working...' : 'Send'}</Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
+            <ComposerPanel
+              draft={draft}
+              dragActive={dragActive}
+              inputRef={inputRef}
+              onComposerDrop={handleComposerDrop}
+              onComposerKeyDown={handleComposerKeyDown}
+              onDragActiveChange={setDragActive}
+              onDraftChange={setDraft}
+              onSubmit={() => void handleSend()}
+              requestInFlight={requestInFlight}
+              status={status}
+            />
           </div>
 
           <aside className="flex min-h-0 flex-col gap-4">
-            <Card>
-              <CardContent className="space-y-4 py-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold uppercase tracking-[0.24em] text-foreground">Commands</div>
-                  <span className="text-xs text-muted-foreground">Click or drag into the input</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {commands.map((item) => (
-                    <Button
-                      key={item.command}
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-full"
-                      disabled={requestInFlight}
-                      draggable
-                      onClick={() => insertCommand(item.command)}
-                      onDragStart={(event) => {
-                        if (requestInFlight) {
-                          event.preventDefault();
-                          return;
-                        }
-                        event.dataTransfer.setData('text/plain', item.command);
-                        event.dataTransfer.effectAllowed = 'copy';
-                      }}
-                    >
-                      {item.label}
-                    </Button>
-                  ))}
-                  {!commands.length ? <p className="text-sm text-muted-foreground">No suggested commands right now.</p> : null}
-                </div>
-              </CardContent>
-            </Card>
+            <CommandPalette commands={commands} onInsertCommand={insertCommand} requestInFlight={requestInFlight} />
 
             <Card className="flex-1 bg-panel-muted/65">
               <CardContent className="space-y-3 py-5 text-sm text-muted-foreground">
